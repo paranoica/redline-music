@@ -149,16 +149,17 @@ def _metrics_cached(cache_dir: Path, key: str, compute: Any) -> tuple[dict, bool
     return result, False
 
 
-def _keep_out_of_git(work_dir: Path) -> None:
-    """Make the folders the tool owns ignore themselves: reports carry reference file names."""
-    for owned in (work_dir / "runs", work_dir / "cache"):
+def keep_out_of_git(*folders: Path) -> None:
+    """Make folders the tool owns ignore themselves: they hold audio and reference file names."""
+    for owned in folders:
         owned.mkdir(parents=True, exist_ok=True)
         marker = owned / ".gitignore"
         if not marker.is_file():
             marker.write_text("*\n", encoding="utf-8")
 
 
-def _new_run_dir(runs: Path) -> Path:
+def new_run_dir(runs: Path) -> Path:
+    """Create a fresh run folder named by the time, with a suffix on a clash."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     runs.mkdir(parents=True, exist_ok=True)
     for attempt in range(100):
@@ -171,18 +172,29 @@ def _new_run_dir(runs: Path) -> Path:
     raise RuntimeError(f"cannot create a run folder under {runs}")
 
 
-def measure_run(track: Path, refs: list[Path], work_dir: Path, separator: Separator) -> Path:
-    """Measure the track and the references; return the run folder with the report."""
+@dataclass
+class Inputs:
+    """Measurements of the track and the references, and the track's stems."""
+
+    track: FileResult
+    refs: list[FileResult]
+    track_stems: Stems
+    upper: float
+
+
+def measure_inputs(track: Path, refs: list[Path], work_dir: Path, separator: Separator) -> Inputs:
+    """Decode, separate and measure the track and every reference, through the caches."""
     decoded = [decode(p) for p in [track, *refs]]
     analysed = [to_analysis(d) for d in decoded]
     limits = [a.band_limit_hz for a in analysed if a.band_limit_hz is not None]
     side_limits = [a.side_band_limit_hz for a in analysed if a.side_band_limit_hz is not None]
     upper = min(limits, default=analysed[0].rate / 2)
     side_upper = min(side_limits, default=upper)
-    _keep_out_of_git(work_dir)
+    keep_out_of_git(work_dir / "runs", work_dir / "cache")
     cache_dir = work_dir / "cache"
     code = code_fingerprint()
     results = []
+    track_stems = None
     for path, dec, audio in zip([track, *refs], decoded, analysed, strict=True):
         log.info("measuring %s", path.name)
         try:
@@ -199,6 +211,8 @@ def measure_run(track: Path, refs: list[Path], work_dir: Path, separator: Separa
             )
         except ValueError as error:
             raise ValueError(f"{path.name}: {error}") from error
+        if track_stems is None:
+            track_stems = stems
         results.append(
             FileResult(
                 path.name,
@@ -210,10 +224,17 @@ def measure_run(track: Path, refs: list[Path], work_dir: Path, separator: Separa
                 measured["info"],
             )
         )
-    track_result, ref_results = results[0], results[1:]
+    assert track_stems is not None
+    return Inputs(results[0], results[1:], track_stems, upper)
+
+
+def measure_run(track: Path, refs: list[Path], work_dir: Path, separator: Separator) -> Path:
+    """Measure the track and the references; return the run folder with the report."""
+    inputs = measure_inputs(track, refs, work_dir, separator)
+    track_result, ref_results, upper = inputs.track, inputs.refs, inputs.upper
     rows = row_verdicts(track_result.values, [r.values for r in ref_results])
     warning = disagreement(track_result.values, [r.values for r in ref_results])
-    run_dir = _new_run_dir(work_dir / "runs")
+    run_dir = new_run_dir(work_dir / "runs")
     payload = {
         "compared_up_to_hz": upper,
         "separator": separator.id,

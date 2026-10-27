@@ -29,6 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
     )
     measure.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    vocal = commands.add_parser(
+        "vocal", help="process the vocal at every dirt level and write blind listening files"
+    )
+    vocal.add_argument("--track", type=Path, required=True, help="the track from Suno")
+    vocal.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    vocal.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    vocal.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
+    vocal.add_argument("--seed", type=int, help="seed of the letter shuffle")
     return parser
 
 
@@ -60,6 +70,25 @@ def _measure(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
+def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
+    from redline.separate import RoformerSeparator, SeparationError
+    from redline.vocal_run import vocal_run
+
+    refs = reference_files(args.ref)
+    if not refs:
+        print("redline: no reference audio files given", file=sys.stderr)
+        return 2
+    try:
+        result = vocal_run(
+            args.track, refs, args.work, args.out, separator or RoformerSeparator(), args.seed
+        )
+    except (AudioError, SeparationError, ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    print(result.listen_dir)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None) -> int:
     """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
@@ -67,5 +96,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if args.command == "measure":
         return _measure(args, separator)
+    if args.command == "vocal":
+        return _vocal(args, separator)
     parser.print_help()
     return 0
