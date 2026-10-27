@@ -8,15 +8,27 @@ from redline.compare import METRICS, SPREAD_MARGIN, Disagreement, RowVerdict, me
 
 INFO_LABELS = {
     "mix.lra_lu": ("диапазон громкости микса (LRA)", "LU"),
+    "mix.short_term_spread_lu": ("разброс мгновенной громкости микса", "LU"),
     "mix.sample_peak_db": ("пик сэмпла микса", "dBFS"),
     "mix.true_peak_db": ("true peak микса", "dBTP"),
     "mix.tempo_candidates": ("темп, кандидаты", "BPM"),
     "mix.key": ("тональность (ненадёжно)", ""),
     "vocal.lra_lu": ("диапазон громкости вокала (LRA)", "LU"),
+    "beat.lra_lu": ("диапазон громкости бита (LRA)", "LU"),
     "vocal.tuning_cents": ("строй вокала относительно A440", "cents"),
     "vocal.voiced_frames": ("кадров вокала с высотой", ""),
     "vocal.tails": ("концов фраз найдено", ""),
     "vocal.tail_decay_all_db_per_s": ("спад хвостов по всем найденным", "dB/s"),
+}
+
+STEMS = {"mix": "микса", "vocal": "вокала", "beat": "бита"}
+QUANTITIES = {
+    "lufs": ("громкость", "LUFS"),
+    "crest_db": ("крест-фактор", "dB"),
+    "tilt_db_per_oct": ("наклон спектра", "dB/oct"),
+    "side_mid_low_db": ("стерео, низ (side/mid)", "dB"),
+    "side_mid_mid_db": ("стерео, середина (side/mid)", "dB"),
+    "correlation": ("корреляция L/R", ""),
 }
 
 
@@ -27,6 +39,7 @@ class Measured(Protocol):
     codec: str
     native_rate: int
     cached: bool
+    cpu_fallback: bool
     values: dict[str, float | None]
     info: dict[str, Any]
 
@@ -70,8 +83,31 @@ def _metrics_section(track: Measured, refs: Sequence[Measured]) -> list[str]:
         cells = [_number(v, metric.unit) for v in (suno, *values)]
         unit = f", {metric.unit}" if metric.unit and metric.unit != "доля" else ""
         floor = _number(metric.floor, metric.unit)
-        body.append([f"{metric.label}{unit}", *cells, floor, verdict.status])
-    header = ["Замер", track.name, *(r.name for r in refs), "порог", "вердикт"]
+        spread = _range(values, metric.unit)
+        body.append([f"{metric.label}{unit}", *cells, spread, floor, verdict.status])
+    header = ["Замер", track.name, *(r.name for r in refs), "диапазон референсов"]
+    return _table([*header, "порог", "вердикт"], body)
+
+
+def _range(values: Sequence[float | None], unit: str) -> str:
+    known = [v for v in values if v is not None]
+    if len(known) < 2:
+        return "—"
+    return f"{_number(min(known), unit)} … {_number(max(known), unit)}"
+
+
+def _other_values_section(track: Measured, refs: Sequence[Measured]) -> list[str]:
+    body = []
+    for stem, stem_label in STEMS.items():
+        for quantity, (label, unit) in QUANTITIES.items():
+            key = f"{stem}.{quantity}"
+            if key in METRICS:
+                continue
+            values = [r.values.get(key) for r in refs]
+            cells = [_number(v, unit) for v in (track.values.get(key), *values)]
+            name = f"{label} {stem_label}" + (f", {unit}" if unit else "")
+            body.append([name, *cells, _range(values, unit)])
+    header = ["Без вердикта", track.name, *(r.name for r in refs), "диапазон референсов"]
     return _table(header, body)
 
 
@@ -95,6 +131,11 @@ def _header(track: Measured, refs: Sequence[Measured], upper: float) -> list[str
     ]
     if cached:
         lines.append(f"- Из кеша, без пересчёта: {', '.join(cached)}.")
+    fell_back = [f.name for f in (track, *refs) if f.cpu_fallback]
+    if fell_back:
+        lines.append(
+            f"- Видеокарта не справилась, разделение шло на процессоре: {', '.join(fell_back)}."
+        )
     if any(r.codec in ("mp3", "ogg") for r in refs):
         lines.append(
             "- Референсы сжатые: доля громких сэмплов у них не считается, "
@@ -121,6 +162,7 @@ def write_report(
         )
     lines += ["", "## Таблица из ТЗ", "", *_rows_section(rows)]
     lines += ["", "## Все замеры", "", *_metrics_section(track, refs)]
+    lines += ["", "## Прочие замеры", "", *_other_values_section(track, refs)]
     lines += ["", "## Справочно", "", *_info_section(track, refs)]
     lines += ["", "## Как читать", "", *_reading_notes()]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

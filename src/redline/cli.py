@@ -5,9 +5,13 @@ import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from redline import __version__
 from redline.audio import AudioError
+
+if TYPE_CHECKING:
+    from redline.separate import Separator
 
 AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".aif", ".aiff"}
 
@@ -39,29 +43,29 @@ def reference_files(paths: Sequence[Path]) -> list[Path]:
     return files
 
 
-def _measure(args: argparse.Namespace) -> int:
+def _measure(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.run import measure_run
-    from redline.separate import RoformerSeparator
+    from redline.separate import RoformerSeparator, SeparationError
 
     refs = reference_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
     try:
-        run_dir = measure_run(args.track, refs, args.work, RoformerSeparator())
-    except (AudioError, ValueError) as error:
+        run_dir = measure_run(args.track, refs, args.work, separator or RoformerSeparator())
+    except (AudioError, SeparationError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     print(run_dir / "report.md")
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the command line and return the exit code."""
+def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None) -> int:
+    """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     if args.command == "measure":
-        return _measure(args)
+        return _measure(args, separator)
     parser.print_help()
     return 0

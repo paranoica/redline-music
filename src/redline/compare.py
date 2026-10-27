@@ -1,5 +1,6 @@
 """Suno versus references: per-metric verdicts and the spec's reference table, row by row."""
 
+import math
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -71,9 +72,9 @@ class MetricVerdict:
 
 def metric_verdict(suno: float | None, refs: Sequence[float | None], floor: float) -> MetricVerdict:
     """Suno is outside the references when it is past [min, max] by half the spread plus floor."""
-    known = [r for r in refs if r is not None]
+    known = [r for r in refs if r is not None and math.isfinite(r)]
     status = IN_RANGE
-    if suno is None or not known:
+    if suno is None or not math.isfinite(suno) or not known:
         status = NO_DATA
     elif len(known) < 2:
         status = FEW_REFS
@@ -144,7 +145,7 @@ ROWS: tuple[Row, ...] = (
     Row(
         "Шум и артефакты",
         (("mix.band_limit_hz", "lower"),),
-        note="референсы — mp3-рипы, срез верха у них от кодека по определению",
+        note="у сжатых референсов срез верха даёт кодек, а не сведение",
     ),
     Row("Структура", rule="none"),
     Row("Адлибы", rule="none"),

@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +19,8 @@ from redline.report import write_report
 from redline.separate import Separator, Stems, cache_key, separate
 from redline.spectrum import low_end, stereo_width, tonal_curve
 
-METRICS_VERSION = "1"
 MIN_TAILS = 5
+MEASURING_MODULES = ("audio", "loudness", "spectrum", "pitch", "dynamics", "run")
 log = logging.getLogger(__name__)
 
 
@@ -31,6 +32,7 @@ class FileResult:
     codec: str
     native_rate: int
     cached: bool
+    cpu_fallback: bool = False
     values: dict[str, float | None] = field(default_factory=dict)
     info: dict[str, Any] = field(default_factory=dict)
 
@@ -39,13 +41,35 @@ def _finite(value: float | None) -> float | None:
     return value if value is not None and math.isfinite(value) else None
 
 
+def reliable_tails(rate: float | None, count: int) -> float | None:
+    """The tail decay rate, or None when fewer than MIN_TAILS phrase ends back it."""
+    return rate if count >= MIN_TAILS else None
+
+
+def code_fingerprint() -> str:
+    """Hash of the measuring code, so changed code never reads stale cached numbers."""
+    digest = hashlib.sha256()
+    for name in MEASURING_MODULES:
+        digest.update((Path(__file__).parent / f"{name}.py").read_bytes())
+    return digest.hexdigest()
+
+
+def metrics_key(
+    stem_key: str, upper: float, side_upper: float, codec: str, native_rate: int, code: str
+) -> str:
+    """Cache key of one file's measurements."""
+    text = f"{stem_key}|{upper}|{side_upper}|{codec}|{native_rate}|{code}"
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 def _stem_values(prefix: str, samples: Any, rate: int, upper: float, side_upper: float) -> dict:
     loud = measure_loudness(samples, rate)
     width = stereo_width(samples, rate, min(upper, side_upper))
+    curve = tonal_curve(samples, rate, upper)
     values = {
         f"{prefix}.lufs": loud.integrated_lufs,
         f"{prefix}.crest_db": loud.crest_db,
-        f"{prefix}.tilt_db_per_oct": tonal_curve(samples, rate, upper).tilt_db_per_oct,
+        f"{prefix}.tilt_db_per_oct": curve.tilt_db_per_oct,
         f"{prefix}.side_mid_low_db": width.side_mid_db[0],
         f"{prefix}.side_mid_mid_db": width.side_mid_db[1],
         f"{prefix}.correlation": width.correlation,
@@ -53,6 +77,7 @@ def _stem_values(prefix: str, samples: Any, rate: int, upper: float, side_upper:
     info = {
         f"{prefix}.lra_lu": loud.lra_lu,
         f"{prefix}.short_term_spread_lu": loud.short_term_spread_lu,
+        f"{prefix}.tonal_curve": {"centers_hz": list(curve.centers_hz), "db": list(curve.curve_db)},
     }
     return {"values": values, "info": info}
 
@@ -79,7 +104,7 @@ def _measure(decoded: Decoded, audio: Audio, stems: Stems, upper: float, side_up
             "vocal.share_within_10_cents": pitch.share_within_10_cents,
             "vocal.median_deviation_cents": pitch.median_deviation_cents,
             "vocal.stable_share": pitch.stable_share,
-            "vocal.tail_decay_db_per_s": tails_rate if tails >= MIN_TAILS else None,
+            "vocal.tail_decay_db_per_s": reliable_tails(tails_rate, tails),
             "pair.vocal_minus_beat_lu": integrated_lufs(stems.vocal, rate)
             - integrated_lufs(stems.beat, rate),
             "beat.low_share_db": low.share_db,
@@ -107,19 +132,25 @@ def _measure(decoded: Decoded, audio: Audio, stems: Stems, upper: float, side_up
     }
 
 
-def _metrics_cached(
-    cache_dir: Path, key: str, upper: float, side_upper: float, compute: Any
-) -> tuple[dict, bool]:
-    name = hashlib.sha256(f"{key}|{upper}|{side_upper}|{METRICS_VERSION}".encode()).hexdigest()
-    path = cache_dir / "metrics" / f"{name}.json"
+def _metrics_cached(cache_dir: Path, key: str, compute: Any) -> tuple[dict, bool]:
+    path = cache_dir / "metrics" / f"{key}.json"
     if path.is_file():
+        log.info("measurements from cache: %s", key[:12])
         return json.loads(path.read_text(encoding="utf-8")), True
     result = compute()
     path.parent.mkdir(parents=True, exist_ok=True)
-    staging = path.with_suffix(".tmp")
+    staging = path.with_suffix(f".{os.getpid()}.tmp")
     staging.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
     staging.replace(path)
     return result, False
+
+
+def _keep_out_of_git(work_dir: Path) -> None:
+    """Make the work folder ignore itself: reports carry reference file names."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    marker = work_dir / ".gitignore"
+    if not marker.is_file():
+        marker.write_text("*\n", encoding="utf-8")
 
 
 def _new_run_dir(runs: Path) -> Path:
@@ -143,26 +174,33 @@ def measure_run(track: Path, refs: list[Path], work_dir: Path, separator: Separa
     side_limits = [a.side_band_limit_hz for a in analysed if a.side_band_limit_hz is not None]
     upper = min(limits, default=analysed[0].rate / 2)
     side_upper = min(side_limits, default=upper)
+    _keep_out_of_git(work_dir)
     cache_dir = work_dir / "cache"
+    code = code_fingerprint()
     results = []
     for path, dec, audio in zip([track, *refs], decoded, analysed, strict=True):
         log.info("measuring %s", path.name)
-        stems = separate(audio, separator, cache_dir)
-        measured, from_cache = _metrics_cached(
-            cache_dir,
-            cache_key(audio, separator.id),
-            upper,
-            side_upper,
-            lambda dec=dec, audio=audio, stems=stems: _measure(
-                dec, audio, stems, upper, side_upper
-            ),
-        )
+        try:
+            stems = separate(audio, separator, cache_dir)
+            key = metrics_key(
+                cache_key(audio, separator.id), upper, side_upper, dec.codec, dec.rate, code
+            )
+            measured, from_cache = _metrics_cached(
+                cache_dir,
+                key,
+                lambda dec=dec, audio=audio, stems=stems: _measure(
+                    dec, audio, stems, upper, side_upper
+                ),
+            )
+        except ValueError as error:
+            raise ValueError(f"{path.name}: {error}") from error
         results.append(
             FileResult(
                 path.name,
                 dec.codec,
                 dec.rate,
                 stems.cached and from_cache,
+                not stems.cached and bool(getattr(separator, "fallback_used", False)),
                 measured["values"],
                 measured["info"],
             )

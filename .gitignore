@@ -12,12 +12,12 @@ bench/results/
 
 # Private data: never in this repository
 /private
-/docs/private/
-/input/
-/work/
-/output/
-/lyrics/
-/profiles/
+/docs/private
+/input
+/work
+/output
+/lyrics
+/profiles
 *.[lL][rR][cC]
 
 # Audio, stems, MIDI and analysis output
@@ -34,7 +34,7 @@ bench/results/
 *.[wW][mM][aA]
 *.[mM][iI][dD]
 *.[mM][iI][dD][iI]
-stems/
+/stems
 chain.json
 spectrogram*.png
 
@@ -52,7 +52,7 @@ spectrogram*.png
 *.safetensors
 *.onnx
 *.gguf
-models/
+/models
 .cache/
 
 # Working notes for the assistant

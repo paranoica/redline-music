@@ -1,5 +1,8 @@
 import hashlib
 import json
+import logging
+import subprocess
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -7,7 +10,7 @@ from redline_signals import tone, write
 
 from redline.cli import main
 from redline.compare import CONFIRMED, REFS_HIGHER
-from redline.run import measure_run
+from redline.run import MIN_TAILS, measure_run, metrics_key, reliable_tails
 
 
 class HalfSeparator:
@@ -110,3 +113,102 @@ def test_report_prints_counts_as_integers_and_small_shares_with_a_decimal(tmp_pa
     assert ".0" not in tails
     hot = next(line for line in lines if line.startswith("| доля сэмплов выше -1 dBFS"))
     assert "| 0.5% |" in hot
+
+
+def test_work_folder_anywhere_in_a_repository_stays_out_of_git(tmp_path, inputs):
+    # report files carry reference file names; a work folder outside the repo root
+    # (not covered by the root .gitignore) must still never be staged
+    track, refs = inputs
+    repo = tmp_path / "repo"
+    (repo / "sub").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    measure_run(track, sorted(refs.iterdir()), repo / "sub" / "work", HalfSeparator())
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == ""
+
+
+def test_metrics_cache_key_follows_code_and_codec():
+    base = metrics_key("stems", 16000.0, 16000.0, "wav", 48000, "code-a")
+    assert metrics_key("stems", 16000.0, 16000.0, "wav", 48000, "code-b") != base
+    assert metrics_key("stems", 16000.0, 16000.0, "mp3", 48000, "code-a") != base
+    assert metrics_key("stems", 16000.0, 16000.0, "wav", 44100, "code-a") != base
+    assert metrics_key("stems", 16000.0, 16000.0, "wav", 48000, "code-a") == base
+
+
+def test_tails_count_below_minimum_is_not_a_measurement():
+    assert reliable_tails(30.0, MIN_TAILS - 1) is None
+    assert reliable_tails(30.0, MIN_TAILS) == 30.0
+
+
+def test_too_short_reference_names_the_file(tmp_path, inputs, capsys):
+    track, refs = inputs
+    write(refs, "short.wav", tone(1000, 2, amp=0.3), 44100, subtype="FLOAT")
+    code = main(["measure", "--track", str(track), "--ref", str(refs)], separator=HalfSeparator())
+    assert code == 2
+    assert "short.wav" in capsys.readouterr().err
+
+
+def test_cli_measure_succeeds_and_prints_the_report_path(tmp_path, inputs, capsys):
+    track, refs = inputs
+    work = tmp_path / "work"
+    args = ["measure", "--track", str(track), "--ref", str(refs), "--work", str(work)]
+    assert main(args, separator=HalfSeparator()) == 0
+    printed = Path(capsys.readouterr().out.strip().splitlines()[-1])
+    assert printed.name == "report.md" and printed.is_file()
+
+
+def test_cache_hits_are_logged(tmp_path, inputs, caplog):
+    track, refs = inputs
+    measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    messages = " ".join(r.getMessage() for r in caplog.records)
+    assert messages.count("stems from cache") == 3
+    assert messages.count("measurements from cache") == 3
+
+
+def test_cpu_fallback_shows_in_the_report(tmp_path, inputs):
+    track, refs = inputs
+
+    class FellBack(HalfSeparator):
+        fallback_used = True
+
+    run_dir = measure_run(track, sorted(refs.iterdir()), tmp_path / "work", FellBack())
+    assert "на процессоре" in (run_dir / "report.md").read_text(encoding="utf-8")
+
+
+def test_report_has_reference_range_and_stem_loudness(tmp_path, inputs):
+    track, refs = inputs
+    run_dir = measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    lines = (run_dir / "report.md").read_text(encoding="utf-8").splitlines()
+    header = next(line for line in lines if line.startswith("| Замер |"))
+    assert "диапазон референсов" in header
+    lufs = next(line for line in lines if line.startswith("| громкость микса"))
+    assert "-11.0 … -10.0" in lufs
+    assert any(line.startswith("| громкость вокала") for line in lines)
+    assert any(line.startswith("| громкость бита") for line in lines)
+
+
+def test_tonal_curves_are_saved(tmp_path, inputs):
+    track, refs = inputs
+    run_dir = measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    data = json.loads((run_dir / "measurements.json").read_text(encoding="utf-8"))
+    for stem in ("mix", "vocal", "beat"):
+        curve = data["track"]["info"][f"{stem}.tonal_curve"]
+        assert len(curve["centers_hz"]) == len(curve["db"]) > 10
+
+
+def test_mp3_reference_has_no_hot_share(tmp_path, inputs):
+    track, refs = inputs
+    write(refs, "c.mp3", tone(1000, 12, amp=0.3), 44100, format="MP3")
+    run_dir = measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    data = json.loads((run_dir / "measurements.json").read_text(encoding="utf-8"))
+    by_name = {r["name"]: r["values"]["mix.hot_share"] for r in data["refs"]}
+    assert by_name["c.mp3"] is None
+    assert by_name["a.wav"] is not None

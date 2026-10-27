@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import Protocol
 
@@ -22,8 +24,18 @@ PIPELINE_VERSION = "1"
 HEADROOM_PEAK = 0.99
 MODEL = "vocals_mel_band_roformer.ckpt"
 MODEL_DIR = Path.home() / ".cache" / "redline" / "models"
+# Pinned on first download (the files the owner listened to); a changed file is refused.
+MODEL_SHA256 = {
+    "vocals_mel_band_roformer.ckpt": (
+        "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e"
+    ),
+    "vocals_mel_band_roformer.yaml": (
+        "b958b29c8f7195f0d86bee6759a33980db675c4ecaf2fcaa80fa125828e6cd38"
+    ),
+}
 
 Samples = npt.NDArray[np.float32]
+ModelRunner = Callable[[Path, Path], tuple[Path, Path]]
 log = logging.getLogger(__name__)
 
 
@@ -58,7 +70,8 @@ def cache_key(audio: Audio, separator_id: str) -> str:
 def separate(audio: Audio, separator: Separator, cache_dir: Path) -> Stems:
     """Return the stems from the cache, or run the separator and cache them atomically."""
     folder = cache_dir / "stems" / cache_key(audio, separator.id)
-    if (folder / "vocal.wav").is_file() and (folder / "beat.wav").is_file():
+    if _complete(folder):
+        log.info("stems from cache: %s", folder.name[:12])
         return Stems(_read(folder / "vocal.wav"), _read(folder / "beat.wav"), audio.rate, True)
     peak = float(np.abs(audio.samples).max())
     scale = HEADROOM_PEAK / peak if peak > HEADROOM_PEAK else 1.0
@@ -74,9 +87,17 @@ def separate(audio: Audio, separator: Separator, cache_dir: Path) -> Stems:
         sf.write(staging / "vocal.wav", vocal, audio.rate, subtype="FLOAT")
         sf.write(staging / "beat.wav", beat, audio.rate, subtype="FLOAT")
         staging.rename(folder)
+    except OSError:
+        # another run may have finished the same entry first
+        if not _complete(folder):
+            raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     return Stems(vocal, beat, audio.rate, False)
+
+
+def _complete(folder: Path) -> bool:
+    return (folder / "vocal.wav").is_file() and (folder / "beat.wav").is_file()
 
 
 def _read(path: Path) -> Samples:
@@ -90,22 +111,71 @@ def _fit(stem: Samples, length: int) -> Samples:
     return np.pad(stem, ((0, length - len(stem)), (0, 0)))
 
 
+class SeparationError(Exception):
+    """Separation could not run; the message says what to do."""
+
+
+def separator_id(library_version: str) -> str:
+    """Cache identity of the Roformer setup: a new library version may change the stems."""
+    return f"audio-separator {library_version}:{MODEL}:normalization=1.0"
+
+
+def _library_version() -> str:
+    try:
+        return metadata.version("audio-separator")
+    except metadata.PackageNotFoundError:
+        return "missing"
+
+
+def _is_gpu_error(error: RuntimeError) -> bool:
+    text = str(error)
+    return "CUDA" in text or "out of memory" in text.lower()
+
+
 class RoformerSeparator:
     """MelBand Roformer through audio-separator; falls back to CPU when the GPU fails."""
 
-    id = f"audio-separator:{MODEL}:normalization=1.0"
+    def __init__(self, run: ModelRunner | None = None, run_on_cpu: ModelRunner | None = None):
+        """Take the model runners; the defaults run the real model in and out of process."""
+        self.id = separator_id(_library_version())
+        self.fallback_used = False
+        self._run = run or run_model
+        self._run_on_cpu = run_on_cpu or run_on_cpu_process
 
     def __call__(self, samples: Samples, rate: int) -> tuple[Samples, Samples]:
-        """Separate on the GPU if there is one, else or on failure on the CPU."""
+        """Separate on the GPU if there is one; retry on the CPU when the GPU fails."""
+        self.fallback_used = False
         with tempfile.TemporaryDirectory(prefix="redline-sep-") as work:
             source = Path(work) / "input.wav"
             sf.write(source, samples, rate, subtype="FLOAT")
             try:
-                vocal_path, beat_path = run_model(source, Path(work))
+                vocal_path, beat_path = self._run(source, Path(work))
+            except ModuleNotFoundError as error:
+                raise SeparationError(
+                    f"{error.name or error}: install the models with `uv sync --extra separation`"
+                ) from error
             except RuntimeError as error:
+                if not _is_gpu_error(error):
+                    raise SeparationError(f"separation failed: {error}") from error
                 log.warning("separation on the GPU failed (%s); retrying on the CPU", error)
-                vocal_path, beat_path = _run_on_cpu(source, Path(work))
+                self.fallback_used = True
+                try:
+                    vocal_path, beat_path = self._run_on_cpu(source, Path(work))
+                except (subprocess.CalledProcessError, OSError) as cpu_error:
+                    raise SeparationError(
+                        f"separation failed on the GPU ({error}) and on the CPU ({cpu_error})"
+                    ) from cpu_error
             return _fit(_read(vocal_path), len(samples)), _fit(_read(beat_path), len(samples))
+
+
+def verify_files(expected: dict[Path, str]) -> None:
+    """Raise when a file's sha256 differs from the pinned one."""
+    for path, digest in expected.items():
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != digest:
+            raise SeparationError(
+                f"{path} does not match its pinned sha256; delete it to download it again"
+            )
 
 
 def run_model(source: Path, out: Path) -> tuple[Path, Path]:
@@ -121,15 +191,22 @@ def run_model(source: Path, out: Path) -> tuple[Path, Path]:
     if "cuda" not in str(getattr(engine, "torch_device", "")):
         log.warning("no CUDA device found; separating on the CPU, expect several minutes")
     engine.load_model(model_filename=MODEL)
+    verify_files({MODEL_DIR / name: digest for name, digest in MODEL_SHA256.items()})
     names = {"Vocals": "vocal", "Other": "beat", "Instrumental": "beat"}
     written = [out / Path(name).name for name in engine.separate(str(source), names)]
     return out / "vocal.wav", next(p for p in written if p.stem == "beat")
 
 
-def _run_on_cpu(source: Path, out: Path) -> tuple[Path, Path]:
+def python_command() -> list[str]:
+    """This interpreter with the current folder kept off the import path (-P)."""
+    return [sys.executable, "-P"]
+
+
+def run_on_cpu_process(source: Path, out: Path) -> tuple[Path, Path]:
+    """Run the model in a child process that cannot see the GPU."""
     env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
     subprocess.run(
-        [sys.executable, "-m", "redline.separate", str(source), str(out)], env=env, check=True
+        [*python_command(), "-m", "redline.separate", str(source), str(out)], env=env, check=True
     )
     return out / "vocal.wav", out / "beat.wav"
 

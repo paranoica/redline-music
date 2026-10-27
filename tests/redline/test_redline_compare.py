@@ -147,3 +147,11 @@ def test_one_metric_against_blocks_confirmation():
     suno = vocal_values(-10.0, 12.0, -5.0, 3.0)
     refs = [vocal_values(-25.0, 6.0, -3.0, 0.5), vocal_values(-24.0, 6.5, -3.1, 0.6)]
     assert row(row_verdicts(suno, refs), VOCAL).status == UNCONFIRMED
+
+
+@pytest.mark.parametrize(
+    ("suno", "refs"),
+    [(1.0, [float("-inf"), float("-inf")]), (float("inf"), [1.0, 2.0]), (1.0, [float("nan"), 2.0])],
+)
+def test_non_finite_values_are_no_data(suno, refs):
+    assert metric_verdict(suno, refs, floor=1.0).status in (NO_DATA, FEW_REFS)

@@ -1,12 +1,22 @@
+import hashlib
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
-from redline_signals import make_rng
+from redline_signals import make_rng, write
 
-from redline.audio import ANALYSIS_RATE, Audio
-from redline.separate import separate
+from redline.audio import ANALYSIS_RATE, Audio, decode, to_analysis
+from redline.separate import (
+    RoformerSeparator,
+    SeparationError,
+    cache_key,
+    python_command,
+    separate,
+    separator_id,
+    verify_files,
+)
 
 
 class FakeSeparator:
@@ -125,3 +135,121 @@ def test_crash_while_writing_leaves_no_half_entry(tmp_path, monkeypatch):
     fake = FakeSeparator()
     assert not separate(audio(), fake, tmp_path).cached
     assert len(fake.calls) == 1
+
+
+def stem_writer(calls: list[str], name: str):
+    """A model runner that writes half-and-half stems and records its use."""
+
+    def run(source: Path, out: Path) -> tuple[Path, Path]:
+        calls.append(name)
+        data, rate = sf.read(source, always_2d=True, dtype="float32")
+        sf.write(out / "v.wav", data * 0.5, rate, subtype="FLOAT")
+        sf.write(out / "b.wav", data * 0.5, rate, subtype="FLOAT")
+        return out / "v.wav", out / "b.wav"
+
+    return run
+
+
+def failing(error: Exception, calls: list[str], name: str):
+    def run(source: Path, out: Path) -> tuple[Path, Path]:
+        calls.append(name)
+        raise error
+
+    return run
+
+
+def test_gpu_failure_falls_back_to_the_cpu(tmp_path):
+    calls: list[str] = []
+    separator = RoformerSeparator(
+        run=failing(RuntimeError("CUDA out of memory"), calls, "gpu"),
+        run_on_cpu=stem_writer(calls, "cpu"),
+    )
+    stems = separate(audio(), separator, tmp_path)
+    assert calls == ["gpu", "cpu"]
+    assert separator.fallback_used
+    assert stems.vocal.shape == audio().samples.shape
+
+
+def test_other_model_errors_do_not_retry_on_the_cpu(tmp_path):
+    calls: list[str] = []
+    separator = RoformerSeparator(
+        run=failing(RuntimeError("checkpoint is corrupt"), calls, "gpu"),
+        run_on_cpu=stem_writer(calls, "cpu"),
+    )
+    with pytest.raises(SeparationError, match="corrupt"):
+        separate(audio(), separator, tmp_path)
+    assert calls == ["gpu"]
+
+
+def test_missing_separation_extra_says_how_to_install(tmp_path):
+    calls: list[str] = []
+    separator = RoformerSeparator(
+        run=failing(ModuleNotFoundError("No module named 'audio_separator'"), calls, "gpu"),
+        run_on_cpu=stem_writer(calls, "cpu"),
+    )
+    with pytest.raises(SeparationError, match="--extra separation"):
+        separate(audio(), separator, tmp_path)
+
+
+def test_failure_on_both_devices_is_one_clear_error(tmp_path):
+    calls: list[str] = []
+    separator = RoformerSeparator(
+        run=failing(RuntimeError("CUDA error: device-side assert"), calls, "gpu"),
+        run_on_cpu=failing(subprocess.CalledProcessError(1, ["python"]), calls, "cpu"),
+    )
+    with pytest.raises(SeparationError, match="CPU"):
+        separate(audio(), separator, tmp_path)
+    assert calls == ["gpu", "cpu"]
+
+
+def test_child_python_ignores_modules_in_the_current_folder(tmp_path):
+    (tmp_path / "numpy.py").write_text("raise SystemExit('hijacked')\n", encoding="utf-8")
+    result = subprocess.run(
+        [*python_command(), "-c", "import numpy; print(numpy.__name__)"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_model_files_are_checked_against_their_hashes(tmp_path):
+    good = tmp_path / "model.ckpt"
+    good.write_bytes(b"weights")
+    digest = hashlib.sha256(b"weights").hexdigest()
+    verify_files({good: digest})
+    good.write_bytes(b"tampered")
+    with pytest.raises(SeparationError, match=r"model\.ckpt"):
+        verify_files({good: digest})
+
+
+def test_library_version_is_part_of_the_cache_key():
+    assert separator_id("0.47.1") != separator_id("0.48.0")
+
+
+def test_cache_key_ignores_the_file_name(tmp_path):
+    data = audio().samples
+    first = write(tmp_path, "one.wav", data, ANALYSIS_RATE, subtype="FLOAT")
+    second = write(tmp_path, "two.wav", data, ANALYSIS_RATE, subtype="FLOAT")
+    fake = FakeSeparator()
+    separate(to_analysis(decode(first)), fake, tmp_path / "work")
+    assert separate(to_analysis(decode(second)), fake, tmp_path / "work").cached
+    assert len(fake.calls) == 1
+
+
+def test_another_process_finishing_first_is_not_an_error(tmp_path):
+    source = audio()
+
+    class Racing(FakeSeparator):
+        def __call__(self, samples, rate):
+            vocal, beat = super().__call__(samples, rate)
+            done = tmp_path / "stems" / cache_key(source, self.id)
+            done.mkdir(parents=True)
+            sf.write(done / "vocal.wav", vocal, rate, subtype="FLOAT")
+            sf.write(done / "beat.wav", beat, rate, subtype="FLOAT")
+            return vocal, beat
+
+    stems = separate(source, Racing(), tmp_path)
+    assert stems.vocal.shape == source.samples.shape
+    assert not [p for p in (tmp_path / "stems").iterdir() if p.name.startswith(".tmp")]
