@@ -155,3 +155,15 @@ def test_one_metric_against_blocks_confirmation():
 )
 def test_non_finite_values_are_no_data(suno, refs):
     assert metric_verdict(suno, refs, floor=1.0).status in (NO_DATA, FEW_REFS)
+
+
+def test_disagreement_skips_non_finite_values():
+    # an infinite value on one reference must not turn its distance into NaN
+    keys = ["mix.lufs", "mix.duration_s", "mix.tilt_db_per_oct", "mix.correlation"]
+    suno = dict.fromkeys(keys, 0.0)
+    refs = [dict.fromkeys(keys, 1.0), dict.fromkeys(keys, 1.2), dict.fromkeys(keys, 30.0)]
+    refs[1]["mix.correlation"] = float("inf")
+    warning = disagreement(suno, refs)
+    assert warning is not None
+    assert warning.outlier == 2
+    assert warning.of == 3

@@ -241,8 +241,8 @@ def disagreement(suno: Values, refs: Sequence[Values]) -> Disagreement | None:
     distance = [0.0] * len(refs)
     for key, metric in METRICS.items():
         value, known = suno.get(key), [r.get(key) for r in refs]
-        values = [v for v in known if v is not None]
-        if value is None or len(values) < 2 or len(values) != len(refs):
+        values = [v for v in known if v is not None and math.isfinite(v)]
+        if value is None or not math.isfinite(value) or len(values) < 2 or len(values) != len(refs):
             continue
         compared += 1
         spread = max(values) - min(values)

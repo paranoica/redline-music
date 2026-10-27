@@ -12,15 +12,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 import numpy.typing as npt
 import soundfile as sf
 
 from redline.audio import Audio
+from redline.fingerprint import fingerprint, library_versions, module_sources
 
-PIPELINE_VERSION = "1"
 HEADROOM_PEAK = 0.99
 MODEL = "vocals_mel_band_roformer.ckpt"
 MODEL_DIR = Path.home() / ".cache" / "redline" / "models"
@@ -59,11 +59,16 @@ class Stems:
     cached: bool
 
 
-def cache_key(audio: Audio, separator_id: str) -> str:
-    """Hash of the samples, the rate, the separator and the pipeline version."""
+def stems_code() -> str:
+    """Fingerprint of the separation code and torch, part of every stem cache key."""
+    return fingerprint(module_sources(["separate"]), library_versions(["torch"]))
+
+
+def cache_key(audio: Audio, separator_id: str, code: str | None = None) -> str:
+    """Hash of the samples, the rate, the separator and the separation code."""
     digest = hashlib.sha256()
     digest.update(np.ascontiguousarray(audio.samples, dtype=np.float32).tobytes())
-    digest.update(f"|{audio.rate}|{separator_id}|{PIPELINE_VERSION}".encode())
+    digest.update(f"|{audio.rate}|{separator_id}|{code or stems_code()}".encode())
     return digest.hexdigest()
 
 
@@ -128,8 +133,8 @@ def _library_version() -> str:
 
 
 def _is_gpu_error(error: RuntimeError) -> bool:
-    text = str(error)
-    return "CUDA" in text or "out of memory" in text.lower()
+    text = str(error).lower()
+    return "cuda" in text or "cudnn" in text or "out of memory" in text
 
 
 class RoformerSeparator:
@@ -154,6 +159,11 @@ class RoformerSeparator:
                 raise SeparationError(
                     f"{error.name or error}: install the models with `uv sync --extra separation`"
                 ) from error
+            except OSError as error:
+                raise SeparationError(
+                    f"model download or file access failed ({error}); "
+                    "the first run needs the internet"
+                ) from error
             except RuntimeError as error:
                 if not _is_gpu_error(error):
                     raise SeparationError(f"separation failed: {error}") from error
@@ -171,6 +181,8 @@ class RoformerSeparator:
 def verify_files(expected: dict[Path, str]) -> None:
     """Raise when a file's sha256 differs from the pinned one."""
     for path, digest in expected.items():
+        if not path.is_file():
+            raise SeparationError(f"{path} is missing; run again to download it")
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != digest:
             raise SeparationError(
@@ -178,20 +190,29 @@ def verify_files(expected: dict[Path, str]) -> None:
             )
 
 
-def run_model(source: Path, out: Path) -> tuple[Path, Path]:
-    """Run the model on a WAV file and return the vocal and beat file paths."""
-    module = importlib.import_module("audio_separator.separator")
-    engine = module.Separator(
-        model_file_dir=str(MODEL_DIR),
-        output_dir=str(out),
-        output_format="WAV",
-        normalization_threshold=1.0,
-        log_level=logging.WARNING,
-    )
-    if "cuda" not in str(getattr(engine, "torch_device", "")):
+def run_model(
+    source: Path,
+    out: Path,
+    engine: Any = None,
+    model_dir: Path = MODEL_DIR,
+    pins: dict[str, str] = MODEL_SHA256,
+    model: str = MODEL,
+) -> tuple[Path, Path]:
+    """Download, verify, load and run the model; return the vocal and beat file paths."""
+    if engine is None:
+        module = importlib.import_module("audio_separator.separator")
+        engine = module.Separator(
+            model_file_dir=str(model_dir),
+            output_dir=str(out),
+            output_format="WAV",
+            normalization_threshold=1.0,
+            log_level=logging.WARNING,
+        )
+    if "cuda" not in str(getattr(engine, "torch_device", "cuda")):
         log.warning("no CUDA device found; separating on the CPU, expect several minutes")
-    engine.load_model(model_filename=MODEL)
-    verify_files({MODEL_DIR / name: digest for name, digest in MODEL_SHA256.items()})
+    engine.download_model_files(model)
+    verify_files({model_dir / name: digest for name, digest in pins.items()})
+    engine.load_model(model_filename=model)
     names = {"Vocals": "vocal", "Other": "beat", "Instrumental": "beat"}
     written = [out / Path(name).name for name in engine.separate(str(source), names)]
     return out / "vocal.wav", next(p for p in written if p.stem == "beat")

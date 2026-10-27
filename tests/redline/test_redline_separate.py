@@ -13,6 +13,7 @@ from redline.separate import (
     SeparationError,
     cache_key,
     python_command,
+    run_model,
     separate,
     separator_id,
     verify_files,
@@ -253,3 +254,72 @@ def test_another_process_finishing_first_is_not_an_error(tmp_path):
     stems = separate(source, Racing(), tmp_path)
     assert stems.vocal.shape == source.samples.shape
     assert not [p for p in (tmp_path / "stems").iterdir() if p.name.startswith(".tmp")]
+
+
+def test_download_failure_is_a_clear_error(tmp_path):
+    calls: list[str] = []
+    separator = RoformerSeparator(
+        run=failing(ConnectionError("no route to host"), calls, "gpu"),
+        run_on_cpu=stem_writer(calls, "cpu"),
+    )
+    with pytest.raises(SeparationError, match="download"):
+        separate(audio(), separator, tmp_path)
+    assert calls == ["gpu"]
+
+
+def test_cudnn_failure_falls_back_to_the_cpu(tmp_path):
+    calls: list[str] = []
+    separator = RoformerSeparator(
+        run=failing(RuntimeError("cuDNN error: CUDNN_STATUS_NOT_INITIALIZED"), calls, "gpu"),
+        run_on_cpu=stem_writer(calls, "cpu"),
+    )
+    separate(audio(), separator, tmp_path)
+    assert calls == ["gpu", "cpu"]
+
+
+def test_missing_pinned_file_is_a_clear_error(tmp_path):
+    with pytest.raises(SeparationError, match=r"absent\.ckpt"):
+        verify_files({tmp_path / "absent.ckpt": "0" * 64})
+
+
+def test_stem_cache_key_follows_the_separation_code():
+    source = audio()
+    assert cache_key(source, "fake", code="a") != cache_key(source, "fake", code="b")
+
+
+class FakeEngine:
+    """Stands in for audio-separator's Separator and records the order of calls."""
+
+    def __init__(self, model_dir: Path, content: bytes) -> None:
+        self.model_dir, self.content, self.calls = model_dir, content, []
+
+    def download_model_files(self, name):
+        self.calls.append("download")
+        (self.model_dir / name).write_bytes(self.content)
+
+    def load_model(self, model_filename):
+        self.calls.append("load")
+
+    def separate(self, source, names):
+        self.calls.append("separate")
+        return ["vocal.wav", "beat.wav"]
+
+
+def test_weights_are_verified_before_they_are_loaded(tmp_path):
+    pins = {"m.ckpt": hashlib.sha256(b"good").hexdigest()}
+    engine = FakeEngine(tmp_path, b"tampered")
+    with pytest.raises(SeparationError, match=r"m\.ckpt"):
+        run_model(
+            tmp_path / "in.wav",
+            tmp_path,
+            engine=engine,
+            model_dir=tmp_path,
+            pins=pins,
+            model="m.ckpt",
+        )
+    assert engine.calls == ["download"]
+    engine = FakeEngine(tmp_path, b"good")
+    run_model(
+        tmp_path / "in.wav", tmp_path, engine=engine, model_dir=tmp_path, pins=pins, model="m.ckpt"
+    )
+    assert engine.calls == ["download", "load", "separate"]

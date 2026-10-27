@@ -61,3 +61,4 @@ spectrogram*.png
 *.pth
 *.npy
 *.npz
+/.claude/cache/

@@ -13,6 +13,7 @@ from typing import Any
 from redline.audio import Audio, Decoded, decode, hot_master, to_analysis
 from redline.compare import disagreement, row_verdicts
 from redline.dynamics import low_end_kurtosis, tail_decay, waveform_kurtosis
+from redline.fingerprint import fingerprint, library_versions, module_sources
 from redline.loudness import integrated_lufs, measure_loudness
 from redline.pitch import estimate_key, measure_pitch, tempo_candidates
 from redline.report import write_report
@@ -21,6 +22,7 @@ from redline.spectrum import low_end, stereo_width, tonal_curve
 
 MIN_TAILS = 5
 MEASURING_MODULES = ("audio", "loudness", "spectrum", "pitch", "dynamics", "run")
+MEASURING_LIBRARIES = ("numpy", "scipy", "librosa", "pyloudnorm", "soundfile")
 log = logging.getLogger(__name__)
 
 
@@ -47,11 +49,8 @@ def reliable_tails(rate: float | None, count: int) -> float | None:
 
 
 def code_fingerprint() -> str:
-    """Hash of the measuring code, so changed code never reads stale cached numbers."""
-    digest = hashlib.sha256()
-    for name in MEASURING_MODULES:
-        digest.update((Path(__file__).parent / f"{name}.py").read_bytes())
-    return digest.hexdigest()
+    """Measuring code and library versions, so changed code never reads stale numbers."""
+    return fingerprint(module_sources(MEASURING_MODULES), library_versions(MEASURING_LIBRARIES))
 
 
 def metrics_key(
@@ -146,11 +145,12 @@ def _metrics_cached(cache_dir: Path, key: str, compute: Any) -> tuple[dict, bool
 
 
 def _keep_out_of_git(work_dir: Path) -> None:
-    """Make the work folder ignore itself: reports carry reference file names."""
-    work_dir.mkdir(parents=True, exist_ok=True)
-    marker = work_dir / ".gitignore"
-    if not marker.is_file():
-        marker.write_text("*\n", encoding="utf-8")
+    """Make the folders the tool owns ignore themselves: reports carry reference file names."""
+    for owned in (work_dir / "runs", work_dir / "cache"):
+        owned.mkdir(parents=True, exist_ok=True)
+        marker = owned / ".gitignore"
+        if not marker.is_file():
+            marker.write_text("*\n", encoding="utf-8")
 
 
 def _new_run_dir(runs: Path) -> Path:

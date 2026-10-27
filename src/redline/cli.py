@@ -53,7 +53,7 @@ def _measure(args: argparse.Namespace, separator: "Separator | None") -> int:
         return 2
     try:
         run_dir = measure_run(args.track, refs, args.work, separator or RoformerSeparator())
-    except (AudioError, SeparationError, ValueError) as error:
+    except (AudioError, SeparationError, ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     print(run_dir / "report.md")

@@ -10,7 +10,7 @@ from redline_signals import tone, write
 
 from redline.cli import main
 from redline.compare import CONFIRMED, REFS_HIGHER
-from redline.run import MIN_TAILS, measure_run, metrics_key, reliable_tails
+from redline.run import MIN_TAILS, fingerprint, measure_run, metrics_key, reliable_tails
 
 
 class HalfSeparator:
@@ -212,3 +212,43 @@ def test_mp3_reference_has_no_hot_share(tmp_path, inputs):
     by_name = {r["name"]: r["values"]["mix.hot_share"] for r in data["refs"]}
     assert by_name["c.mp3"] is None
     assert by_name["a.wav"] is not None
+
+
+def test_existing_gitignore_in_the_work_folder_does_not_let_reports_in(tmp_path, inputs):
+    # --work pointing at a folder that already has its own .gitignore, e.g. the repo root
+    track, refs = inputs
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", ".gitignore"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i"],
+        check=True,
+    )
+    measure_run(track, sorted(refs.iterdir()), repo, HalfSeparator())
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == ""
+
+
+def test_unusable_work_folder_is_a_clear_error(tmp_path, inputs, capsys):
+    track, refs = inputs
+    blocker = tmp_path / "occupied"
+    blocker.write_text("a file where the work folder should be", encoding="utf-8")
+    args = ["measure", "--track", str(track), "--ref", str(refs), "--work", str(blocker)]
+    assert main(args, separator=HalfSeparator()) == 2
+    assert "occupied" in capsys.readouterr().err
+
+
+def test_fingerprint_follows_library_versions():
+    assert fingerprint([b"src"], {"librosa": "1.0.0"}) != fingerprint(
+        [b"src"], {"librosa": "1.0.1"}
+    )
+    assert fingerprint([b"src"], {"librosa": "1.0.0"}) != fingerprint(
+        [b"src2"], {"librosa": "1.0.0"}
+    )
