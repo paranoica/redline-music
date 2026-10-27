@@ -10,14 +10,22 @@ from redline.loudness import integrated_lufs
 RATE = 44100
 
 
+def bursts():
+    gate = np.zeros((RATE * 4, 1), dtype=np.float32)
+    for start in range(0, RATE * 4, RATE):
+        gate[start + 1000 : start + 1441] = 1.0
+    return gate
+
+
 def variants():
     rng = make_rng()
     noise = rng.standard_normal((RATE * 4, 2)).astype(np.float32)
     return {
         "original": tone(440, 4, amp=0.1),
         "eq": tone(440, 4, amp=0.5) + 0.05 * noise,
-        # a 4x true-peak estimate reads this one about 0.2 dB under its real peak
-        "light": tone(15000, 4, amp=0.9, phase=0.7),
+        # loud 15 kHz bursts over a quiet floor: this variant sets the common level, and a
+        # 4x true-peak estimate reads it about 0.2 dB under its real peak
+        "light": tone(15000, 4, amp=0.9, phase=0.7) * bursts() + 0.001 * noise,
         "medium": 0.02 * noise,
         "heavy": np.clip(tone(220, 4, amp=2.0), -0.3, 0.3),
     }
