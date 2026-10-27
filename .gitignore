@@ -9,3 +9,55 @@ __pycache__/
 plugins/bedrock/evals/results/
 plugins/bedrock/evals-bench
 bench/results/
+
+# Private data: never in this repository
+/private
+/docs/private/
+/input/
+/work/
+/output/
+/lyrics/
+/profiles/
+*.[lL][rR][cC]
+
+# Audio, stems, MIDI and analysis output
+*.[wW][aA][vV]
+*.[wW][aA][vV][eE]
+*.[mM][pP]3
+*.[fF][lL][aA][cC]
+*.[mM]4[aA]
+*.[aA][aA][cC]
+*.[oO][gG][gG]
+*.[oO][pP][uU][sS]
+*.[aA][iI][fF]
+*.[aA][iI][fF][fF]
+*.[wW][mM][aA]
+*.[mM][iI][dD]
+*.[mM][iI][dD][iI]
+stems/
+chain.json
+spectrogram*.png
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Model weights and caches
+*.pt
+*.th
+*.ckpt
+*.safetensors
+*.onnx
+*.gguf
+models/
+.cache/
+
+# Working notes for the assistant
+/AGENTS.md
+/.claude/settings.local.json
+*.pth
+*.npy
+*.npz

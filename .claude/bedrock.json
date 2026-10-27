@@ -1,5 +1,7 @@
 {
-  "project": "bedrock",
+  "project": "redline",
+  "critical_zones": [".gitignore"],
+  "packs": ["python"],
   "leaks": {
     "allow": [
       "claude",
@@ -26,12 +28,18 @@
     ]
   },
   "commands": {
+    "setup": {
+      "run": "uv sync --all-extras"
+    },
     "test": {
-      "run": "uvx pytest -p no:cacheprovider -q -o addopts=",
+      "run": "uv run pytest -p no:cacheprovider -q -o addopts=",
       "heavy": true
     },
     "test-related": {
-      "run": "uvx pytest -p no:cacheprovider -q -o addopts= {args}"
+      "run": "uv run pytest -p no:cacheprovider -q -o addopts= {args}"
+    },
+    "typecheck": {
+      "run": "uv run pyright src/redline"
     },
     "lint": {
       "run": "uvx ruff check ."
