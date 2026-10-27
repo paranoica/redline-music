@@ -1,0 +1,11 @@
+.dev/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.review/index.json
+.review/outcomes.jsonl
+.review/verify-receipt.json
+plugins/bedrock/evals/results/
+plugins/bedrock/evals-bench
+bench/results/
