@@ -26,7 +26,8 @@ Samples = npt.NDArray[np.floating]
 PRE_GAIN_LUFS = -18.0
 OVERSAMPLING = 8
 GATE_BELOW_P95_DB = 30.0
-FIT_FROM_HZ = 100.0
+# a vocal stem below 200 Hz is mostly bass and 808 bleeding through the separation
+FIT_FROM_HZ = 200.0
 GAIN_LIMIT_DB = 12.0
 MAX_PASSES = 3
 DAMPING = 0.7

@@ -69,9 +69,8 @@ def test_eq_stays_flat_when_the_curve_already_matches():
 def test_eq_ignores_the_bands_under_the_fit_range():
     source = pink()
     curve = tonal_curve(source, RATE, UPPER)
-    # below 100 Hz a vocal stem is mostly beat bleed
     cut = tuple(
-        db - (20.0 if hz < 100 else 0.0)
+        db - (20.0 if hz < 200 else 0.0)
         for hz, db in zip(curve.centers_hz, curve.curve_db, strict=True)
     )
     _, chain = process_vocal(source, RATE, LEVELS["eq"], Target(curve.centers_hz, cut), UPPER)
