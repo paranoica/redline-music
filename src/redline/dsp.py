@@ -67,6 +67,16 @@ def apply_sos(samples: Samples, sos: Sos) -> Samples:
     return np.asarray(sosfilt(sos, samples, axis=0), dtype=np.float32)
 
 
+def block_levels_db(samples: Samples, rate: int) -> npt.NDArray[np.float64]:
+    """Peak level of the loudest channel in each 1 ms block, in dBFS."""
+    block = max(1, round(rate * BLOCK_SECONDS))
+    count = math.ceil(len(samples) / block)
+    padded = np.zeros((count * block, samples.shape[1]), dtype=np.float32)
+    padded[: len(samples)] = np.abs(samples)
+    peaks = padded.reshape(count, block * samples.shape[1]).max(axis=1)
+    return 20 * np.log10(np.maximum(peaks, LEVEL_FLOOR))
+
+
 def compressor_gain_db(
     samples: Samples,
     rate: int,
@@ -82,11 +92,8 @@ def compressor_gain_db(
     does not move.
     """
     block = max(1, round(rate * BLOCK_SECONDS))
-    count = math.ceil(len(samples) / block)
-    padded = np.zeros((count * block, samples.shape[1]), dtype=np.float32)
-    padded[: len(samples)] = np.abs(samples)
-    peaks = padded.reshape(count, block * samples.shape[1]).max(axis=1)
-    level = 20 * np.log10(np.maximum(peaks, LEVEL_FLOOR))
+    level = block_levels_db(samples, rate)
+    count = len(level)
     target = np.where(level > threshold_db, (threshold_db - level) * (1 - 1 / ratio), 0.0)
     target += np.where(level < gate_db, level - gate_db, 0.0)
     attack = math.exp(-block / rate / (attack_ms / 1000))
