@@ -278,7 +278,7 @@ def test_cudnn_failure_falls_back_to_the_cpu(tmp_path):
 
 
 def test_missing_pinned_file_is_a_clear_error(tmp_path):
-    with pytest.raises(SeparationError, match=r"absent\.ckpt"):
+    with pytest.raises(SeparationError, match=r"absent\.ckpt was not downloaded"):
         verify_files({tmp_path / "absent.ckpt": "0" * 64})
 
 
@@ -323,3 +323,24 @@ def test_weights_are_verified_before_they_are_loaded(tmp_path):
         tmp_path / "in.wav", tmp_path, engine=engine, model_dir=tmp_path, pins=pins, model="m.ckpt"
     )
     assert engine.calls == ["download", "load", "separate"]
+
+
+def test_corrupt_cache_entry_is_recomputed(tmp_path):
+    source = audio()
+    fake = FakeSeparator()
+    separate(source, fake, tmp_path)
+    entry = tmp_path / "stems" / cache_key(source, fake.id)
+    (entry / "vocal.wav").write_bytes(b"")
+    stems = separate(source, fake, tmp_path)
+    assert len(fake.calls) == 2
+    assert not stems.cached
+    assert stems.vocal.shape == source.samples.shape
+
+
+def test_model_writing_no_stems_is_a_clear_error(tmp_path):
+    def writes_nothing(source: Path, out: Path) -> tuple[Path, Path]:
+        return out / "vocal.wav", out / "beat.wav"
+
+    separator = RoformerSeparator(run=writes_nothing, run_on_cpu=writes_nothing)
+    with pytest.raises(SeparationError, match="no readable stems"):
+        separate(audio(), separator, tmp_path)

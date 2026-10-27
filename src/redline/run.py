@@ -22,7 +22,7 @@ from redline.spectrum import low_end, stereo_width, tonal_curve
 
 MIN_TAILS = 5
 MEASURING_MODULES = ("audio", "loudness", "spectrum", "pitch", "dynamics", "run")
-MEASURING_LIBRARIES = ("numpy", "scipy", "librosa", "pyloudnorm", "soundfile")
+MEASURING_LIBRARIES = ("numpy", "scipy", "librosa", "pyloudnorm", "soundfile", "soxr")
 log = logging.getLogger(__name__)
 
 
@@ -134,8 +134,13 @@ def _measure(decoded: Decoded, audio: Audio, stems: Stems, upper: float, side_up
 def _metrics_cached(cache_dir: Path, key: str, compute: Any) -> tuple[dict, bool]:
     path = cache_dir / "metrics" / f"{key}.json"
     if path.is_file():
-        log.info("measurements from cache: %s", key[:12])
-        return json.loads(path.read_text(encoding="utf-8")), True
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            log.warning("cached measurements unreadable (%s); measuring again", error)
+        else:
+            log.info("measurements from cache: %s", key[:12])
+            return cached, True
     result = compute()
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = path.with_suffix(f".{os.getpid()}.tmp")

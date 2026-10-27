@@ -61,7 +61,10 @@ class Stems:
 
 def stems_code() -> str:
     """Fingerprint of the separation code and torch, part of every stem cache key."""
-    return fingerprint(module_sources(["separate"]), library_versions(["torch"]))
+    return fingerprint(
+        module_sources(["separate"]),
+        library_versions(["torch", "rotary-embedding-torch", "einops"]),
+    )
 
 
 def cache_key(audio: Audio, separator_id: str, code: str | None = None) -> str:
@@ -76,8 +79,16 @@ def separate(audio: Audio, separator: Separator, cache_dir: Path) -> Stems:
     """Return the stems from the cache, or run the separator and cache them atomically."""
     folder = cache_dir / "stems" / cache_key(audio, separator.id)
     if _complete(folder):
-        log.info("stems from cache: %s", folder.name[:12])
-        return Stems(_read(folder / "vocal.wav"), _read(folder / "beat.wav"), audio.rate, True)
+        try:
+            cached = Stems(
+                _read(folder / "vocal.wav"), _read(folder / "beat.wav"), audio.rate, True
+            )
+        except sf.LibsndfileError as error:
+            log.warning("cached stems unreadable (%s); separating again", error)
+            shutil.rmtree(folder, ignore_errors=True)
+        else:
+            log.info("stems from cache: %s", folder.name[:12])
+            return cached
     peak = float(np.abs(audio.samples).max())
     scale = HEADROOM_PEAK / peak if peak > HEADROOM_PEAK else 1.0
     vocal, beat = separator(audio.samples * np.float32(scale), audio.rate)
@@ -175,15 +186,22 @@ class RoformerSeparator:
                     raise SeparationError(
                         f"separation failed on the GPU ({error}) and on the CPU ({cpu_error})"
                     ) from cpu_error
-            return _fit(_read(vocal_path), len(samples)), _fit(_read(beat_path), len(samples))
+            try:
+                vocal, beat = _read(vocal_path), _read(beat_path)
+            except sf.LibsndfileError as error:
+                raise SeparationError(f"the model wrote no readable stems: {error}") from error
+            return _fit(vocal, len(samples)), _fit(beat, len(samples))
 
 
 def verify_files(expected: dict[Path, str]) -> None:
     """Raise when a file's sha256 differs from the pinned one."""
     for path, digest in expected.items():
         if not path.is_file():
-            raise SeparationError(f"{path} is missing; run again to download it")
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            raise SeparationError(
+                f"{path} was not downloaded; the pinned files may not match this library version"
+            )
+        with path.open("rb") as handle:
+            actual = hashlib.file_digest(handle, "sha256").hexdigest()
         if actual != digest:
             raise SeparationError(
                 f"{path} does not match its pinned sha256; delete it to download it again"

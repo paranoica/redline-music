@@ -252,3 +252,13 @@ def test_fingerprint_follows_library_versions():
     assert fingerprint([b"src"], {"librosa": "1.0.0"}) != fingerprint(
         [b"src2"], {"librosa": "1.0.0"}
     )
+
+
+def test_corrupt_cached_measurements_are_recomputed(tmp_path, inputs):
+    track, refs = inputs
+    measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    for cached in (tmp_path / "work" / "cache" / "metrics").glob("*.json"):
+        cached.write_text('{"values": {', encoding="utf-8")
+    run_dir = measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
+    data = json.loads((run_dir / "measurements.json").read_text(encoding="utf-8"))
+    assert data["track"]["values"]["mix.lufs"] == pytest.approx(-20.0, abs=0.2)
