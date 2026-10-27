@@ -127,6 +127,10 @@ def low_end(samples: Samples, rate: int) -> LowEnd:
         return LowEnd(None, None)
     low = _band_energy(freqs, power, 0.0, LOW_END_HZ)
     share = 10 * math.log10(low / total) if low > 0 else LOW_SHARE_FLOOR_DB
+    return LowEnd(share, gated_crest_db(low_band(samples, rate), rate))
+
+
+def low_band(samples: Samples, rate: int) -> npt.NDArray[np.float64]:
+    """The signal below LOW_END_HZ (8th-order Butterworth)."""
     sos = butter(8, LOW_END_HZ, btype="lowpass", fs=rate, output="sos")
-    band = np.asarray(sosfilt(sos, samples, axis=0), dtype=np.float64)
-    return LowEnd(share, gated_crest_db(band, rate))
+    return np.asarray(sosfilt(sos, samples, axis=0), dtype=np.float64)

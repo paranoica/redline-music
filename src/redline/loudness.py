@@ -41,7 +41,7 @@ def loudness_range(samples: Samples, rate: int) -> float | None:
     return None if math.isnan(value) else value
 
 
-def _gated(levels: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
+def gate_levels(levels: npt.NDArray[np.floating]) -> npt.NDArray[np.floating]:
     """Keep levels above the absolute gate and within RELATIVE_GATE of their power mean."""
     above = levels[np.isfinite(levels) & (levels >= ABSOLUTE_GATE)]
     if above.size == 0:
@@ -56,7 +56,7 @@ def short_term_spread(samples: Samples, rate: int) -> float | None:
         return None
     meter = pyln.Meter(rate, block_size=WINDOW_SECONDS, overlap=1 - HOP_SECONDS / WINDOW_SECONDS)
     meter.integrated_loudness(samples)
-    levels = _gated(np.asarray(meter.blockwise_loudness, dtype=np.float64))
+    levels = gate_levels(np.asarray(meter.blockwise_loudness, dtype=np.float64))
     if levels.size < 2:
         return None
     low, high = np.percentile(levels, [25, 75])
@@ -73,7 +73,7 @@ def gated_crest_db(samples: Samples, rate: int) -> float | None:
     power = np.array([np.mean(np.square(samples[s : s + window])) for s in starts])
     with np.errstate(divide="ignore"):
         levels = 10 * np.log10(power)
-    keep = np.isin(levels, _gated(levels))
+    keep = np.isin(levels, gate_levels(levels))
     if not keep.any():
         return None
     crest = 20 * np.log10(peaks[keep]) - 10 * np.log10(power[keep])
