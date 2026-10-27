@@ -1,0 +1,46 @@
+{
+  "project": "bedrock",
+  "leaks": {
+    "allow": [
+      "claude",
+      "anthropic",
+      "paranoica"
+    ],
+    "ignore": [
+      "tests/test_leaks.py",
+      "plugins/bedrock/scripts/bedrock_lib/leaks.py"
+    ]
+  },
+  "checks": {
+    "allow_hosts": [
+      "registry.npmjs.org",
+      "api.npmjs.org",
+      "pypi.org",
+      "pypistats.org"
+    ],
+    "ignore": [
+      "tests/test_codecheck.py",
+      "plugins/bedrock/skills/code-review/*",
+      "plugins/bedrock/skills/design-creator/*",
+      "plugins/bedrock/skills/humanize/*"
+    ]
+  },
+  "commands": {
+    "test": {
+      "run": "uvx pytest -p no:cacheprovider -q -o addopts=",
+      "heavy": true
+    },
+    "test-related": {
+      "run": "uvx pytest -p no:cacheprovider -q -o addopts= {args}"
+    },
+    "lint": {
+      "run": "uvx ruff check ."
+    },
+    "format": {
+      "run": "uvx black -q ."
+    },
+    "skills": {
+      "run": "python3 plugins/bedrock/scripts/skillcheck.py --root plugins/bedrock --strict"
+    }
+  }
+}
