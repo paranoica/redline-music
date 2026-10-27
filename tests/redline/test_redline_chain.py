@@ -6,6 +6,7 @@ from redline_signals import make_rng
 
 from redline.chain import (
     DIRT_LEVELS,
+    EQ_BANDS,
     GAIN_LIMIT_DB,
     Compressor,
     DirtLevel,
@@ -17,6 +18,7 @@ from redline.chain import (
     render_dirt,
     solve_gains,
 )
+from redline.dsp import apply_sos, peaking
 from redline.loudness import gated_crest_db, integrated_lufs
 from redline.spectrum import tonal_curve
 
@@ -83,6 +85,31 @@ def test_compression_keeps_the_level_going_into_the_drive():
     out, _ = render_dirt(x, RATE, level)
     assert gated_crest_db(out, RATE) < gated_crest_db(x, RATE) - 1
     assert integrated_lufs(out, RATE) == pytest.approx(integrated_lufs(x, RATE), abs=0.1)
+
+
+def test_eq_answers_a_bump_with_its_own_band_only():
+    source = pink()
+    bumped = tonal_curve(apply_sos(source, peaking(1000, 6.0, 1.0, RATE)), RATE, UPPER)
+    # a level offset and +-1 dB of band noise no EQ band can follow, as on real stems
+    noise = make_rng().uniform(-1.0, 1.0, len(bumped.curve_db))
+    target = Target(bumped.centers_hz, tuple(np.array(bumped.curve_db) + 10.0 + noise))
+    _, chain = process_vocal(source, RATE, LEVELS["eq"], target, UPPER)
+    gains = dict(zip(EQ_BANDS, chain.eq_gains_db, strict=True))
+    assert gains[("peak", 1000.0)] == pytest.approx(6.0, abs=2.0)
+    others = [g for band, g in gains.items() if band != ("peak", 1000.0)]
+    assert max(abs(g) for g in others) <= 2.0, gains
+
+
+def test_eq_does_not_spend_its_range_on_a_level_change():
+    source = pink()
+    curve = tonal_curve(source, RATE, UPPER)
+    # more lows and highs, fewer mids: shelves and peaks can also fake a plain level change
+    # here, which the offset already covers, so nothing should end up at the limit
+    smile = [3.5 if hz < 700 else (4.0 if hz > 4000 else -3.0) for hz in curve.centers_hz]
+    target = Target(curve.centers_hz, tuple(np.array(curve.curve_db) + smile))
+    _, chain = process_vocal(source, RATE, LEVELS["eq"], target, UPPER)
+    assert max(abs(g) for g in chain.eq_gains_db) < GAIN_LIMIT_DB - 2, chain.eq_gains_db
+    assert chain.passes_error_db[-1] <= 0.6 * chain.passes_error_db[0]
 
 
 def test_eq_gains_stop_at_the_limit():

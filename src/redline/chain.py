@@ -32,6 +32,7 @@ GAIN_LIMIT_DB = 12.0
 MAX_PASSES = 3
 DAMPING = 0.7
 PROBE_GAIN_DB = 6.0
+RIDGE = 0.3
 EQ_BANDS = (
     ("low_shelf", 200.0),
     ("peak", 400.0),
@@ -172,9 +173,23 @@ def eq_matrix(
     return np.array(columns).T, used
 
 
-def solve_gains(diff_db: npt.NDArray[np.float64], matrix: npt.NDArray[np.float64]) -> npt.NDArray:
-    """Least-squares EQ gains for a curve difference, offset dropped, no limit."""
-    solution, *_ = np.linalg.lstsq(matrix, diff_db, rcond=None)
+def solve_gains(
+    diff_db: npt.NDArray[np.float64],
+    matrix: npt.NDArray[np.float64],
+    current: npt.NDArray[np.float64] | None = None,
+) -> npt.NDArray[np.float64]:
+    """EQ gains that close a curve difference on top of the current gains, offset dropped.
+
+    Shelves and peaks together can imitate a plain level change, which the offset already
+    covers; the small penalty on the gains keeps them from drifting along that direction.
+    """
+    bands = matrix[:, :-1]
+    current = np.zeros(bands.shape[1]) if current is None else current
+    system = np.vstack(
+        [matrix, np.hstack([RIDGE * np.eye(bands.shape[1]), np.zeros((bands.shape[1], 1))])]
+    )
+    wanted = np.concatenate([diff_db + bands @ current, np.zeros(bands.shape[1])])
+    solution, *_ = np.linalg.lstsq(system, wanted, rcond=None)
     return solution[:-1]
 
 
@@ -202,7 +217,8 @@ def _fit_eq(
         # the EQ comes after the nonlinear stages, so the passes only correct the
         # band-averaging error of the linear model and do not oscillate
         diff = np.asarray(target.curve_db) - np.asarray(curve.curve_db)
-        step = solve_gains(diff[used], matrix) * (1.0 if attempt == 0 else DAMPING)
+        step = solve_gains(diff[used], matrix, gains) - gains
+        step *= 1.0 if attempt == 0 else DAMPING
         gains = np.clip(gains + step, -GAIN_LIMIT_DB, GAIN_LIMIT_DB)
     raise AssertionError("unreachable")
 
