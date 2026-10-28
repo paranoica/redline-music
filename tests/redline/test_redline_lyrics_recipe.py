@@ -55,7 +55,8 @@ def test_the_recipe_is_the_same_in_another_process(profile, tmp_path):
 def test_seeds_reach_rare_shapes_and_both_line_lengths(profile):
     recipes = [make_recipe(profile, seed) for seed in range(300)]
     shapes = {"-".join(s.kind for s in r.sections) for r in recipes}
-    assert {p for p, _ in profile["structure"]["patterns"]} == shapes
+    tracks = {p for p, _ in profile["structure"]["patterns"] if "-" in p}
+    assert tracks == shapes
     assert {r.band for r in recipes} == {"short", "middle", "long"}
 
 
@@ -144,3 +145,14 @@ def test_a_drawn_topic_is_a_few_anchor_words_not_a_story(profile):
         topic = make_recipe(profile, seed).topic
         assert 2 <= len(topic.split(", ")) <= 3
         assert all(len(word.split()) == 1 for word in topic.split(", "))
+
+
+def test_a_recipe_is_never_a_lone_section_or_a_snippet(profile):
+    from redline.lyrics.recipe import MIN_LINES
+
+    profile["structure"]["patterns"] = [["verse", 0.9], ["intro-verse-hook-verse", 0.1]]
+    profile["lines_per_section"]["verse"] = {"hist": {"8": 1.0}, "p10": 8, "p50": 8, "p90": 8}
+    for seed in range(30):
+        recipe = make_recipe(profile, seed)
+        assert len(recipe.sections) >= 2
+        assert sum(s.lines for s in recipe.sections) >= MIN_LINES

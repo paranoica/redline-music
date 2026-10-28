@@ -7,7 +7,8 @@ recipe below; it was drawn from the statistics of the scene and of the owner's o
 ## What makes it this scene
 
 - Concrete, not abstract. A brand with its model or price, a sum of money, a real ordinary
-  place, a drug by its street name, a game term. Never "the cold inside", "a heart of ice",
+  place, a drug by its street name, a game term. Prefer niche and archive labels to the
+  ones everyone names; never use the same brand or the same place twice in one text. Never "the cold inside", "a heart of ice",
   "the soul", "the void", "the city sleeps": those are what an outsider writes.
 - Flex and damage in the same breath: rich and wrecked, cold and needy, stated flatly.
 - Humour is deadpan: absurd lines said with a straight face, arrogance, provocation,

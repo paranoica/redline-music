@@ -15,6 +15,9 @@ ADLIBS = 4
 FALLBACK_LINES = 4
 # about 3000 characters, which Suno sings without rushing
 MAX_LINES = 48
+# a lone section or a short snippet is a demo, not a track
+MIN_SECTIONS = 2
+MIN_LINES = 20
 FALLBACK_SYLLABLES = (8, 12)
 # a drawn topic is a few anchor words that set the vibe; the scene tells no stories
 ANCHORS = (
@@ -144,7 +147,8 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
     """Draw a text's shape and material from the profile; the same seed draws the same."""
     rng = np.random.Generator(np.random.PCG64(seed))
     patterns = profile["structure"]["patterns"]
-    shape = str(_draw(rng, [p for p, _ in patterns], [s for _, s in patterns])).split("-")
+    tracks = [(p, s) for p, s in patterns if len(p.split("-")) >= MIN_SECTIONS] or patterns
+    shape = str(_draw(rng, [p for p, _ in tracks], [s for _, s in tracks])).split("-")
     band = str(_draw(rng, list(BANDS), [1.0] * len(BANDS)))
     plans: dict[str, tuple[int, str]] = {}
     sections = []
@@ -158,6 +162,13 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         lines, scheme = plans[kind]
         syllables = _band_range(profile["line_syllables"].get(kind), band)
         sections.append(SectionPlan(kind, lines, syllables, scheme))
+    growing = [i for i, p in enumerate(sections) if p.kind == "verse"] or list(range(len(sections)))
+    turn = 0
+    while sum(p.lines for p in sections) < MIN_LINES:
+        i = growing[turn % len(growing)]
+        p = sections[i]
+        sections[i] = SectionPlan(p.kind, p.lines + 1, p.syllables, p.scheme)
+        turn += 1
     while sum(s.lines for s in sections) > MAX_LINES and max(s.lines for s in sections) > 1:
         longest = max(range(len(sections)), key=lambda i: (sections[i].lines, -i))
         s = sections[longest]
