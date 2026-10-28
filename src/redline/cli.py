@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from redline.separate import Separator
 
 AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".aif", ".aiff"}
+LYRICS_BUILD = Path("private/lyrics/build")
 
 
 def _inputs(command: argparse.ArgumentParser, out_help: str | None = None) -> None:
@@ -73,6 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="process a track with the chosen settings and write the result folder"
     )
     _inputs(run, "result folder")
+    lyrics = commands.add_parser("lyrics", help="the lyrics base: copy check")
+    lyrics_commands = lyrics.add_subparsers(dest="lyrics_command", metavar="command")
+    check = lyrics_commands.add_parser(
+        "check", help="exit 1 if the text copies 8 or more words in a row from the base"
+    )
+    check.add_argument("file", type=Path, help="the text to check")
+    check.add_argument("--build", type=Path, default=LYRICS_BUILD, help="the index folder")
+    check.add_argument(
+        "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
+    )
     return parser
 
 
@@ -189,6 +200,29 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
+def _lyrics_check(args: argparse.Namespace) -> int:
+    from redline.lyrics.fingerprint import FingerprintIndex
+    from redline.lyrics.parse import LyricsError, parse_text
+
+    try:
+        index = FingerprintIndex.load(args.build)
+        track = parse_text(args.file.read_text(encoding="utf-8"))
+        matches = index.check(track, args.min_words)
+    except (LyricsError, ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    for match in matches:
+        where = f"lines {match.first_line}-{match.last_line}"
+        if match.first_line == match.last_line:
+            where = f"line {match.first_line}"
+        print(f"copy: {match.words} words in a row, {where}")
+        for line in match.lines:
+            print(f"  {line}")
+    if not matches:
+        print("no copies")
+    return 1 if matches else 0
+
+
 def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None) -> int:
     """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
@@ -202,5 +236,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _master(args, separator)
     if args.command == "run":
         return _run(args, separator)
+    if args.command == "lyrics" and args.lyrics_command == "check":
+        return _lyrics_check(args)
     parser.print_help()
     return 0
