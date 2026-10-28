@@ -3,6 +3,7 @@
 import hashlib
 import json
 import secrets
+import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +15,7 @@ from redline.lyrics.normalize import words
 from redline.lyrics.parse import LyricsError, Track
 
 MAGIC = "redline-lyrics-index"
-VERSION = 1
+VERSION = 2
 RUN = 5
 MIN_DISTINCT = 3
 DEFAULT_MIN_WORDS = 8
@@ -22,6 +23,9 @@ KEY_BYTES = 32
 INDEX_FILE = "fingerprints.npz"
 KEY_FILE = "key"
 CANARY = b"redline canary"
+# a place is the run's position in its text's word stream; the stream with adlibs dropped
+# is told apart by the top bit
+DROPPED = 1 << 31
 
 
 @dataclass(frozen=True)
@@ -56,7 +60,7 @@ def _streams(track: Track) -> list[list[tuple[str, int]]]:
             number += 1
             kept += [(w, number) for w in words(line.text)]
             dropped += [(w, number) for w in words(line.plain)]
-    return [kept, dropped] if kept != dropped else [kept]
+    return [kept, dropped]
 
 
 def _runs(key: bytes, stream: list[tuple[str, int]]) -> list[int | None]:
@@ -68,22 +72,36 @@ def _runs(key: bytes, stream: list[tuple[str, int]]) -> list[int | None]:
     return out
 
 
+def _write(path: Path, data: bytes) -> None:
+    # written aside and moved in, so a crash never leaves half a file
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("wb") as f:
+        f.write(data)
+    tmp.chmod(0o600)
+    tmp.replace(path)
+
+
 class FingerprintIndex:
-    """Run digests of the base with the text each came from."""
+    """Run digests of the base with the text and the place each came from."""
 
     def __init__(
         self,
         key: bytes,
         digests: npt.NDArray[np.uint64],
         texts: npt.NDArray[np.uint32],
+        places: npt.NDArray[np.uint32],
         artists: list[str],
     ) -> None:
-        """Hold sorted digests, the text of each and the artist of each text."""
+        """Hold digests sorted with their texts and places, and the artist of each text."""
+        if len(key) != KEY_BYTES:
+            # a short key, empty above all, leaves the digests open to a word-list attack
+            raise LyricsError(f"the lyrics index key must be {KEY_BYTES} bytes, got {len(key)}")
         if not artists:
             raise LyricsError("the lyrics index holds no texts")
         self.key = key
         self.digests = digests
         self.texts = texts
+        self.places = places
         self.artists = artists
 
     @property
@@ -94,43 +112,61 @@ class FingerprintIndex:
     @classmethod
     def build(cls, tracks: Iterable[tuple[str, Track]], key: bytes) -> "FingerprintIndex":
         """Index (artist, track) pairs; the artist is kept per text for later counts."""
-        pairs: set[tuple[int, int]] = set()
+        rows: set[tuple[int, int, int]] = set()
         artists: list[str] = []
         for text_id, (artist, track) in enumerate(tracks):
             artists.append(artist)
-            for stream in _streams(track):
-                pairs.update((d, text_id) for d in _runs(key, stream) if d is not None)
-        ordered = sorted(pairs)
-        digests = np.array([d for d, _ in ordered], dtype=np.uint64)
-        texts = np.array([t for _, t in ordered], dtype=np.uint32)
-        return cls(key, digests, texts, artists)
+            for variant, stream in zip((0, DROPPED), _streams(track), strict=True):
+                for place, digest in enumerate(_runs(key, stream)):
+                    if digest is not None:
+                        rows.add((digest, text_id, variant | place))
+        ordered = sorted(rows)
+        return cls(
+            key,
+            np.array([d for d, _, _ in ordered], dtype=np.uint64),
+            np.array([t for _, t, _ in ordered], dtype=np.uint32),
+            np.array([p for _, _, p in ordered], dtype=np.uint32),
+            artists,
+        )
 
-    def _texts_of(self, digest: int) -> set[int]:
+    def _places_of(self, digest: int) -> set[tuple[int, int]]:
         value = np.uint64(digest)
         lo = int(np.searchsorted(self.digests, value, side="left"))
         hi = int(np.searchsorted(self.digests, value, side="right"))
-        return set(self.texts[lo:hi].tolist())
+        return set(zip(self.texts[lo:hi].tolist(), self.places[lo:hi].tolist(), strict=True))
 
     def _spans(self, stream: list[tuple[str, int]], min_words: int) -> list[tuple[int, int]]:
-        # consecutive runs found in the same base text join into one stretch
-        hits = [self._texts_of(d) if d is not None else set() for d in _runs(self.key, stream)]
-        active: dict[int, int] = {}
+        # a stretch grows while each next run sits right after the previous one in the same
+        # base text; an interjection run proves nothing and only carries the stretch on
+        active: dict[tuple[int, int], tuple[int, int]] = {}
         spans = []
-        for i, found in enumerate([*hits, set()]):
-            for text_id in [t for t in active if t not in found]:
-                start = active.pop(text_id)
-                end = i + RUN - 2
-                if end - start + 1 >= min_words:
-                    spans.append((start, end))
-            for text_id in found:
-                active.setdefault(text_id, i)
+
+        def close(start: int, last: int) -> None:
+            if last + RUN - start >= min_words:
+                spans.append((start, last + RUN - 1))
+
+        for i, digest in enumerate(_runs(self.key, stream)):
+            if digest is None:
+                active = {(t, p + 1): v for (t, p), v in active.items()}
+                continue
+            hits = self._places_of(digest)
+            grown: dict[tuple[int, int], tuple[int, int]] = {}
+            for (text_id, place), (start, last) in active.items():
+                if (text_id, place) in hits:
+                    grown[(text_id, place + 1)] = (start, i)
+                else:
+                    close(start, last)
+            for text_id, place in hits:
+                grown.setdefault((text_id, place + 1), (i, i))
+            active = grown
+        for start, last in active.values():
+            close(start, last)
         return spans
 
     def check(self, track: Track, min_words: int = DEFAULT_MIN_WORDS) -> list[Match]:
         """Stretches of min_words or more words in a row that one text of the base also has.
 
-        Runs of different base texts never add up, so pieces common to several texts
-        stay short.
+        Pieces of different base texts, or of different places in one, never add up.
         """
         if min_words < RUN:
             raise ValueError(f"a copy is at least {RUN} words long, got {min_words}")
@@ -142,12 +178,12 @@ class FingerprintIndex:
         return _matches(found, lines)
 
     def save(self, folder: Path, force: bool = False) -> None:
-        """Write the index and its key; a smaller index replaces a bigger one only when forced."""
+        """Write the index and its key; a smaller or unreadable index is replaced only by force."""
         if not force and (folder / INDEX_FILE).exists():
             try:
                 existing = FingerprintIndex.load(folder).n_texts
-            except LyricsError:
-                existing = 0
+            except LyricsError as error:
+                raise LyricsError(f"{error}; force a rebuild to replace it") from error
             if existing > self.n_texts:
                 raise LyricsError(
                     f"the index on disk holds {existing} texts, this one {self.n_texts}; "
@@ -162,18 +198,23 @@ class FingerprintIndex:
             "texts": self.n_texts,
             "canary": _digest(self.key, CANARY),
         }
-        (folder / KEY_FILE).write_bytes(self.key)
-        np.savez(
-            folder / INDEX_FILE,
-            header=np.frombuffer(json.dumps(header).encode(), dtype=np.uint8),
-            artists=np.frombuffer(json.dumps(self.artists).encode(), dtype=np.uint8),
-            digests=self.digests,
-            texts=self.texts,
-        )
+        tmp = folder / (INDEX_FILE + ".tmp")
+        with tmp.open("wb") as f:
+            np.savez(
+                f,
+                header=np.frombuffer(json.dumps(header).encode(), dtype=np.uint8),
+                artists=np.frombuffer(json.dumps(self.artists).encode(), dtype=np.uint8),
+                digests=self.digests,
+                texts=self.texts,
+                places=self.places,
+            )
+        tmp.chmod(0o600)
+        _write(folder / KEY_FILE, self.key)
+        tmp.replace(folder / INDEX_FILE)
 
     @classmethod
     def load(cls, folder: Path) -> "FingerprintIndex":
-        """Read an index and refuse one that is missing, empty, of another version or key."""
+        """Read an index and refuse one that is missing, broken, of another version or key."""
         try:
             key = (folder / KEY_FILE).read_bytes()
             with np.load(folder / INDEX_FILE, allow_pickle=False) as data:
@@ -181,7 +222,8 @@ class FingerprintIndex:
                 artists = json.loads(data["artists"].tobytes())
                 digests = data["digests"].astype(np.uint64)
                 texts = data["texts"].astype(np.uint32)
-        except (OSError, KeyError, ValueError) as error:
+                places = data["places"].astype(np.uint32)
+        except (OSError, KeyError, ValueError, EOFError, zipfile.BadZipFile) as error:
             raise LyricsError(f"no usable lyrics index in {folder}: {error}") from error
         if header.get("magic") != MAGIC or header.get("version") != VERSION:
             raise LyricsError(f"the lyrics index in {folder} is of another version; rebuild it")
@@ -191,7 +233,11 @@ class FingerprintIndex:
             )
         if header.get("canary") != _digest(key, CANARY):
             raise LyricsError(f"the key in {folder} is not the one the lyrics index was built with")
-        return cls(key, digests, texts, artists)
+        sizes = {len(digests), len(texts), len(places)}
+        unsorted = len(digests) > 1 and bool(np.any(digests[1:] < digests[:-1]))
+        if header.get("texts") != len(artists) or len(sizes) != 1 or not len(digests) or unsorted:
+            raise LyricsError(f"the lyrics index in {folder} is damaged; rebuild it")
+        return cls(key, digests, texts, places, artists)
 
 
 def _matches(found: list[tuple[int, int, int]], lines: list[str]) -> list[Match]:

@@ -2,6 +2,7 @@
 
 import re
 
+from redline.lyrics.normalize import DIGIT_GROUP, clean
 from redline.lyrics.parse import ADLIB
 
 CYRILLIC_VOWELS = set("аеёиоуыэюя")
@@ -9,7 +10,7 @@ LATIN_VOWEL_GROUP = re.compile(r"[aeiouy]+")
 TOKEN = re.compile(r"[0-9]+|[A-Za-zА-Яа-яЁё'\u2019]+(?:-[A-Za-zА-Яа-яЁё'\u2019]+)*")
 # a letter held three times or more is one stretched sound; two can be two syllables
 REPEAT = re.compile(r"([a-zа-яё])\1{2,}")
-ACRONYM_LETTERS = 4
+ACRONYM_LETTERS = 3
 
 UNITS = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
 TEENS = [
@@ -87,9 +88,11 @@ def number_words(n: int) -> str:
 def _latin(part: str, original: str) -> int:
     letters = re.sub(r"[^a-z]", "", part)
     groups = LATIN_VOWEL_GROUP.findall(letters)
-    spelled = original.isupper() and 1 < len(letters) <= ACRONYM_LETTERS
-    if spelled or not groups:
+    if original.isupper() and 1 < len(letters) <= ACRONYM_LETTERS:
         return len(letters)
+    if not groups:
+        # a vowelless word read out: an interjection (hmm, brr) unless it is capitals
+        return len(letters) if original.isupper() else 1
     count = len(groups)
     if count > 1 and letters.endswith("e") and not letters.endswith(("le", "ee")):
         count -= 1
@@ -110,7 +113,7 @@ def _chain(token: str) -> int:
     last_vowel = ""
     for part in token.split("-"):
         lowered = REPEAT.sub(r"\1", part.lower())
-        if lowered in CYRILLIC_VOWELS and lowered == last_vowel:
+        if lowered and set(lowered) == {last_vowel}:
             continue
         total += _part(part)
         vowels = [c for c in lowered if c in CYRILLIC_VOWELS]
@@ -121,7 +124,7 @@ def _chain(token: str) -> int:
 def count_syllables(line: str) -> int:
     """Syllables of a line without its adlibs; digits are read as Russian numbers."""
     total = 0
-    for token in TOKEN.findall(ADLIB.sub(" ", line)):
+    for token in TOKEN.findall(DIGIT_GROUP.sub("", ADLIB.sub(" ", clean(line)))):
         if token.isdigit():
             words = number_words(int(token))
             total += sum(c in CYRILLIC_VOWELS for c in words)

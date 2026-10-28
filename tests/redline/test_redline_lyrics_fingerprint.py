@@ -148,3 +148,76 @@ def test_cli_check_exit_codes(index, tmp_path, capsys):
     assert main(["lyrics", "check", str(clean), "--build", str(build)]) == 0
     assert main(["lyrics", "check", str(clean), "--build", str(tmp_path / "none")]) == 2
     assert main(["lyrics", "check", str(tmp_path / "nofile.txt"), "--build", str(build)]) == 2
+
+
+@pytest.mark.parametrize("key", [b"", b"short"])
+def test_a_key_of_the_wrong_length_is_refused(key):
+    # an empty key turns the keyed hash into a plain one, open to a word-list attack
+    with pytest.raises(LyricsError, match="key"):
+        FingerprintIndex.build(base_tracks(), key)
+
+
+def test_the_key_is_readable_by_the_owner_only(index, tmp_path):
+    index.save(tmp_path)
+    assert (tmp_path / "key").stat().st_mode & 0o077 == 0
+
+
+def test_runs_from_different_places_of_one_text_do_not_chain():
+    base = (
+        "мы летим над городом ночью\n"
+        "звезды летим над городом ночью одни\n"
+        "видим над городом ночью одни сегодня\n"
+        "и снова городом ночью одни сегодня тихо\n"
+    )
+    index = FingerprintIndex.build([("a", parse_text(base))], new_key())
+    assert found(index, "мы летим над городом ночью одни сегодня тихо\n") == []
+
+
+def test_an_interjection_chain_inside_a_copy_does_not_split_it():
+    base = "кот идет домой ла ла ла ла по мокрой улице\n"
+    index = FingerprintIndex.build([("a", parse_text(base))], new_key())
+    assert [m.words for m in found(index, base)] == [10]
+
+
+@pytest.mark.parametrize("content", [b"", b"not a zip at all"])
+def test_a_broken_index_file_is_refused(index, tmp_path, content):
+    index.save(tmp_path)
+    (tmp_path / "fingerprints.npz").write_bytes(content)
+    with pytest.raises(LyricsError, match="lyrics index"):
+        FingerprintIndex.load(tmp_path)
+
+
+def test_an_index_with_unsorted_digests_is_refused(index, tmp_path):
+    index.save(tmp_path)
+    data = dict(np.load(tmp_path / "fingerprints.npz"))
+    data["digests"] = data["digests"][::-1].copy()
+    np.savez(tmp_path / "fingerprints.npz", **data)
+    with pytest.raises(LyricsError, match="lyrics index"):
+        FingerprintIndex.load(tmp_path)
+
+
+def test_an_unreadable_index_is_not_replaced_without_force(index, tmp_path):
+    index.save(tmp_path)
+    (tmp_path / "key").write_bytes(new_key())
+    smaller = FingerprintIndex.build(base_tracks()[:1], new_key())
+    with pytest.raises(LyricsError, match="force"):
+        smaller.save(tmp_path)
+    smaller.save(tmp_path, force=True)
+
+
+def test_cli_check_reads_a_leading_dash_block_as_text(index, tmp_path):
+    build = tmp_path / "build"
+    index.save(build)
+    text = "---\nвот мы гуляем по крышам пока город молчит и дальше\n---\nмое\n"
+    path = tmp_path / "candidate.txt"
+    path.write_text(text, encoding="utf-8")
+    assert main(["lyrics", "check", str(path), "--build", str(build)]) == 1
+
+
+def test_cli_check_with_a_broken_index_exits_2(index, tmp_path):
+    build = tmp_path / "build"
+    index.save(build)
+    (build / "fingerprints.npz").write_bytes(b"")
+    path = tmp_path / "candidate.txt"
+    path.write_text("строка\n", encoding="utf-8")
+    assert main(["lyrics", "check", str(path), "--build", str(build)]) == 2

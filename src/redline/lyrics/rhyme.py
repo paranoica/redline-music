@@ -2,6 +2,7 @@
 
 import re
 
+from redline.lyrics.normalize import clean
 from redline.lyrics.parse import ADLIB
 
 VOWELS = set("аеиоуыэюяё")
@@ -49,11 +50,11 @@ def _stressed(word: str) -> tuple[str, int] | None:
     single vowel.
     """
     plain = word.replace(STRESS, "")
-    capitals = [i for i, c in enumerate(plain) if i and c.isupper() and c.lower() in VOWELS]
-    if len(capitals) == 1 and plain.upper() != plain:
-        # the author's capital vowel marks the stress and overrides a model's mark;
-        # a capital first letter only starts a sentence
-        at = capitals[0]
+    inner = [i for i, c in enumerate(plain) if i and c.isupper()]
+    if len(inner) == 1 and plain[inner[0]].lower() in VOWELS:
+        # the author's capital vowel marks the stress and overrides a model's mark; a
+        # capital first letter only starts a sentence, and capitals in a row are a name
+        at = inner[0]
         word = plain[:at] + STRESS + plain[at:].lower()
     letters = re.sub(r"[^a-zа-яё+]", "", HYPHEN_STRETCH.sub(r"\1", word).lower()).translate(LATIN)
     letters = STRETCH.sub(r"\1", letters.replace("ь", "").replace("ъ", ""))
@@ -78,9 +79,10 @@ def _by_stress(a: tuple[str, int], b: tuple[str, int]) -> bool:
     if not vowels_a:
         # stress on the last syllable: the same closing consonant, or none in both
         return after_a[-1:].translate(DEVOICE) == after_b[-1:].translate(DEVOICE)
-    # otherwise the consonant that opens the next syllable carries the rhyme
-    before_a = after_a[vowels_a[0] - 1 : vowels_a[0]].translate(DEVOICE)
-    before_b = after_b[vowels_b[0] - 1 : vowels_b[0]].translate(DEVOICE)
+    # otherwise the consonant that opens the next syllable carries the rhyme; before a
+    # vowel voiced and voiceless sound apart
+    before_a = after_a[vowels_a[0] - 1 : vowels_a[0]]
+    before_b = after_b[vowels_b[0] - 1 : vowels_b[0]]
     return before_a == before_b
 
 
@@ -91,6 +93,7 @@ def rhymes(a: str, b: str) -> bool:
     consonant; else the same consonant before the next vowel. Unknown stress: the same
     ending from the second-to-last vowel.
     """
+    a, b = clean(a), clean(b)
     sa, sb = _stressed(a), _stressed(b)
     if sa and sb:
         return _by_stress(sa, sb)

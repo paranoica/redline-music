@@ -164,3 +164,28 @@ def test_cli_stats_without_the_stress_extra_exits_2(tmp_path, monkeypatch):
     path.write_text("строка\n", encoding="utf-8")
     monkeypatch.setattr("redline.lyrics.stress.load_stresser", missing)
     assert main(["lyrics", "stats", str(path), "--stress"]) == 2
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [("LOVE", 1), ("YEAH", 1), ("hmm", 1), ("100 000", 3), ("да-аа", 1), ("GTA", 3), ("LV", 2)],
+)
+def test_syllables_of_caps_interjections_numbers_and_stretches(line, expected):
+    assert count_syllables(line) == expected
+
+
+def test_capitals_of_an_abbreviation_are_not_a_stress_mark():
+    from redline.lyrics.rhyme import _stressed
+
+    assert _stressed("ОМОНовец") is None
+    assert _stressed("домИно") == ("домино", 3)
+
+
+def test_a_voiced_and_a_voiceless_consonant_before_a_vowel_differ():
+    assert not rhymes("в+ода", "в+ота")
+    assert rhymes("д+уб", "с+уп")
+
+
+def test_syllables_and_rhymes_read_unicode_forms_and_invisible_characters():
+    assert count_syllables("мои\u0306 го\u200bрод") == 3
+    assert rhymes("мои\u0306", "бой")

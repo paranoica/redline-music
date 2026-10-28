@@ -154,3 +154,71 @@ def test_loading_refuses_a_missing_or_unknown_key_naming_it(tmp_path, change):
     path.write_text(json.dumps(profile), encoding="utf-8")
     with pytest.raises(LyricsError, match=expected):
         load_profile(path)
+
+
+def test_a_guest_verse_still_counts_in_the_track_structure():
+    text = "[Припев: Host]\nлети\n[Куплет: Guest]\nчужое\n[Припев: Host]\nлети\n"
+    own, _ = count_tracks([track(text)], names=("Host",))
+    assert own["structure"] == {"hook-verse-hook": 1}
+
+
+def test_a_group_of_one_artist_keeps_its_words():
+    artists = {"a": Artist(("A",), "A"), "b": Artist(("B",), "B"), "c": Artist(("C",), "B")}
+    own_word = {"a": "алмаз", "b": "берег", "c": "ветер"}
+    base = {
+        s: [track(f"[Куплет]\n{w} общий номер {i}\n") for i in range(5)]
+        for s, w in own_word.items()
+    }
+    profiles = build_profiles(base, artists, mine=[track(ONE)], min_tracks=5)
+    assert "алмаз" in {w["word"] for w in profiles["group-A"]["vocabulary"]["top"]}
+    assert "берег" not in {w["word"] for w in profiles["group-B"]["vocabulary"]["top"]}
+
+
+def test_a_group_name_that_is_not_a_plain_word_is_refused():
+    artists = {"a": Artist(("A",), "../x")}
+    base = {"a": [track(f"[Куплет]\nслово {i}\n") for i in range(5)]}
+    with pytest.raises(LyricsError, match="group"):
+        build_profiles(base, artists, mine=[], min_tracks=5)
+
+
+def test_a_performer_name_matches_whole_words_only():
+    text = "[Куплет: Лилия]\nчужое слово\n"
+    own, guests = count_tracks([track(text)], names=("Ли",))
+    assert "чужое" in guests["words"] and "words" not in own
+
+
+def test_guests_of_small_artists_stay_out_of_the_scene():
+    artists = {"a": Artist(("A",), "A"), "b": Artist(("B",), "A"), "c": Artist(("C",), "A")}
+    base = {
+        "a": [track(f"[Куплет]\nобщий свет номер {i}\n") for i in range(5)],
+        "b": [track(f"[Куплет]\nобщий звон номер {i}\n") for i in range(5)],
+        "c": [track("[Куплет: Guest]\nсвет гость\n")],
+    }
+    profiles = build_profiles(base, artists, mine=[], min_tracks=5)
+    # one artist has the word; a small artist's guest would make it two
+    assert "свет" not in {w["word"] for w in profiles["scene"]["vocabulary"]["top"]}
+
+
+def test_guest_words_count_as_one_more_voice_in_the_scene():
+    artists = {"a": Artist(("A",), "A"), "b": Artist(("B",), "A")}
+    base = {
+        "a": [track(f"[Куплет]\nобщий свет номер {i}\n") for i in range(5)],
+        "b": [track(f"[Куплет: Guest]\nсвет гость {i}\n[Куплет]\nзвон {i}\n") for i in range(5)],
+    }
+    profiles = build_profiles(base, artists, mine=[], min_tracks=5)
+    assert "свет" in {w["word"] for w in profiles["scene"]["vocabulary"]["top"]}
+
+
+def test_profiles_say_their_weights():
+    artists = {"a": Artist(("A",), "A")}
+    profiles = build_profiles({"a": [track(ONE)]}, artists, mine=[track(TWO)], min_tracks=1)
+    assert profiles["working"]["meta"]["weights"] == {"mine": 0.5, "scene": 0.5}
+    assert profiles["scene"]["meta"]["weights"] == {"each_artist": 1.0}
+
+
+def test_an_artist_without_a_group_is_in_no_group_but_in_the_scene():
+    artists = {"a": Artist(("A",), ""), "b": Artist(("B",), "A")}
+    base = {s: [track(f"[Куплет]\nобщий {s} номер {i}\n") for i in range(5)] for s in "ab"}
+    profiles = build_profiles(base, artists, mine=[], min_tracks=5)
+    assert "group-" not in profiles and "group-A" in profiles
+    assert profiles["scene"]["meta"]["artists"] == 2

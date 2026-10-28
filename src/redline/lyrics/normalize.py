@@ -1,6 +1,7 @@
 """Text to comparable words: case, letters, punctuation."""
 
 import re
+import unicodedata
 
 APOSTROPHES = "'\u2019`\u02bc\u2018"
 CYRILLIC = re.compile(r"[а-я]")
@@ -10,6 +11,7 @@ LATIN_TO_CYRILLIC = str.maketrans("aeopcxykmthb", "аеорсхукмтнв")
 CYRILLIC_TO_LATIN = str.maketrans("аеорсхукмтнв", "aeopcxykmthb")
 DIGIT_GROUP = re.compile(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))")
 TOKEN = re.compile(r"[a-zа-я0-9]+")
+INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"))
 REPEAT = re.compile(r"([a-zа-я])\1+")
 
 
@@ -22,13 +24,18 @@ def _fold_script(token: str) -> str:
     return token
 
 
+def clean(text: str) -> str:
+    """The text in composed Unicode form, without invisible characters."""
+    return unicodedata.normalize("NFC", text).translate(INVISIBLE)
+
+
 def words(text: str) -> list[str]:
     """Lower-case words with ё as е, look-alike letters folded and stretched letters collapsed.
 
     Apostrophes join a word, any other punctuation splits it; digit groups split by a space
     ("100 000") read as one number.
     """
-    text = text.lower().replace("ё", "е")
+    text = clean(text).lower().replace("ё", "е")
     for mark in APOSTROPHES:
         text = text.replace(mark, "")
     text = DIGIT_GROUP.sub("", text)

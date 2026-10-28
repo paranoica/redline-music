@@ -246,6 +246,28 @@ def _lyrics_check(args: argparse.Namespace) -> int:
     return 1 if matches else 0
 
 
+def _git_would_track(folder: Path) -> bool:
+    """Whether a file in the folder would be tracked by the git repository it sits in."""
+    import subprocess
+
+    probe = folder.resolve() / "key"
+    existing = next(p for p in probe.parents if p.exists())
+    top = subprocess.run(
+        ["git", "-C", str(existing), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if top.returncode != 0:
+        return False
+    ignored = subprocess.run(
+        ["git", "-C", top.stdout.strip(), "check-ignore", "-q", "--no-index", str(probe)],
+        capture_output=True,
+        check=False,
+    )
+    return ignored.returncode != 0
+
+
 def _lyrics_index(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.fingerprint import KEY_FILE, FingerprintIndex, new_key
@@ -254,6 +276,9 @@ def _lyrics_index(args: argparse.Namespace) -> int:
 
     others = args.lyrics / "others"
     try:
+        if _git_would_track(args.build):
+            # the key with the digests gives the texts back, and profiles name the artists
+            raise LyricsError(f"{args.build} is not ignored by git; build into private/")
         if not others.is_dir():
             raise LyricsError(f"no lyrics base in {args.lyrics}: {others} is missing")
         artists = read_artists(others / "artists.yaml")
@@ -275,9 +300,12 @@ def _lyrics_index(args: argparse.Namespace) -> int:
         index.save(args.build, force=args.force)
         folder = args.build / "profiles"
         folder.mkdir(exist_ok=True)
+        for stale in folder.glob("*.json"):
+            if stale.stem not in profiles:
+                stale.unlink()
         for name, profile in profiles.items():
             (folder / f"{name}.json").write_text(dumps(profile), encoding="utf-8")
-    except (LyricsError, OSError) as error:
+    except (LyricsError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     print(f"{index.n_texts} texts, {len(index.digests)} digests, {len(profiles)} profiles")

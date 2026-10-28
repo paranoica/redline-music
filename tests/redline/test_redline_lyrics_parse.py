@@ -137,7 +137,7 @@ def test_an_empty_header_without_an_earlier_section_stays_empty(tmp_path):
 
 
 def test_crlf_and_bom_are_read(tmp_path):
-    path = write(tmp_path, "a.txt", "﻿" + GENIUS.replace("\n", "\r\n"))
+    path = write(tmp_path, "a.txt", "\ufeff" + GENIUS.replace("\n", "\r\n"))
     track = read_track(path)
     assert track.meta["track"] == "made up"
     assert track.sections[0].lines[0].plain == "холодный ветер"
@@ -171,4 +171,42 @@ def test_artists_map_reads_flow_mappings(tmp_path):
     ],
 )
 def test_words_normalize_case_letters_and_punctuation(text, expected):
+    assert words(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["---\nartist: [unclosed\n---\nстрока\n", "---\nчужие слова тут\n---\nстрока\n"]
+)
+def test_a_leading_block_that_is_not_front_matter_is_read_as_text(text):
+    track = parse_text(text)
+    lines = [line.text for s in track.sections for line in s.lines]
+    assert "строка" in lines and len(lines) == 4
+
+
+def test_owner_note_followed_by_words_keeps_the_words(tmp_path):
+    text = '---\nartist: "me"\ntrack: "x"\n---\n[Verse]\n[шепотом] я иду домой один\n'
+    track = read_track(write(tmp_path, "mine.txt", text), mine=True)
+    assert [line.text for line in track.sections[0].lines] == ["я иду домой один"]
+
+
+def test_a_part_header_is_a_verse():
+    assert parse_text("[Часть 2]\nстрока\n").sections[0].kind == "verse"
+
+
+def test_a_yaml_error_names_the_file_without_quoting_it(tmp_path):
+    path = write(tmp_path, "a.txt", '---\nartist: "Secret Name\ntrack: x\n---\nстрока\n')
+    with pytest.raises(LyricsError) as error:
+        read_track(path)
+    assert "a.txt" in str(error.value) and "Secret" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("мои\u0306 город", ["мой", "город"]),  # й written as и plus a combining breve
+        ("го\u200bрод", ["город"]),
+        ("го\u00adрод", ["город"]),
+    ],
+)
+def test_words_fold_unicode_forms_and_invisible_characters(text, expected):
     assert words(text) == expected

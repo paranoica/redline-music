@@ -70,8 +70,13 @@ def _sung(track: Track) -> list[tuple[str, Any]]:
 def _is_host(who: str, names: Sequence[str]) -> bool:
     if not who or not names:
         return True
-    said = " ".join(words(who))
-    return any(" ".join(words(n)) in said for n in names if words(n))
+    said = words(who)
+    for name in names:
+        wanted = words(name)
+        n = len(wanted)
+        if n and any(said[i : i + n] == wanted for i in range(len(said) - n + 1)):
+            return True
+    return False
 
 
 def _count_words(counts: Counts, kind: str, text: str) -> None:
@@ -110,7 +115,6 @@ def _count_section_lines(counts: Counts, kind: str, lines: list[Any], mark: Stre
 def _count_track(
     counts: Counts, guests: Counts, track: Track, names: Sequence[str], mark: Stresser
 ) -> None:
-    own_sections = []
     for section in track.sections:
         target = counts if _is_host(section.who, names) else guests
         sung = [line for line in section.lines if line.plain]
@@ -126,15 +130,14 @@ def _count_track(
         if track.headerless:
             continue
         _count_section_lines(target, section.kind, sung, mark)
-        if target is counts:
-            own_sections.append(section)
-            counts[f"lines_per_section/{section.kind}"][str(len(sung))] += 1
+        target[f"lines_per_section/{section.kind}"][str(len(sung))] += 1
     counts["totals"]["tracks"] += 1
-    if track.headerless or not own_sections:
+    if track.headerless or not track.sections:
         return
-    counts["structure"]["-".join(s.kind for s in own_sections)] += 1
-    counts["sections_per_track"][str(len(own_sections))] += 1
-    counts["hooks_per_track"][str(sum(s.kind == "hook" for s in own_sections))] += 1
+    # the shape of a track does not depend on who reads which part
+    counts["structure"]["-".join(s.kind for s in track.sections)] += 1
+    counts["sections_per_track"][str(len(track.sections))] += 1
+    counts["hooks_per_track"][str(sum(s.kind == "hook" for s in track.sections))] += 1
 
 
 def count_tracks(
@@ -234,7 +237,13 @@ def _words(
     return rows
 
 
-def to_profile(counts: Counts, level: str, name: str, min_presence: int = 1) -> dict[str, Any]:
+def to_profile(
+    counts: Counts,
+    level: str,
+    name: str,
+    min_presence: int = 1,
+    weights: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
     """The profile written to disk: shares, histograms with percentiles, top lists."""
     presence = counts.get("presence", Counter())
     totals = counts.get("totals", Counter())
@@ -245,6 +254,7 @@ def to_profile(counts: Counts, level: str, name: str, min_presence: int = 1) -> 
             "name": name,
             "tracks": int(totals.get("tracks", 0)),
             "artists": int(totals.get("artists", 0)),
+            "weights": dict(weights or {"each_track": 1.0}),
         },
         "structure": {
             "patterns": [
@@ -339,27 +349,37 @@ def build_profiles(
     """
     profiles: dict[str, dict[str, Any]] = {}
     own: dict[str, Counts] = {}
-    guests: list[Counts] = []
+    guests: dict[str, Counts] = {}
     for slug, tracks in sorted(base.items()):
+        if not tracks:
+            continue
         artist = artists.get(slug)
         counts, guest = count_tracks(dedupe(tracks), artist.names if artist else (), mark)
         own[slug] = _with_presence(counts)
-        if guest:
-            guests.append(guest)
+        guests[slug] = guest
         profiles[f"artist-{slug}"] = to_profile(own[slug], "artist", slug)
     eligible = {s: c for s, c in own.items() if c["totals"]["tracks"] >= min_tracks}
-    groups = sorted({artists[s].profile for s in eligible if s in artists and artists[s].profile})
-    for group in groups:
+    each = {"each_artist": 1.0}
+    for group in sorted({artists[s].profile for s in eligible if s in artists} - {""}):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", group):
+            raise LyricsError(f"style group {group!r} must be letters, digits, - or _")
         parts = [c for s, c in eligible.items() if s in artists and artists[s].profile == group]
-        profiles[f"group-{group}"] = to_profile(merge(parts, [1.0] * len(parts)), "group", group, 2)
+        floor = 2 if len(parts) > 1 else 1
+        merged = merge(parts, [1.0] * len(parts))
+        profiles[f"group-{group}"] = to_profile(merged, "group", group, floor, each)
     scene_parts = list(eligible.values())
-    if guests:
-        scene_parts.append(merge(guests))
+    guest_parts = [guests[s] for s in eligible if guests[s]]
+    if guest_parts:
+        # every guest together is one more voice of the scene
+        voice = _with_presence(merge(guest_parts))
+        voice["totals"] = Counter({k: v for k, v in voice["totals"].items() if k != "artists"})
+        scene_parts.append(voice)
     scene = merge(scene_parts, [1.0] * len(scene_parts)) if scene_parts else {}
-    profiles["scene"] = to_profile(scene, "scene", "scene", 2)
+    profiles["scene"] = to_profile(scene, "scene", "scene", 2 if len(scene_parts) > 1 else 1, each)
     # the owner's words always pass the two-artist floor
-    owner = _with_presence(count_tracks(mine, (), mark)[0], weight=2)
+    owner = _with_presence(count_tracks(dedupe(mine), (), mark)[0], weight=2)
     profiles["mine"] = to_profile(owner, "mine", "mine")
     working = merge([owner, scene], [MINE_WEIGHT, 1 - MINE_WEIGHT]) if scene else owner
-    profiles["working"] = to_profile(working, "working", "working", 2)
+    halves = {"mine": MINE_WEIGHT, "scene": 1 - MINE_WEIGHT}
+    profiles["working"] = to_profile(working, "working", "working", 2, halves)
     return profiles

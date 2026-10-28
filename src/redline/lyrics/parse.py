@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from redline.lyrics.normalize import clean
+
 KINDS = {
     "intro": "intro",
     "интро": "intro",
@@ -27,6 +29,7 @@ KINDS = {
     "пре-хук": "prehook",
     "verse": "verse",
     "куплет": "verse",
+    "часть": "verse",
     "bridge": "bridge",
     "бридж": "bridge",
     "переход": "bridge",
@@ -102,14 +105,13 @@ def _sections(body: str, mine: bool) -> tuple[list[Section], bool]:
         match = HEADER.match(line)
         if match:
             inside, rest = match.groups()
-            kind, name, who = _header(inside)
             if inside.strip().lower().startswith("текст"):
                 continue
-            if mine and kind == "other":
-                # the owner's bracket lines that name no section are performance notes
-                continue
-            headerless = False
-            sections.append(Section(kind, name, "" if mine else who))
+            kind, name, who = _header(inside)
+            # the owner's bracket lines that name no section are performance notes
+            if not (mine and kind == "other"):
+                headerless = False
+                sections.append(Section(kind, name, "" if mine else who))
             line = rest.strip()
             if not line:
                 continue
@@ -130,8 +132,13 @@ def _repeat_empty(sections: list[Section]) -> None:
                 section.lines = list(earlier[-1].lines)
 
 
+def _unify(text: str) -> str:
+    # one Unicode form, no BOM or invisible characters, \n line ends
+    return clean(text).replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _split(text: str) -> tuple[str | None, str]:
-    text = text.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
+    text = _unify(text)
     if not text.startswith("---\n"):
         return None, text
     head, sep, body = text[4:].partition("\n---\n")
@@ -140,12 +147,28 @@ def _split(text: str) -> tuple[str | None, str]:
     return head, body
 
 
+def _front_matter(head: str) -> dict[str, Any] | None:
+    try:
+        meta = yaml.safe_load(head)
+    except yaml.YAMLError:
+        return None
+    if isinstance(meta, dict) and meta.get("artist") and meta.get("track"):
+        return meta
+    return None
+
+
 def parse_text(text: str, mine: bool = False) -> Track:
-    """Parse a text with or without front matter, as for checking a new text."""
+    """Parse a text with or without front matter, as for checking a new text.
+
+    A leading block between --- lines that is not front matter with artist and track is
+    read as text, so nothing in it escapes a check.
+    """
     head, body = _split(text)
-    meta = yaml.safe_load(head) if head else {}
+    meta = _front_matter(head) if head is not None else None
+    if meta is None:
+        meta, body = {}, _unify(text)
     sections, headerless = _sections(body, mine)
-    return Track(meta if isinstance(meta, dict) else {}, sections, headerless, mine)
+    return Track(meta, sections, headerless, mine)
 
 
 def read_track(path: Path, mine: bool = False) -> Track:
@@ -160,7 +183,10 @@ def read_track(path: Path, mine: bool = False) -> Track:
     try:
         meta = yaml.safe_load(head)
     except yaml.YAMLError as error:
-        raise LyricsError(f"{path}: front matter: {error}") from error
+        # the parser's message quotes the line, which can hold names
+        mark = getattr(error, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark else ""
+        raise LyricsError(f"{path}: front matter is not valid YAML{where}") from None
     if not isinstance(meta, dict) or not meta.get("artist") or not meta.get("track"):
         raise LyricsError(f"{path}: front matter needs artist and track")
     sections, headerless = _sections(body, mine)

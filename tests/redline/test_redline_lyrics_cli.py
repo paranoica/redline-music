@@ -103,3 +103,31 @@ def test_index_with_stress_marks_line_final_words_once_each(lyrics, tmp_path, mo
     assert index(lyrics, tmp_path / "build", "--stress") == 0
     assert calls and all(" " not in c for c in calls)
     assert len(calls) == len(set(calls))
+
+
+def test_index_refuses_a_build_folder_git_would_track(lyrics, tmp_path):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_text("/private\n", encoding="utf-8")
+    assert index(lyrics, repo / "build") == 2
+    assert not (repo / "build").exists()
+    assert index(lyrics, repo / "private" / "build") == 0
+
+
+def test_a_key_file_of_the_wrong_length_stops_the_index(lyrics, tmp_path):
+    build = tmp_path / "build"
+    build.mkdir()
+    (build / "key").write_bytes(b"")
+    assert index(lyrics, build) == 2
+
+
+def test_profiles_of_removed_artists_are_deleted(lyrics, tmp_path):
+    build = tmp_path / "build"
+    index(lyrics, build)
+    for path in (lyrics / "others" / "b").glob("*.txt"):
+        path.unlink()
+    assert index(lyrics, build, "--force") == 0
+    assert not (build / "profiles" / "artist-b.json").exists()
