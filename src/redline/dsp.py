@@ -12,6 +12,7 @@ Sos = npt.NDArray[np.float64]
 
 BLOCK_SECONDS = 0.001
 LEVEL_FLOOR = 1e-6
+EXPANDER_RANGE_DB = 40.0
 OVERSAMPLING_WINDOW = ("kaiser", 10.0)
 
 
@@ -88,22 +89,28 @@ def compressor_gain_db(
 ) -> npt.NDArray[np.float64]:
     """Per-sample gain of a compressor above threshold and a 1:2 expander below the gate.
 
-    One detector for all channels (the loudest one per 1 ms block), so the stereo image
-    does not move.
+    The expander turns a gap down by EXPANDER_RANGE_DB at most. One detector for all
+    channels (the loudest one per 1 ms block), so the stereo image does not move.
     """
     block = max(1, round(rate * BLOCK_SECONDS))
     level = block_levels_db(samples, rate)
     count = len(level)
-    target = np.where(level > threshold_db, (threshold_db - level) * (1 - 1 / ratio), 0.0)
-    target += np.where(level < gate_db, level - gate_db, 0.0)
+    squash = np.where(level > threshold_db, (threshold_db - level) * (1 - 1 / ratio), 0.0)
+    expand = np.maximum(np.where(level < gate_db, level - gate_db, 0.0), -EXPANDER_RANGE_DB)
     attack = math.exp(-block / rate / (attack_ms / 1000))
     release = math.exp(-block / rate / (release_ms / 1000))
     smoothed = np.empty(count)
-    gain = 0.0
-    for i, aim in enumerate(target.tolist()):
-        coeff = attack if aim < gain else release
-        gain = coeff * gain + (1 - coeff) * aim
-        smoothed[i] = gain
+    squash_gain = expand_gain = 0.0
+    # the compressor clamps down at attack speed; the expander opens at attack speed, so
+    # the first syllable after a pause is not swallowed
+    for i, (aim_squash, aim_expand) in enumerate(
+        zip(squash.tolist(), expand.tolist(), strict=True)
+    ):
+        coeff = attack if aim_squash < squash_gain else release
+        squash_gain = coeff * squash_gain + (1 - coeff) * aim_squash
+        coeff = attack if aim_expand > expand_gain else release
+        expand_gain = coeff * expand_gain + (1 - coeff) * aim_expand
+        smoothed[i] = squash_gain + expand_gain
     centers = np.arange(count) * block + (block - 1) / 2
     return np.interp(np.arange(len(samples)), centers, smoothed)
 

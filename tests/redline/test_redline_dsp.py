@@ -4,6 +4,7 @@ from redline_signals import make_rng, tone
 from scipy.signal import sosfreqz
 
 from redline.dsp import (
+    EXPANDER_RANGE_DB,
     compress,
     compressor_gain_db,
     drive,
@@ -72,6 +73,22 @@ def test_expander_halves_the_level_below_the_gate():
     x = tone(1000, 2, amp=level(-50))
     # 1:2 below the gate: 10 dB under it comes out 20 dB under it
     assert steady_gain(x, gate_db=-40.0, **SETTINGS) == pytest.approx(-10.0, abs=0.5)
+
+
+def test_expander_opens_at_attack_speed_when_a_phrase_starts():
+    gap = tone(1000, 1, amp=level(-70))
+    phrase = tone(1000, 1, amp=level(-25))
+    x = np.concatenate([gap, phrase])
+    gain = compressor_gain_db(x, RATE, gate_db=-40.0, **SETTINGS)
+    # one-pole: five attack times leave e^-5 of the 30 dB step, about 0.2 dB
+    after = len(gap) + int(5 * SETTINGS["attack_ms"] / 1000 * RATE) + int(RATE / 1000)
+    assert gain[after] > -1.0
+    assert gain[len(gap) - 3 * int(RATE / 1000)] == pytest.approx(-30.0, abs=1.0)
+
+
+def test_expander_turns_a_gap_down_by_its_range_at_most():
+    x = tone(1000, 2, amp=level(-100))
+    assert steady_gain(x, gate_db=-40.0, **SETTINGS) == pytest.approx(-EXPANDER_RANGE_DB, abs=0.5)
 
 
 def test_compressor_is_stereo_linked():
