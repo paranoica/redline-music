@@ -401,6 +401,8 @@ def build_profiles(
     names = {w for slug in artists for w in words(slug, keep_doubles=True)}
     names |= {w for a in artists.values() for n in a.names for w in words(n, keep_doubles=True)}
     names |= {w for n in more_names for w in words(n, keep_doubles=True)}
+    performers = {s.who for tracks in base.values() for t in tracks for s in t.sections if s.who}
+    names |= {w for n in performers for w in words(n, keep_doubles=True)}
 
     def count(tracks: Sequence[Track], performers: Sequence[str]) -> tuple[Counts, Counts]:
         own, guest = count_tracks(tracks, performers, mark)
@@ -453,7 +455,19 @@ def build_profiles(
         unknown = [name for name in mix if name not in counts_of]
         if unknown:
             raise LyricsError(f"the mix names no such profile: {', '.join(unknown)}")
-        parts = [counts_of[name] for name in mix]
+        # an artist's own profile keeps all its words; a merged one only the words of two
+        # artists or more, so one other artist's names and slang stay out of the target
+        parts = [
+            (
+                counts_of[name]
+                if name.startswith("artist-") or name == "mine"
+                else _keep_words(
+                    counts_of[name],
+                    lambda w, c=counts_of[name]: c.get("presence", {}).get(w, 0) >= 2,
+                )
+            )
+            for name in mix
+        ]
         target = merge(parts, list(mix.values()))
         profiles["target"] = profile_of(target, "target", "target", 1, mix)
     return profiles

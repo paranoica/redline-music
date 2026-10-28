@@ -150,3 +150,12 @@ def test_a_draft_too_long_for_suno_goes_back():
     assert len(fits) <= 3000 < len(too_long)
     assert "length" not in problems(fits, plan)
     assert "length" in problems(too_long, plan)
+
+
+def test_verbs_with_stress_marks_are_still_verbs():
+    assert is_verb("игр+ает") and is_verb("сгор+ел")
+
+
+def test_words_after_the_last_section_are_refused():
+    signed = GOOD_VERSE + "надеюсь тебе понравится\n"
+    assert "lines" in problems(signed, VERSE)

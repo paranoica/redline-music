@@ -125,7 +125,7 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         lines, scheme = plans[kind]
         syllables = _band_range(profile["line_syllables"].get(kind), band)
         sections.append(SectionPlan(kind, lines, syllables, scheme))
-    while sum(s.lines for s in sections) > MAX_LINES:
+    while sum(s.lines for s in sections) > MAX_LINES and max(s.lines for s in sections) > 1:
         longest = max(range(len(sections)), key=lambda i: (sections[i].lines, -i))
         s = sections[longest]
         sections = [

@@ -4,9 +4,9 @@ import argparse
 import functools
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from redline import __version__
 from redline.audio import AudioError
@@ -334,12 +334,26 @@ def _lyrics_index(args: argparse.Namespace) -> int:
     return 0
 
 
-def _lyrics_write(args: argparse.Namespace) -> int:
+def _lazy_stresser(stress: Any) -> Callable[[str], str]:
+    """Load the stress model on first use only: printing a saved text needs none."""
     import functools
+
+    @functools.cache
+    def model() -> Callable[[str], str]:
+        return stress.load_stresser()
+
+    @functools.cache
+    def mark(text: str) -> str:
+        return model()(text)
+
+    return mark
+
+
+def _lyrics_write(args: argparse.Namespace) -> int:
     import re
 
     from redline.lyrics import stress
-    from redline.lyrics.fingerprint import FingerprintIndex
+    from redline.lyrics.fingerprint import DEFAULT_MIN_WORDS, RUN, FingerprintIndex
     from redline.lyrics.generate import Failed, Pending, Session
     from redline.lyrics.parse import LyricsError, read_track
     from redline.lyrics.profile import load_profile
@@ -348,6 +362,9 @@ def _lyrics_write(args: argparse.Namespace) -> int:
     try:
         if args.seed < 0:
             raise LyricsError("a seed is a whole number from 0")
+        if not RUN <= args.min_words <= DEFAULT_MIN_WORDS:
+            # a looser check would let a saved text hold a longer copy than the owner allows
+            raise LyricsError(f"--min-words takes {RUN} to {DEFAULT_MIN_WORDS}")
         name = args.profile or (
             "target" if (args.build / "profiles" / "target.json").exists() else "working"
         )
@@ -359,7 +376,9 @@ def _lyrics_write(args: argparse.Namespace) -> int:
         profile = load_profile(args.build / "profiles" / f"{name}.json")
         index = FingerprintIndex.load(args.build)
         mine = [read_track(p, mine=True) for p in sorted((args.lyrics / "mine").glob("*.txt"))]
-        mark = functools.cache(stress.load_stresser()) if profile["meta"]["stress"] else str
+        if "stress" not in profile["meta"]:
+            raise LyricsError(f"profile {name} is from an older index; run lyrics index again")
+        mark = _lazy_stresser(stress) if profile["meta"]["stress"] else str
         session = Session(
             folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words
         )

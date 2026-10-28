@@ -119,3 +119,12 @@ def test_a_recipe_stays_short_enough_for_suno(profile):
     profile["lines_per_section"]["verse"] = {"hist": {"16": 1.0}, "p10": 16, "p50": 16, "p90": 16}
     for seed in range(20):
         assert sum(s.lines for s in make_recipe(profile, seed).sections) <= MAX_LINES
+
+
+def test_trimming_never_empties_a_section(profile):
+    from redline.lyrics.recipe import MAX_LINES
+
+    profile["structure"]["patterns"] = [["-".join(["verse"] * 60), 1.0]]
+    recipe = make_recipe(profile, 0)
+    assert all(s.lines >= 1 for s in recipe.sections)
+    assert sum(s.lines for s in recipe.sections) <= max(MAX_LINES, len(recipe.sections))

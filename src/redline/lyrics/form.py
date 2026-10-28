@@ -55,7 +55,7 @@ class Problem:
 
 def is_verb(word: str) -> bool:
     """Whether a Russian word looks like a verb by its ending (a heuristic)."""
-    found = words(word, keep_doubles=True)
+    found = words(word.replace("+", ""), keep_doubles=True)
     if not found:
         return False
     w = found[-1]
@@ -84,7 +84,9 @@ def _sections(track: Any, recipe: Recipe, mark: StressMark) -> tuple[list[Proble
     pairs: list[tuple[str, str]] = []
     for i, (section, plan) in enumerate(zip(track.sections, recipe.sections, strict=True), 1):
         sung = [line for line in section.lines if line.plain]
-        if abs(len(sung) - plan.lines) > LINE_SLACK:
+        # a line past the end of the last section is most likely a note to the reader
+        over = 0 if i == len(recipe.sections) else LINE_SLACK
+        if len(sung) - plan.lines > over or plan.lines - len(sung) > LINE_SLACK:
             problems.append(
                 Problem(
                     "lines", f"section {i} ({plan.kind})", f"{len(sung)} lines, need {plan.lines}"

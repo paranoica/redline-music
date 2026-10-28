@@ -119,5 +119,8 @@ class HandoffWriter:
                 return Refusal(text.lstrip()[len(REFUSAL) :].strip())
             return Draft(text)
         if not asked.exists():
-            asked.write_text(render(request, answer), encoding="utf-8")
+            tmp = asked.with_name(asked.name + ".tmp")
+            tmp.write_text(render(request, answer), encoding="utf-8")
+            tmp.chmod(0o600)
+            tmp.replace(asked)
         return Waiting(asked, answer)

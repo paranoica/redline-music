@@ -251,3 +251,56 @@ def test_excerpts_skip_guest_sections_and_borrowed_lines():
     index = FingerprintIndex.build([*others, ("mine", own), ("mine", guest)], new_key())
     picked = excerpts([own, guest], index, seed=1)
     assert picked == ("первая своя строка\nвторая своя строка\nтретья своя строка\nчетвертая своя",)
+
+
+def test_a_saved_seed_asked_from_another_profile_is_refused(base):
+    run(base, 21)
+    draft(base, 21, good_draft(recipe_of(base, 21)))
+    assert run(base, 21) == 0
+    assert run(base, 21, "--profile", "working") == 2
+
+
+def test_the_copy_threshold_cannot_be_loosened(base):
+    assert run(base, 22, "--min-words", "9") == 2
+    assert run(base, 22, "--min-words", "5") == 3
+    state = json.loads((folder(base, 22) / "state.json").read_text(encoding="utf-8"))
+    assert state["min_words"] == 5
+
+
+def test_a_profile_from_before_stress_was_recorded_is_refused(base):
+    path = base[1] / "profiles" / "target.json"
+    profile = json.loads(path.read_text(encoding="utf-8"))
+    del profile["meta"]["stress"]
+    path.write_text(json.dumps(profile), encoding="utf-8")
+    assert run(base, 23) == 2
+
+
+def test_the_drawn_topic_can_be_named_again_and_force_takes_a_new_one(base):
+    run(base, 24)
+    drawn = recipe_of(base, 24).topic
+    assert run(base, 24, "--topic", drawn) == 3
+    assert run(base, 24, "--topic", "зима", "--force") == 3
+    assert recipe_of(base, 24).topic == "зима"
+
+
+def test_a_round_that_is_not_a_number_is_refused(base):
+    run(base, 25)
+    path = folder(base, 25) / "state.json"
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state["round"] = "../x"
+    path.write_text(json.dumps(state), encoding="utf-8")
+    assert run(base, 25) == 2
+
+
+def test_seed_files_are_readable_by_the_owner_only(base):
+    run(base, 26)
+    for path in folder(base, 26).iterdir():
+        assert path.stat().st_mode & 0o077 == 0, path.name
+
+
+def test_each_round_records_the_prompt_it_was_written_under(base):
+    run(base, 27)
+    draft(base, 27, "[Куплет]\nне то\n")
+    run(base, 27)
+    checks = json.loads((folder(base, 27) / "checks-1.json").read_text(encoding="utf-8"))
+    assert len(checks["prompt"]) == 12

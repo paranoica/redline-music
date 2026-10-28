@@ -267,3 +267,26 @@ def test_artist_names_stay_out_of_word_lists():
 def test_word_lists_keep_double_letters():
     own, _ = count_tracks([track("[Куплет]\nинвестиции и bottles\n")])
     assert "инвестиции" in own["words"] and "bottles" in own["latin"]
+
+
+def test_the_target_keeps_the_scene_floor_for_other_artists():
+    artists = {"fav": Artist(("Fav",), "A"), "b": Artist(("B",), "A"), "c": Artist(("C",), "A")}
+    base = {
+        "fav": [track(f"[Куплет]\nлюбимое общий {i}\n") for i in range(5)],
+        "b": [track(f"[Куплет]\nодиночка общий {i}\n") for i in range(5)],
+        "c": [track(f"[Куплет]\nобщий звук {i}\n") for i in range(5)],
+    }
+    mix = {"artist-fav": 0.5, "scene": 0.5}
+    target = build_profiles(base, artists, mine=[], min_tracks=5, mix=mix)["target"]
+    found = {w["word"] for w in target["vocabulary"]["top"]}
+    assert "любимое" in found and "общий" in found and "одиночка" not in found
+
+
+def test_guest_names_from_headers_stay_out_of_word_lists():
+    artists = {"a": Artist(("A",), "A")}
+    # the host shouts the guest's name in their own hook
+    text = "[Куплет: Гостевой]\nчужие слова {i}\n[Припев]\nгостевой на бите {i}\n"
+    base = {"a": [track(text.format(i=i)) for i in range(5)]}
+    profile = build_profiles(base, artists, mine=[], min_tracks=5)["artist-a"]
+    found = {w["word"] for w in profile["vocabulary"]["top"]}
+    assert "бите" in found and "гостевой" not in found
