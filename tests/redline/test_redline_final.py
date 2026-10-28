@@ -7,7 +7,15 @@ from redline_signals import make_rng, tone, write
 from scipy.ndimage import maximum_filter1d
 
 from redline.cli import main
-from redline.final_run import TIMBRES, master_round, master_targets, run_track, timbre_round
+from redline.final_run import (
+    BASS_DRIVES_DB,
+    TIMBRES,
+    bass_round,
+    master_round,
+    master_targets,
+    run_track,
+    timbre_round,
+)
 from redline.loudness import integrated_lufs
 from redline.master import CEILING_DB
 from redline.run import FileResult
@@ -243,7 +251,7 @@ def test_reference_audio_never_reaches_the_result(hot_inputs, tmp_path):
 def test_run_clips_to_reach_hot_references(hot_inputs, tmp_path):
     chain = json.loads((make_track(hot_inputs, tmp_path) / "chain.json").read_text())
     assert chain["master"]["clipped_share"] > 0
-    assert chain["timbre"] == "octave down"
+    assert chain["timbre"] == "octave down + doubles"
 
 
 def test_cli_run_without_references_exits_2(inputs, tmp_path):
@@ -307,7 +315,7 @@ def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_p
 
 def test_timbre_round_takes_chosen_combinations(inputs, tmp_path):
     track, refs = inputs
-    chosen = ("octave down", "octave down + doubles")
+    chosen = ("octave down + doubles", "pitched up", "octave up loud")
     result = timbre_round(
         track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), 6, chosen
     )
@@ -327,3 +335,21 @@ def test_an_unknown_timbre_is_refused(inputs, tmp_path):
             6,
             ("nightcore",),
         )
+
+
+def test_bass_round_holds_the_loudness_and_steps_the_808_drive(inputs, tmp_path):
+    track, refs = inputs
+    result = bass_round(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), seed=7
+    )
+    key = json.loads((result.run_dir / "key.json").read_text())
+    assert key["axis"] == "808"
+    names = [f"808 +{d:.0f} dB" for d in BASS_DRIVES_DB]
+    assert sorted(key["key"].values()) == sorted(["original", *names])
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    masters = {m["name"]: m for m in chain["masters"]}
+    assert sorted(masters) == sorted(names)
+    finals = [m["final_lufs"] for m in masters.values()]
+    assert max(finals) - min(finals) <= 0.5
+    for name in names:
+        assert "low_crest_db" in masters[name]

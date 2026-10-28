@@ -16,10 +16,11 @@ from redline.chain import ALL_LEVELS, ChainResult, check_vocal, process_vocal
 from redline.final_report import write_final_report
 from redline.listen import common_lufs, write_listen_set
 from redline.loudness import gated_crest_db, integrated_lufs
-from redline.master import master_clip
+from redline.master import master_clip, saturate_low
 from redline.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
-from redline.timbre import bitcrush, double, octave_layer
+from redline.spectrum import low_end
+from redline.timbre import bitcrush, double, octave_layer, pitch_shift
 from redline.vocal_run import ORIGINAL, VocalRun, check_folders, reference_target
 
 Samples = npt.NDArray[np.floating]
@@ -29,9 +30,11 @@ VOCAL_DB = -6.0
 QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
 BASE = "base"
-EFFECTS = ("doubles", "octave down", "octave up", "bitcrush")
+EFFECTS = ("doubles", "octave down", "octave up", "octave up loud", "pitched up", "bitcrush")
 TIMBRES = ("doubles", "octave down", "octave up", "bitcrush")
-TIMBRE = "octave down"
+TIMBRE = "octave down + doubles"
+BASS_FREQ_HZ = 120.0
+BASS_DRIVES_DB = (0.0, 6.0, 12.0, 18.0, 24.0)
 OCTAVE_LEVEL_DB = -6.0
 CRUSH_BITS = 8
 CRUSH_HOLD = 3
@@ -91,23 +94,8 @@ def master_round(
         masters.append(
             {"name": name, **asdict(result), "final_lufs": integrated_lufs(mastered, rate)}
         )
-    run_dir = new_run_dir(work_dir / "runs")
-    out_run = new_run_dir(out_dir)
-    keep_out_of_git(out_run)
-    listen_dir = out_run / "listen"
-    seed = secrets.randbits(32) if seed is None else seed
-    key = write_listen_set(variants, rate, listen_dir, seed)
-    (run_dir / "key.json").write_text(
-        json.dumps(
-            {"axis": "master", "seed": seed, "key": key, "listen_dir": str(listen_dir)}, indent=1
-        ),
-        encoding="utf-8",
-    )
-    (run_dir / "chain.json").write_text(
-        json.dumps({"vocal": asdict(chain), "vocal_db": VOCAL_DB, "masters": masters}, indent=1),
-        encoding="utf-8",
-    )
-    return VocalRun(run_dir, listen_dir)
+    record = {"vocal": asdict(chain), "vocal_db": VOCAL_DB, "masters": masters}
+    return _write_round(work_dir, out_dir, "master", variants, rate, seed, record)
 
 
 def _effects(name: str) -> list[str]:
@@ -124,6 +112,10 @@ def _with_timbre(name: str, vocal: Samples, rate: int) -> Samples:
             out = octave_layer(out, rate, -1, OCTAVE_LEVEL_DB)
         elif effect == "octave up":
             out = octave_layer(out, rate, 1, OCTAVE_LEVEL_DB)
+        elif effect == "octave up loud":
+            out = octave_layer(out, rate, 1, 0.0)
+        elif effect == "pitched up":
+            out = pitch_shift(out, rate, 12.0)
         elif effect == "bitcrush":
             # the crush works on the vocal's own scale, not on its level under the beat
             peak = float(np.abs(out).max())
@@ -156,6 +148,18 @@ def timbre_round(
     for name in timbres:
         log.info("timbre: %s", name)
         variants[name] = master_clip(_with_timbre(name, vocal, rate) + beat, rate, target)[0]
+    return _write_round(work_dir, out_dir, "timbre", variants, rate, seed, {"timbres": timbres})
+
+
+def _write_round(
+    work_dir: Path,
+    out_dir: Path,
+    axis: str,
+    variants: dict[str, Samples],
+    rate: int,
+    seed: int | None,
+    record: dict,
+) -> VocalRun:
     run_dir = new_run_dir(work_dir / "runs")
     out_run = new_run_dir(out_dir)
     keep_out_of_git(out_run)
@@ -163,10 +167,51 @@ def timbre_round(
     seed = secrets.randbits(32) if seed is None else seed
     key = write_listen_set(variants, rate, listen_dir, seed)
     (run_dir / "key.json").write_text(
-        json.dumps({"axis": "timbre", "seed": seed, "key": key, "listen_dir": str(listen_dir)}),
+        json.dumps({"axis": axis, "seed": seed, "key": key, "listen_dir": str(listen_dir)}),
         encoding="utf-8",
     )
+    (run_dir / "chain.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
     return VocalRun(run_dir, listen_dir)
+
+
+def bass_round(
+    track: Path,
+    refs: list[Path],
+    work_dir: Path,
+    out_dir: Path,
+    separator: Separator,
+    seed: int | None = None,
+) -> VocalRun:
+    """Blind round on the 808: the chosen vocal and master, the beat's low band driven harder.
+
+    The master's target is held, so each file reads as loud as the others before the
+    listening set levels them; the clip depth each one needed is recorded.
+    """
+    check_folders(work_dir, out_dir)
+    inputs, original, vocal, _ = _chosen_mix(track, refs, work_dir, separator)
+    beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
+    vocal = _with_timbre(TIMBRE, vocal, rate)
+    target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
+    variants = {ORIGINAL: original}
+    masters = []
+    for drive_db in BASS_DRIVES_DB:
+        name = f"808 +{drive_db:.0f} dB"
+        log.info("808: %s", name)
+        mixed = vocal + saturate_low(beat, rate, BASS_FREQ_HZ, drive_db)
+        final, result = master_clip(mixed, rate, target)
+        variants[name] = final
+        masters.append(
+            {
+                "name": name,
+                "drive_db": drive_db,
+                **asdict(result),
+                "final_lufs": integrated_lufs(final, rate),
+                "low_crest_db": low_end(final, rate).crest_db,
+            }
+        )
+    refs_low = [r.values.get("beat.low_crest_db") for r in inputs.refs]
+    record = {"masters": masters, "refs_low_crest_db": refs_low}
+    return _write_round(work_dir, out_dir, "808", variants, rate, seed, record)
 
 
 def run_track(

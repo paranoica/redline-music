@@ -1,4 +1,4 @@
-"""Stage 3 effects on the whole mix: a crossover and a clipping master."""
+"""Stage 3 effects: a crossover, 808 saturation and a clipping master."""
 
 import math
 from dataclasses import dataclass
@@ -7,14 +7,17 @@ import numpy as np
 import numpy.typing as npt
 from scipy.signal import butter, sosfilt, sosfiltfilt
 
-from redline.dsp import hard_clip, oversampled
+from redline.dsp import drive, hard_clip, oversampled
 from redline.loudness import integrated_lufs
+from redline.spectrum import low_band
 
 Samples = npt.NDArray[np.floating]
 
 CEILING_DB = -0.1
 MAX_GAIN_DB = 30.0
 OVERSAMPLING = 8
+# tanh harmonics of a band under 120 Hz fall off long before 2x Nyquist
+LOW_OVERSAMPLING = 2
 SEARCH_STEPS = 18
 CORRECTIONS = 4
 MIN_SLOPE = 0.05
@@ -110,3 +113,20 @@ def master_clip(samples: Samples, rate: int, target_lufs: float) -> tuple[Sample
     reached = abs(integrated_lufs(out, rate) - target_lufs) <= REACH_TOLERANCE_LU
     clipped = float(np.mean(np.abs(samples * 10 ** (high / 20)) > _ceiling()))
     return out, MasterResult(target_lufs, high + trim, reached, clipped, trim)
+
+
+def saturate_low(samples: Samples, rate: int, freq: float, drive_db: float) -> Samples:
+    """Drive the band under freq through tanh and rejoin it with the rest.
+
+    The driven band is brought back to its level under 100 Hz, so the drive changes the
+    808's shape, not how loud the sub is. Its harmonics stay in, which is the point.
+    """
+    low, high = crossover(samples, rate, freq)
+    if drive_db <= 0:
+        return (low + high).astype(np.float32)
+    before = float(np.mean(low_band(low, rate) ** 2))
+    driven = oversampled(lambda v: drive(v, drive_db), low, LOW_OVERSAMPLING)
+    after = float(np.mean(low_band(driven, rate) ** 2))
+    if before > 0 and after > 0:
+        driven = driven * np.float32(math.sqrt(before / after))
+    return (driven + high).astype(np.float32)

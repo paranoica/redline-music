@@ -61,9 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     master.add_argument("--seed", type=int, help="seed of the letter shuffle")
     master.add_argument(
         "--axis",
-        choices=("master", "timbre"),
+        choices=("master", "timbre", "808"),
         default="master",
-        help="what the variants change: the master's loudness, or the vocal's timbre",
+        help="what the variants change: the master's loudness, the vocal's timbre, the 808",
     )
     master.add_argument(
         "--timbres",
@@ -132,7 +132,7 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
 
 
 def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
-    from redline.final_run import master_round, timbre_round
+    from redline.final_run import bass_round, master_round, timbre_round
     from redline.separate import RoformerSeparator, SeparationError
 
     refs = reference_files(args.ref)
@@ -153,6 +153,8 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
             result = timbre_round(*common, chosen)
         elif args.axis == "timbre":
             result = timbre_round(*common)
+        elif args.axis == "808":
+            result = bass_round(*common)
         else:
             result = master_round(*common)
     except (AudioError, SeparationError, ValueError, OSError) as error:

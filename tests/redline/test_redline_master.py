@@ -1,9 +1,12 @@
+import itertools
+
 import numpy as np
 import pytest
 from redline_signals import make_rng, tone
 
 from redline.loudness import integrated_lufs
-from redline.master import CEILING_DB, MAX_GAIN_DB, crossover, master_clip
+from redline.master import CEILING_DB, MAX_GAIN_DB, crossover, master_clip, saturate_low
+from redline.spectrum import low_end
 
 RATE = 44100
 
@@ -116,3 +119,35 @@ def test_master_clip_keeps_its_turn_down_small():
     # repeated clip and band limit at the high rate leave little for the decimation to ring
     _, result = master_clip(beatlike(), RATE, -6.0)
     assert result.trim_db > -1.5
+
+
+def low_rms_db(x):
+    from redline.spectrum import low_band
+
+    return 10 * np.log10(np.mean(low_band(x, RATE) ** 2))
+
+
+def test_saturate_low_without_drive_only_passes_the_crossover():
+    x = beatlike()
+    low, high = crossover(x, RATE, 120.0)
+    np.testing.assert_allclose(saturate_low(x, RATE, 120.0, 0.0), low + high, atol=1e-6)
+
+
+def test_saturate_low_squashes_the_808_more_with_more_drive():
+    x = beatlike()
+    crests = [low_end(saturate_low(x, RATE, 120.0, d), RATE).crest_db for d in (0, 6, 12, 18)]
+    assert all(a > b for a, b in itertools.pairwise(crests)), crests
+
+
+def test_saturate_low_keeps_the_sub_level():
+    x = beatlike()
+    for drive_db in (6.0, 18.0):
+        assert low_rms_db(saturate_low(x, RATE, 120.0, drive_db)) == pytest.approx(
+            low_rms_db(x), abs=0.5
+        )
+
+
+def test_saturate_low_leaves_the_highs_alone():
+    x = tone(55, 3, amp=0.4) + tone(2000, 3, amp=0.1)
+    y = saturate_low(x, RATE, 120.0, 18.0)
+    assert band_level_db(y, 2000) == pytest.approx(band_level_db(x, 2000), abs=0.2)
