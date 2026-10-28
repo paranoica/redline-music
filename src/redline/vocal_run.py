@@ -74,6 +74,11 @@ def vocal_run(
     """
     if axis not in AXES:
         raise ValueError(f"unknown axis {axis!r}, expected one of {', '.join(AXES)}")
+    work, out = work_dir.resolve(), out_dir.resolve()
+    if work.is_relative_to(out) or out.is_relative_to(work):
+        raise ValueError(
+            f"keep --out and --work separate: the key in {work_dir} would sit with the files"
+        )
     inputs = measure_inputs(track, refs, work_dir, separator)
     stems, upper = inputs.track_stems, inputs.upper
     rate = stems.rate
@@ -93,8 +98,9 @@ def vocal_run(
         else:
             variants.update(balance_variants(vocal, stems.beat))
     run_dir = new_run_dir(work_dir / "runs")
-    listen_dir = out_dir / run_dir.name / "listen"
-    keep_out_of_git(out_dir / run_dir.name)
+    out_run = new_run_dir(out_dir)
+    keep_out_of_git(out_run)
+    listen_dir = out_run / "listen"
     seed = secrets.randbits(32) if seed is None else seed
     key = write_listen_set(variants, rate, listen_dir, seed)
     _write_records(run_dir, axis, seed, key, listen_dir, rate, upper, target, chains)

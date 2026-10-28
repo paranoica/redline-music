@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
@@ -157,3 +158,30 @@ def test_balance_axis_writes_original_and_four_balances(inputs, tmp_path):
     chain = json.loads((result.run_dir / "chain.json").read_text())
     assert [c["level"] for c in chain["chains"]] == ["extra"]
     assert chain["balance_db"] == [0, 3, 6, 9]
+
+
+@pytest.mark.parametrize("out", ["w", "w/runs", "w/runs/x"])
+def test_output_inside_the_work_folder_is_refused(inputs, tmp_path, out):
+    # the key lives in the work folder: listening files next to it would unblind the test
+    track, refs = inputs
+    with pytest.raises(ValueError, match="separate"):
+        vocal_run(track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / out, HalfSeparator())
+
+
+def test_work_inside_the_output_folder_is_refused(inputs, tmp_path):
+    track, refs = inputs
+    with pytest.raises(ValueError, match="separate"):
+        vocal_run(
+            track, sorted(refs.iterdir()), tmp_path / "o" / "w", tmp_path / "o", HalfSeparator()
+        )
+
+
+def test_a_run_never_writes_into_an_existing_output_folder(inputs, tmp_path):
+    out = tmp_path / "out"
+    now = datetime.now()
+    taken = [out / (now + timedelta(seconds=s)).strftime("%Y%m%d-%H%M%S") for s in range(120)]
+    for folder in taken:
+        (folder / "listen").mkdir(parents=True)
+    result = run(inputs, tmp_path, seed=8)
+    assert result.listen_dir.parent not in taken
+    assert all(not any((folder / "listen").iterdir()) for folder in taken)
