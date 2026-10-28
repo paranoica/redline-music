@@ -12,18 +12,16 @@ import numpy.typing as npt
 from redline.chain import (
     DIRT_LEVELS,
     EXTRA,
-    FIT_FROM_HZ,
     ChainResult,
     Target,
     check_vocal,
-    curve_distance,
     process_vocal,
 )
 from redline.listen import write_listen_set
 from redline.loudness import integrated_lufs
 from redline.run import FileResult, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
-from redline.spectrum import tonal_curve
+from redline.vocal_report import write_vocal_report
 
 Samples = npt.NDArray[np.floating]
 
@@ -43,12 +41,20 @@ class VocalRun:
 
 def reference_target(refs: list[FileResult]) -> Target:
     """Per-band median of the references' vocal tonal curves."""
+    for ref in refs:
+        if not ref.info["vocal.tonal_curve"]["db"]:
+            raise ValueError(f"{ref.name}: no vocal in the reference")
     curves = [r.info["vocal.tonal_curve"] for r in refs]
     centers = tuple(curves[0]["centers_hz"])
     if any(tuple(c["centers_hz"]) != centers for c in curves):
         raise ValueError("the references' vocal curves use different bands")
     median = np.median(np.array([c["db"] for c in curves], dtype=float), axis=0)
     return Target(centers, tuple(float(v) for v in median))
+
+
+def dirt_variants(vocals: dict[str, Samples], beat: Samples) -> dict[str, Samples]:
+    """Each processed vocal over the untouched beat."""
+    return {name: vocal + beat for name, vocal in vocals.items()}
 
 
 def balance_variants(vocal: Samples, beat: Samples) -> dict[str, Samples]:
@@ -87,16 +93,18 @@ def vocal_run(
     target = reference_target(inputs.refs)
     variants = {ORIGINAL: original}
     chains: list[ChainResult] = []
-    distances = {ORIGINAL: curve_distance(tonal_curve(stems.vocal, rate, upper), target)}
+    vocals = {ORIGINAL: stems.vocal}
     for level in DIRT_LEVELS if axis == "dirt" else (EXTRA,):
         log.info("processing the vocal: %s", level.name)
         vocal, chain = process_vocal(stems.vocal, rate, level, target, upper)
         chains.append(chain)
-        distances[level.name] = curve_distance(tonal_curve(vocal, rate, upper), target)
-        if axis == "dirt":
-            variants[level.name] = vocal + stems.beat
-        else:
+        vocals[level.name] = vocal
+        if axis == "balance":
             variants.update(balance_variants(vocal, stems.beat))
+    if axis == "dirt":
+        variants.update(
+            dirt_variants({k: v for k, v in vocals.items() if k != ORIGINAL}, stems.beat)
+        )
     run_dir = new_run_dir(work_dir / "runs")
     out_run = new_run_dir(out_dir)
     keep_out_of_git(out_run)
@@ -104,7 +112,15 @@ def vocal_run(
     seed = secrets.randbits(32) if seed is None else seed
     key = write_listen_set(variants, rate, listen_dir, seed)
     _write_records(run_dir, axis, seed, key, listen_dir, rate, upper, target, chains)
-    _write_report(run_dir / "report.md", distances)
+    write_vocal_report(
+        run_dir / "report.md",
+        vocals,
+        rate,
+        upper,
+        target,
+        [r.values for r in inputs.refs],
+        inputs.track.native_rate,
+    )
     return VocalRun(run_dir, listen_dir)
 
 
@@ -140,19 +156,3 @@ def _write_records(
         ),
         encoding="utf-8",
     )
-
-
-def _write_report(path: Path, distances: dict[str, float]) -> None:
-    lines = [
-        "# Вокал: варианты для прослушивания",
-        "",
-        "Расстояние тональной кривой вокала до медианы вокала референсов, дБ "
-        f"(среднее по полосам от {FIT_FROM_HZ:.0f} Гц, меньше = ближе к референсам; "
-        "это не «лучше»).",
-        "",
-        "| вариант | расстояние, дБ |",
-        "|---|---|",
-        *(f"| {name} | {value:.2f} |" for name, value in distances.items()),
-        "",
-    ]
-    path.write_text("\n".join(lines), encoding="utf-8")

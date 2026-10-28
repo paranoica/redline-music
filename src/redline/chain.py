@@ -1,5 +1,6 @@
 """The vocal chain: compression, drive and clip at a dirt level, then an EQ fitted to a curve."""
 
+import logging
 import math
 from dataclasses import dataclass
 
@@ -43,6 +44,7 @@ EQ_BANDS = (
 )
 EQ_Q = 1.0
 VOCAL_MIN_LU_BELOW_MIX = 25.0
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -236,6 +238,7 @@ def process_vocal(
     gate = gate_level_db(staged, rate) if level.compressor is not None else None
     dirty, clip = render_dirt(staged, rate, level)
     out, gains, errors = _fit_eq(dirty, rate, target, upper_hz)
+    log.info("%s: EQ fit error per pass %s dB", level.name, ", ".join(f"{e:.2f}" for e in errors))
     out = out * np.float32(10 ** ((loudness - integrated_lufs(out, rate)) / 20))
     result = ChainResult(
         level.name,

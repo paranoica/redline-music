@@ -7,7 +7,14 @@ import soundfile as sf
 from redline_signals import make_rng, tone, write
 
 from redline.cli import main
-from redline.vocal_run import BALANCE_DB, balance_variants, vocal_run
+from redline.run import FileResult
+from redline.vocal_run import (
+    BALANCE_DB,
+    balance_variants,
+    dirt_variants,
+    reference_target,
+    vocal_run,
+)
 
 MARKER_HZ = 7300
 
@@ -185,3 +192,30 @@ def test_a_run_never_writes_into_an_existing_output_folder(inputs, tmp_path):
     result = run(inputs, tmp_path, seed=8)
     assert result.listen_dir.parent not in taken
     assert all(not any((folder / "listen").iterdir()) for folder in taken)
+
+
+def ref_result(name, curve_db):
+    curve = {"centers_hz": [1000.0 * k for k in range(1, len(curve_db) + 1)], "db": curve_db}
+    return FileResult(name, "wav", 44100, False, info={"vocal.tonal_curve": curve})
+
+
+def test_reference_target_is_the_median_curve():
+    target = reference_target(
+        [ref_result("a", [0.0, -3.0]), ref_result("b", [-2.0, -1.0]), ref_result("c", [-1.0, -9.0])]
+    )
+    assert target.curve_db == (-1.0, -3.0)
+
+
+def test_a_reference_without_vocal_is_named():
+    with pytest.raises(ValueError, match=r"b\.wav: no vocal"):
+        reference_target([ref_result("a.wav", [0.0, -3.0]), ref_result("b.wav", [])])
+
+
+def test_dirt_variants_add_the_beat_untouched():
+    rng = make_rng()
+    beat = rng.standard_normal((1000, 2)).astype(np.float32)
+    vocals = {name: rng.standard_normal((1000, 2)).astype(np.float32) for name in ("eq", "heavy")}
+    variants = dirt_variants(vocals, beat)
+    assert list(variants) == ["eq", "heavy"]
+    for name, mix in variants.items():
+        np.testing.assert_allclose(mix - vocals[name], beat, atol=1e-6)
