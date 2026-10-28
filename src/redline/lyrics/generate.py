@@ -129,6 +129,20 @@ def style_for(notes: str, seed: int) -> str:
     return "\n".join(out)
 
 
+# a re-measured beat may land a tenth of a beat per minute off
+BPM_SLACK = 0.5
+
+
+def _other_ask(state: dict[str, Any], topic: str | None, bpm: float | None) -> str | None:
+    """How a started seed differs from what is asked now; None when it does not."""
+    if topic and topic not in (state["asked_topic"], state["topic"]):
+        return f"about {state['topic']!r}"
+    started = state.get("bpm")
+    if bpm is not None and (started is None or abs(bpm - started) > BPM_SLACK):
+        return f"for a beat at {started:g} BPM" if started else "without a beat"
+    return None
+
+
 class Session:
     """One seed's folder: its frozen recipe, state, requests and drafts."""
 
@@ -168,16 +182,17 @@ class Session:
     def _save_state(self, state: dict[str, Any]) -> None:
         _write(self.folder / "state.json", json.dumps(state, ensure_ascii=False, indent=1))
 
-    def _start(self, seed: int, topic: str | None) -> dict[str, Any]:
+    def _start(self, seed: int, topic: str | None, bpm: float | None) -> dict[str, Any]:
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         for old in self.folder.glob("*"):
             old.unlink()
-        recipe = make_recipe(self.profile, seed, topic)
+        recipe = make_recipe(self.profile, seed, topic, bpm)
         _write(self.folder / "recipe.json", recipe_json(recipe))
         state = {
             "seed": seed,
             "topic": recipe.topic,
             "asked_topic": topic,
+            "bpm": bpm,
             "profile": self.profile_name,
             "profile_digest": self.profile["meta"]["digest"],
             "prompt": prompt_hash(),
@@ -212,27 +227,25 @@ class Session:
         ]
 
     def _settled(
-        self, state: dict[str, Any], seed: int, topic: str | None, force: bool
+        self, state: dict[str, Any], seed: int, topic: str | None, bpm: float | None, force: bool
     ) -> Saved | Failed | None:
         """A saved or given-up seed's answer; None when the seed goes on or starts over."""
         if not (isinstance(state.get("round"), int) and 1 <= state["round"] <= ROUNDS):
             raise LyricsError(f"seed {seed}: its state file is damaged; --force to restart it")
         if state["profile"] != self.profile_name:
             raise LyricsError(f"seed {seed} is written from profile {state['profile']!r}")
-        other_topic = bool(topic) and topic not in (state["asked_topic"], state["topic"])
+        other = _other_ask(state, topic, bpm)
         if state["status"] == "saved":
             if force:
                 raise LyricsError(f"seed {seed} is saved; it is final")
-            if other_topic:
-                raise LyricsError(f"seed {seed} is about {state['topic']!r}")
+            if other:
+                raise LyricsError(f"seed {seed} is written {other}")
             path = self.folder / "text.txt"
             return Saved(path, path.read_text(encoding="utf-8"))
         if force:
             return None
-        if other_topic:
-            raise LyricsError(
-                f"seed {seed} was started about {state['topic']!r}; --force to change it"
-            )
+        if other:
+            raise LyricsError(f"seed {seed} was started {other}; --force to change it")
         if state["status"] in ("failed", "refused"):
             return Failed(state["status"], tuple(state["reasons"]))
         if state["profile_digest"] != self.profile["meta"]["digest"]:
@@ -242,16 +255,28 @@ class Session:
         return None
 
     def run(
-        self, seed: int, topic: str | None = None, force: bool = False
+        self,
+        seed: int,
+        topic: str | None = None,
+        force: bool = False,
+        bpm: float | None = None,
     ) -> Saved | Pending | Failed:
-        """Take the seed one step on: start it, wait, check a draft, ask again or save."""
+        """Take the seed one step on: start it, wait, check a draft, ask again or save.
+
+        Args:
+            seed: The text's seed.
+            topic: The vibe words; None keeps the started seed's.
+            force: Start a pending or failed seed over.
+            bpm: The beat's half-time tempo; None keeps the started seed's.
+        """
         state = self._state()
         if state:
-            settled = self._settled(state, seed, topic, force)
+            settled = self._settled(state, seed, topic, bpm, force)
             if settled:
                 return settled
         if state is None or force:
-            state = self._start(seed, topic or (state or {}).get("asked_topic"))
+            before = state or {}
+            state = self._start(seed, topic or before.get("asked_topic"), bpm or before.get("bpm"))
         recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
         request = WriterRequest(
             prompt_text(),

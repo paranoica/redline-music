@@ -3,6 +3,7 @@
 import argparse
 import functools
 import logging
+import math
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -115,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
     )
     write.add_argument("--force", action="store_true", help="start a pending or failed seed over")
+    beat = write.add_mutually_exclusive_group()
+    beat.add_argument("--beat", type=Path, help="the beat the text is for; its tempo is measured")
+    beat.add_argument("--bpm", type=float, help="the beat's tempo, when it is known")
     suno = lyrics_commands.add_parser(
         "suno", help="a saved text as a Suno card: title, style, settings, tagged lyrics"
     )
@@ -359,6 +363,21 @@ def _lazy_stresser(stress: Any) -> Callable[[str], str]:
     return mark
 
 
+def _asked_bpm(args: argparse.Namespace) -> float | None:
+    from redline.lyrics.beat import beat_bpm, half_time
+    from redline.lyrics.parse import LyricsError
+
+    if args.beat:
+        bpm = beat_bpm(args.beat)
+        print(f"beat tempo: {bpm:g} BPM at half time, {bpm * 2:g} at full")
+        return bpm
+    if args.bpm is None:
+        return None
+    if not (math.isfinite(args.bpm) and args.bpm > 0):
+        raise LyricsError("--bpm takes a positive number")
+    return half_time((args.bpm,))
+
+
 def _lyrics_write(args: argparse.Namespace) -> int:
     import re
 
@@ -394,7 +413,7 @@ def _lyrics_write(args: argparse.Namespace) -> int:
         session = Session(
             folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words, style
         )
-        result = session.run(args.seed, args.topic, args.force)
+        result = session.run(args.seed, args.topic, args.force, _asked_bpm(args))
     except (LyricsError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
@@ -414,6 +433,7 @@ def _lyrics_write(args: argparse.Namespace) -> int:
 def _lyrics_suno(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.parse import LyricsError, parse_text
+    from redline.lyrics.recipe import recipe_from_json
     from redline.lyrics.suno import card
 
     folder = args.lyrics / "generated" / str(args.seed)
@@ -421,11 +441,12 @@ def _lyrics_suno(args: argparse.Namespace) -> int:
         if not (folder / "text.txt").exists():
             raise LyricsError(f"seed {args.seed} has no saved text")
         track = parse_text((folder / "text.txt").read_text(encoding="utf-8"))
+        recipe = recipe_from_json((folder / "recipe.json").read_text(encoding="utf-8"))
         mark = _lazy_stresser(stress) if args.stress else None
         own = args.lyrics / "suno-style.txt"
         lines = own.read_text(encoding="utf-8").splitlines() if own.exists() else []
         style = ", ".join(line.strip() for line in lines if line.strip())
-        text = card(track, mark, style or None)
+        text = card(track, mark, style or None, recipe)
         (folder / "suno.md").write_text(text, encoding="utf-8")
     except (LyricsError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)

@@ -9,6 +9,7 @@ from collections.abc import Callable
 
 from redline.lyrics.normalize import DIGIT_GROUP
 from redline.lyrics.parse import Track
+from redline.lyrics.recipe import Recipe
 from redline.lyrics.rhyme import STRESS, VOWELS, last_word
 from redline.lyrics.syllables import number_words
 
@@ -39,6 +40,14 @@ STYLE = [
     "hard 808",
     "fast hi-hats",
 ]
+# on the owner's own beat (Add Vocals) the style box speaks of the voice only
+VOCALS = ["soundcloud rap", "energetic high-pitched male vocals", "heavy autotune"]
+FLOW_TAGS = {
+    "sixteenths": "fast flow",
+    "triplets": "triplet flow",
+    "eighths": "bouncy flow",
+    "chant": "chant hook",
+}
 EXCLUDE = [
     "slow",
     "deep vocals",
@@ -123,18 +132,31 @@ def title_of(track: Track) -> str:
     return first[:1].upper() + first[1:]
 
 
-def card(track: Track, mark: Mark | None = None, style: str | None = None) -> str:
+def _style(recipe: Recipe | None) -> str:
+    if recipe is None or not recipe.bpm:
+        return ", ".join(STYLE)
+    flows = dict.fromkeys(FLOW_TAGS[s.flow] for s in recipe.sections if s.flow)
+    return ", ".join([*VOCALS, *flows])
+
+
+def card(
+    track: Track,
+    mark: Mark | None = None,
+    style: str | None = None,
+    recipe: Recipe | None = None,
+) -> str:
     """Everything to fill in Suno for one text, ready to copy field by field.
 
     Args:
         track: The saved text.
         mark: Puts stress marks into a line, or None for none.
         style: The owner's own style box, or None for the default one.
+        recipe: The text's recipe; a beat's recipe gets a style of the voice and flows only.
     """
     out = [
         f"Title: {title_of(track)}",
         "",
-        f"Style: {style or ', '.join(STYLE)}",
+        f"Style: {style or _style(recipe)}",
         f"Exclude: {', '.join(EXCLUDE)}",
         "",
         *(f"{name}: {value}" for name, value in SETTINGS.items()),

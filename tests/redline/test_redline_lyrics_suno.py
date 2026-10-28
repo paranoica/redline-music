@@ -1,6 +1,7 @@
 import pytest
 
 from redline.lyrics.parse import parse_text
+from redline.lyrics.recipe import Recipe, SectionPlan
 from redline.lyrics.suno import MAX_CHARACTERS, card, convert, respell, title_of
 
 TEXT = """[Интро]
@@ -113,3 +114,32 @@ def test_too_long_lyrics_are_refused():
     long = "[Куплет]\n" + "\n".join(["очень длинная строчка текста про кэш"] * 200) + "\n"
     with pytest.raises(ValueError, match=str(MAX_CHARACTERS)):
         convert(parse_text(long))
+
+
+def beat_recipe(*flows):
+    sections = tuple(SectionPlan("verse", 2, (6, 8), "AABB", flow) for flow in flows)
+    return Recipe(1, "лёд", "short", sections, (), (), (), 0, 0, 0, bpm=66.0)
+
+
+def test_a_beat_seed_gets_a_vocal_style_with_its_flows_and_no_beat_tags():
+    style = field(card(parse_text(TEXT), recipe=beat_recipe("triplets", "eighths")), "Style")
+    terms = style.split(", ")
+    assert "triplet flow" in terms and "bouncy flow" in terms
+    assert not {"bpm", "808", "hi-hats", "trap"} & set(style.split())
+    assert 3 <= len(terms) <= 7
+
+
+def test_a_flow_used_twice_is_named_once_and_a_plain_recipe_keeps_the_trap_style():
+    style = field(card(parse_text(TEXT), recipe=beat_recipe("triplets", "triplets")), "Style")
+    assert style.split(", ").count("triplet flow") == 1
+    plain = Recipe(
+        1, "лёд", "short", (SectionPlan("verse", 2, (6, 8), "AABB"),), (), (), (), 0, 0, 0
+    )
+    assert field(card(parse_text(TEXT), recipe=plain), "Style") == field(
+        card(parse_text(TEXT)), "Style"
+    )
+
+
+def test_the_owners_style_wins_on_a_beat_seed_too():
+    text = card(parse_text(TEXT), style="свой стиль", recipe=beat_recipe("triplets"))
+    assert field(text, "Style") == "свой стиль"

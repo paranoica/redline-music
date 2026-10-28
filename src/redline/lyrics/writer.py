@@ -82,12 +82,19 @@ def render(request: WriterRequest, answer_to: Path | None = None) -> str:
         "",
         f"- Vibe and anchor words, not a story: {r.topic}",
     ]
-    out.append(f"- Line length: {r.band}")
+    if r.bpm:
+        out.append(
+            f"- Beat: {r.bpm:g} BPM at half time; one line is one bar. Keep the lines of a "
+            "section even, so each fills its bar alike; a line with adlibs keeps to the low end"
+        )
+    else:
+        out.append(f"- Line length: {r.band}")
     out.append("- Sections, in this order:")
     for i, s in enumerate(r.sections, 1):
         low, high = s.syllables
+        flow = f", flow {s.flow}" if s.flow else ""
         out.append(
-            f"  {i}. [{KIND_NAMES[s.kind]}]: {s.lines} lines of {low}-{high} syllables, "
+            f"  {i}. [{KIND_NAMES[s.kind]}]: {s.lines} lines of {low}-{high} syllables{flow}, "
             f"rhyme scheme {s.scheme}"
         )
     out.append(f"- Words of the scene to draw on: {', '.join(r.words) or '-'}")

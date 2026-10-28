@@ -1,7 +1,7 @@
 """The recipe of a new text, drawn from a style profile by seed."""
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -63,6 +63,17 @@ DEVICES = {
     "sound": "a line built for its sound: repeated syllables, chained inner rhymes, alliteration",
 }
 DEVICE_COUNT = (3, 5)
+# one line is one bar at half time: the scene's lines stop at 16 syllables, the sixteenths
+# of a bar. Each flow fills the bar to its own range of syllables
+FLOWS = {
+    "sixteenths": (13, 16),
+    "triplets": (10, 12),
+    "eighths": (6, 8),
+    "chant": (4, 6),
+}
+HOOK_ONLY = ("chant",)
+# past this a line turns to mush in Suno
+MAX_SYLLABLES_PER_SECOND = 6.5
 
 
 @dataclass(frozen=True)
@@ -73,6 +84,7 @@ class SectionPlan:
     lines: int
     syllables: tuple[int, int]
     scheme: str
+    flow: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +105,7 @@ class Recipe:
     hook_repeat_share: float
     en_share: float
     devices: tuple[tuple[str, int], ...] = ()
+    bpm: float | None = None
 
 
 def _draw(rng: np.random.Generator, items: list[Any], weights: list[float]) -> Any:
@@ -138,13 +151,40 @@ def _scheme(rng: np.random.Generator, known: dict[str, Any] | None) -> str:
     return str(_draw(rng, [s for s, _ in named], [v for _, v in named]))
 
 
+def _flow(rng: np.random.Generator, kind: str, known: dict[str, Any] | None, bpm: float) -> str:
+    hist = (known or {}).get("hist") or {}
+    names = [
+        name
+        for name, (_, high) in FLOWS.items()
+        if high * bpm / 240 <= MAX_SYLLABLES_PER_SECOND
+        and (kind == "hook" or name not in HOOK_ONLY)
+    ]
+    weights = [
+        sum(share for count, share in hist.items() if low <= int(count) <= high)
+        for low, high in (FLOWS[name] for name in names)
+    ]
+    if not any(w > 0 for w in weights):
+        weights = [1.0] * len(names)
+    return str(_draw(rng, names, weights))
+
+
 def _anchors(rng: np.random.Generator) -> str:
     count = int(rng.integers(ANCHOR_COUNT[0], ANCHOR_COUNT[1] + 1))
     return ", ".join(ANCHORS[int(i)] for i in rng.choice(len(ANCHORS), size=count, replace=False))
 
 
-def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) -> Recipe:
-    """Draw a text's shape and material from the profile; the same seed draws the same."""
+def make_recipe(
+    profile: dict[str, Any], seed: int, topic: str | None = None, bpm: float | None = None
+) -> Recipe:
+    """Draw a text's shape and material from the profile; the same seed draws the same.
+
+    Args:
+        profile: The style profile.
+        seed: The draw's seed.
+        topic: The vibe words, or None to draw them.
+        bpm: The beat's half-time tempo; with it every section gets a flow that sets its
+            syllables, and the draw differs from the seed's draw without a beat.
+    """
     rng = np.random.Generator(np.random.PCG64(seed))
     patterns = profile["structure"]["patterns"]
     # a song has a verse or a hook; shapes of skits and intros alone are not songs
@@ -155,18 +195,20 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
     ] or patterns
     shape = str(_draw(rng, [p for p, _ in tracks], [s for _, s in tracks])).split("-")
     band = str(_draw(rng, list(BANDS), [1.0] * len(BANDS)))
-    plans: dict[str, tuple[int, str]] = {}
+    plans: dict[str, tuple[int, str, str | None]] = {}
     sections = []
     for kind in shape:
+        known = profile["line_syllables"].get(kind)
         # a hook comes back the same each time, other kinds are drawn anew
         if kind != "hook" or kind not in plans:
             plans[kind] = (
                 _lines(rng, profile["lines_per_section"].get(kind)),
                 _scheme(rng, profile["rhyme"].get(kind)),
+                _flow(rng, kind, known, bpm) if bpm else None,
             )
-        lines, scheme = plans[kind]
-        syllables = _band_range(profile["line_syllables"].get(kind), band)
-        sections.append(SectionPlan(kind, lines, syllables, scheme))
+        lines, scheme, flow = plans[kind]
+        syllables = FLOWS[flow] if flow else _band_range(known, band)
+        sections.append(SectionPlan(kind, lines, syllables, scheme, flow))
     # verses grow first, then other sections; hooks only all together, so they stay equal
     hooks = [i for i, p in enumerate(sections) if p.kind == "hook"]
     groups = [[i] for i, p in enumerate(sections) if p.kind == "verse"]
@@ -174,15 +216,14 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
     turn = 0
     while sum(p.lines for p in sections) < MIN_LINES:
         for i in groups[turn % len(groups)]:
-            p = sections[i]
-            sections[i] = SectionPlan(p.kind, p.lines + 1, p.syllables, p.scheme)
+            sections[i] = replace(sections[i], lines=sections[i].lines + 1)
         turn += 1
     while sum(s.lines for s in sections) > MAX_LINES and max(s.lines for s in sections) > 1:
         longest = max(range(len(sections)), key=lambda i: (sections[i].lines, -i))
         s = sections[longest]
         sections = [
             (
-                SectionPlan(p.kind, p.lines - 1, p.syllables, p.scheme)
+                replace(p, lines=p.lines - 1)
                 if p.kind == s.kind and p.lines == s.lines and (p.kind == "hook" or i == longest)
                 else p
             )
@@ -206,19 +247,26 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         hook_repeat_share=float(profile["hook"]["repeated_line_share"] or 0.0),
         en_share=float(profile["latin"]["en_share"] or 0.0),
         devices=devices,
+        bpm=bpm,
     )
 
 
 def recipe_json(recipe: Recipe) -> str:
-    """Byte-stable JSON of a recipe."""
-    return json.dumps(asdict(recipe), ensure_ascii=False, sort_keys=True, indent=1)
+    """Byte-stable JSON of a recipe; a recipe without a beat reads as before beats existed."""
+    data = asdict(recipe)
+    if data["bpm"] is None:
+        del data["bpm"]
+    for section in data["sections"]:
+        if section["flow"] is None:
+            del section["flow"]
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, indent=1)
 
 
 def recipe_from_json(text: str) -> Recipe:
     """A recipe read back from its JSON."""
     data = json.loads(text)
     data["sections"] = tuple(
-        SectionPlan(s["kind"], s["lines"], tuple(s["syllables"]), s["scheme"])
+        SectionPlan(s["kind"], s["lines"], tuple(s["syllables"]), s["scheme"], s.get("flow"))
         for s in data["sections"]
     )
     for key in ("words", "latin", "adlibs"):

@@ -393,3 +393,83 @@ def test_cli_suno_takes_the_owners_style_file(base, capsys):
     (base[0] / "suno-style.txt").write_text("\n", encoding="utf-8")
     assert main(["lyrics", "suno", "--seed", "36", "--lyrics", str(base[0])]) == 0
     assert "Style: trap, " in capsys.readouterr().out
+
+
+def off_draft(recipe):
+    # every third line far over its range: about two lines in three fit
+    lines = good_draft(recipe).split("\n")
+    out, sung = [], 0
+    for line in lines:
+        if line and not line.startswith("["):
+            sung += 1
+            if sung % 3 == 0:
+                line = "та " * 8 + line
+        out.append(line)
+    return "\n".join(out)
+
+
+def test_a_beat_seed_freezes_the_half_time_tempo_and_tells_the_writer(base):
+    assert run(base, 40, "--bpm", "160") == 3
+    recipe = recipe_of(base, 40)
+    assert recipe.bpm == 80.0
+    request = (folder(base, 40) / "request-1.md").read_text(encoding="utf-8")
+    assert "80 BPM" in request and "one bar" in request
+    assert "- Line length:" not in request
+    assert all(f"flow {s.flow}" in request for s in recipe.sections)
+    assert "- Line length:" in (
+        run(base, 41) == 3 and (folder(base, 41) / "request-1.md")
+    ).read_text(encoding="utf-8")
+
+
+def test_a_beat_seed_holds_its_lines_tighter(base):
+    run(base, 42, "--bpm", "75")
+    draft(base, 42, off_draft(recipe_of(base, 42)))
+    assert run(base, 42) == 3
+    reasons = json.loads((folder(base, 42) / "state.json").read_text())["reasons"]
+    assert any(r.startswith("syllables") for r in reasons)
+    run(base, 43)
+    draft(base, 43, off_draft(recipe_of(base, 43)))
+    assert run(base, 43) == 0
+
+
+def test_another_tempo_for_a_started_seed_is_refused_and_force_keeps_the_beat(base):
+    assert run(base, 44, "--bpm", "150") == 3
+    assert run(base, 44, "--bpm", "140") == 2
+    assert run(base, 44, "--bpm", "75") == 3
+    assert run(base, 44) == 3
+    assert run(base, 44, "--force") == 3
+    assert recipe_of(base, 44).bpm == 75.0
+    run(base, 45)
+    assert run(base, 45, "--bpm", "150") == 2
+    assert run(base, 45, "--bpm", "150", "--force") == 3
+    assert recipe_of(base, 45).bpm == 75.0
+
+
+def test_a_saved_seed_is_not_given_out_for_another_beat(base):
+    run(base, 46, "--bpm", "150")
+    draft(base, 46, good_draft(recipe_of(base, 46)))
+    assert run(base, 46) == 0
+    assert run(base, 46, "--bpm", "75") == 0
+    assert run(base, 46, "--bpm", "100") == 2
+
+
+@pytest.mark.parametrize("bpm", ["0", "-80", "nan", "inf"])
+def test_a_tempo_must_be_a_positive_number(base, bpm):
+    assert run(base, 47, "--bpm", bpm) == 2
+    assert not folder(base, 47).exists()
+
+
+def test_a_missing_beat_file_and_both_tempo_options_are_refused(base, tmp_path):
+    assert run(base, 48, "--beat", str(tmp_path / "none.wav")) == 2
+    with pytest.raises(SystemExit):
+        run(base, 48, "--beat", str(tmp_path / "none.wav"), "--bpm", "150")
+
+
+def test_cli_suno_on_a_beat_seed_writes_the_vocal_style(base, capsys):
+    run(base, 49, "--bpm", "132")
+    draft(base, 49, good_draft(recipe_of(base, 49)))
+    assert run(base, 49) == 0
+    capsys.readouterr()
+    assert main(["lyrics", "suno", "--seed", "49", "--lyrics", str(base[0])]) == 0
+    out = capsys.readouterr().out
+    assert " flow" in out.split("Style: ")[1].split("\n")[0] and "bpm" not in out

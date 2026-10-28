@@ -19,6 +19,8 @@ MAX_CHARACTERS = 3000
 # the owner heard a text held to the band as flat
 SYLLABLE_TOLERANCE = 1
 SYLLABLE_SHARE = 0.5
+# on a beat a line that misses its bar is heard at once, and the flows already differ by section
+BEAT_SYLLABLE_SHARE = 0.75
 NAMED_LINES = 5
 RHYME_SHARE = 0.3
 # one rhyme held longer than this reads as a monotone
@@ -136,7 +138,7 @@ def check_draft(
     text: str,
     recipe: Recipe,
     mark: StressMark = str,
-    syllable_share: float = SYLLABLE_SHARE,
+    syllable_share: float | None = None,
     rhyme_share: float = RHYME_SHARE,
 ) -> tuple[list[Problem], dict[str, Any]]:
     """What the draft must fix to match the recipe, and the numbers behind the verdicts."""
@@ -153,6 +155,8 @@ def check_draft(
         detail = f"sections should be {'-'.join(wanted)}, got {'-'.join(got) or 'none'}"
         return [Problem("sections", "the draft", detail)], {}
     problems, lines, pairs = _sections(track, recipe, mark)
+    if syllable_share is None:
+        syllable_share = BEAT_SYLLABLE_SHARE if recipe.bpm else SYLLABLE_SHARE
     off = [line for line in lines if line[0] > SYLLABLE_TOLERANCE]
     share = 1 - len(off) / len(lines) if lines else 1.0
     if share < syllable_share:

@@ -200,3 +200,17 @@ def test_a_held_rhyme_is_found_wherever_it_starts():
     from redline.lyrics.form import _longest_run
 
     assert _longest_run(["рома", "ка", "ка", "ка", "рука", "рука"]) == 5
+
+
+def test_a_beat_holds_three_lines_in_four_to_their_range():
+    from dataclasses import replace
+
+    plan = SectionPlan("verse", 4, (5, 7), "AABB", "eighths")
+    # three lines of 7 syllables and one of 12: 75 % in range
+    three = GOOD_VERSE.replace("и вокруг огромный мир", "и вокруг меня огромный и большой мир")
+    # two of four: 50 %, enough without a beat
+    two = three.replace("и беру тяжелый лом", "и беру с собой тяжелый новый лом")
+    beat = replace(recipe(plan), bpm=80.0)
+    assert not [p for p in check_draft(three, beat)[0] if p.kind == "syllables"]
+    assert [p for p in check_draft(two, beat)[0] if p.kind == "syllables"]
+    assert not [p for p in check_draft(two, recipe(plan))[0] if p.kind == "syllables"]

@@ -176,3 +176,55 @@ def test_a_track_has_a_verse_or_a_hook(profile):
     for seed in range(30):
         kinds = {s.kind for s in make_recipe(profile, seed).sections}
         assert kinds & {"verse", "hook"}
+
+
+def test_without_a_beat_recipes_are_the_ones_drawn_before_beats_existed(profile):
+    import hashlib
+
+    from redline.lyrics.recipe import recipe_from_json
+
+    before = {
+        0: "e838384e97b4cf2b0c7a21c668d650fca75912c2c701d3ebee050d393e66d2ca",
+        7: "dff038b2876623355d29eb730b83f44debae01976236e1978cad577fe0e8bc10",
+        31: "f783a7903a187083c0d74dc4db658f50d147a190dfa06c1e618db6efd3138584",
+    }
+    for seed, digest in before.items():
+        text = recipe_json(make_recipe(profile, seed))
+        assert hashlib.sha256(text.encode()).hexdigest() == digest
+        assert recipe_json(recipe_from_json(text)) == text
+
+
+def test_a_beat_gives_every_section_a_flow_and_the_flow_its_syllables(profile):
+    from redline.lyrics.recipe import FLOWS
+
+    for seed in range(40):
+        recipe = make_recipe(profile, seed, bpm=80.0)
+        assert recipe.bpm == 80.0
+        for section in recipe.sections:
+            assert section.flow in FLOWS
+            assert section.syllables == FLOWS[section.flow]
+            assert section.flow != "chant" or section.kind == "hook"
+
+
+def test_hooks_of_a_beat_recipe_share_one_flow_after_growing(profile):
+    profile["structure"]["patterns"] = [["hook-verse-hook", 1.0]]
+    for seed in range(20):
+        recipe = make_recipe(profile, seed, bpm=75.0)
+        assert sum(s.lines for s in recipe.sections) >= 20
+        hooks = {(s.flow, s.lines) for s in recipe.sections if s.kind == "hook"}
+        assert len(hooks) == 1
+        assert all(s.flow for s in recipe.sections)
+
+
+def test_a_flow_too_fast_for_the_beat_is_never_drawn(profile):
+    flows = {s.flow for seed in range(60) for s in make_recipe(profile, seed, bpm=110.0).sections}
+    assert "sixteenths" not in flows and flows
+    slow = {s.flow for seed in range(60) for s in make_recipe(profile, seed, bpm=60.0).sections}
+    assert "sixteenths" in slow
+
+
+def test_a_beat_recipe_reads_back_with_its_tempo_and_flows(profile):
+    from redline.lyrics.recipe import recipe_from_json
+
+    recipe = make_recipe(profile, 5, bpm=82.5)
+    assert recipe_from_json(recipe_json(recipe)) == recipe
