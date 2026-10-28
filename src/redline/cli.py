@@ -56,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
     master = commands.add_parser(
         "master", help="blind round on the master: the chosen vocal, clipped to reference loudness"
     )
+    master.add_argument(
+        "--axis",
+        choices=("master", "timbre"),
+        default="master",
+        help="what the variants change: the master's loudness, or the vocal's timbre",
+    )
     master.add_argument("--track", type=Path, required=True, help="the track from Suno")
     master.add_argument(
         "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
@@ -131,7 +137,7 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
 
 
 def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
-    from redline.final_run import master_round
+    from redline.final_run import master_round, timbre_round
     from redline.separate import RoformerSeparator, SeparationError
 
     refs = reference_files(args.ref)
@@ -139,7 +145,8 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
     try:
-        result = master_round(
+        rounds = {"master": master_round, "timbre": timbre_round}
+        result = rounds[args.axis](
             args.track, refs, args.work, args.out, separator or RoformerSeparator(), args.seed
         )
     except (AudioError, SeparationError, ValueError, OSError) as error:

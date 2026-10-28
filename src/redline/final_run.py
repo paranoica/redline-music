@@ -19,6 +19,7 @@ from redline.loudness import gated_crest_db, integrated_lufs
 from redline.master import master_clip
 from redline.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
+from redline.timbre import bitcrush, double, octave_layer
 from redline.vocal_run import ORIGINAL, VocalRun, check_folders, reference_target
 
 Samples = npt.NDArray[np.floating]
@@ -27,6 +28,11 @@ VOCAL_LEVEL = "loudest"
 VOCAL_DB = -6.0
 QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
+BASE = "base"
+TIMBRES = ("doubles", "octave down", "octave up", "bitcrush")
+OCTAVE_LEVEL_DB = -6.0
+CRUSH_BITS = 8
+CRUSH_HOLD = 3
 log = logging.getLogger(__name__)
 
 
@@ -95,6 +101,48 @@ def master_round(
     )
     (run_dir / "chain.json").write_text(
         json.dumps({"vocal": asdict(chain), "vocal_db": VOCAL_DB, "masters": masters}, indent=1),
+        encoding="utf-8",
+    )
+    return VocalRun(run_dir, listen_dir)
+
+
+def _with_timbre(name: str, vocal: Samples, rate: int) -> Samples:
+    if name == "doubles":
+        return double(vocal, rate)
+    if name == "octave down":
+        return octave_layer(vocal, rate, -1, OCTAVE_LEVEL_DB)
+    if name == "octave up":
+        return octave_layer(vocal, rate, 1, OCTAVE_LEVEL_DB)
+    # the crush works on the vocal's own scale, not on its level under the beat
+    peak = float(np.abs(vocal).max())
+    return bitcrush(vocal / peak, rate, CRUSH_BITS, CRUSH_HOLD) * np.float32(peak)
+
+
+def timbre_round(
+    track: Path,
+    refs: list[Path],
+    work_dir: Path,
+    out_dir: Path,
+    separator: Separator,
+    seed: int | None = None,
+) -> VocalRun:
+    """Blind round on the vocal's timbre: the original, the chosen sound, one file per effect."""
+    check_folders(work_dir, out_dir)
+    inputs, original, vocal, _ = _chosen_mix(track, refs, work_dir, separator)
+    beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
+    target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
+    variants = {ORIGINAL: original, BASE: master_clip(vocal + beat, rate, target)[0]}
+    for name in TIMBRES:
+        log.info("timbre: %s", name)
+        variants[name] = master_clip(_with_timbre(name, vocal, rate) + beat, rate, target)[0]
+    run_dir = new_run_dir(work_dir / "runs")
+    out_run = new_run_dir(out_dir)
+    keep_out_of_git(out_run)
+    listen_dir = out_run / "listen"
+    seed = secrets.randbits(32) if seed is None else seed
+    key = write_listen_set(variants, rate, listen_dir, seed)
+    (run_dir / "key.json").write_text(
+        json.dumps({"axis": "timbre", "seed": seed, "key": key, "listen_dir": str(listen_dir)}),
         encoding="utf-8",
     )
     return VocalRun(run_dir, listen_dir)

@@ -6,7 +6,7 @@ import soundfile as sf
 from redline_signals import make_rng, write
 
 from redline.cli import main
-from redline.final_run import master_round, master_targets, run_track
+from redline.final_run import TIMBRES, master_round, master_targets, run_track, timbre_round
 from redline.loudness import integrated_lufs
 from redline.master import CEILING_DB
 from redline.run import FileResult
@@ -219,3 +219,14 @@ def test_run_refuses_overlapping_folders(inputs, tmp_path, work, out):
     track, refs = inputs
     with pytest.raises(ValueError, match="separate"):
         run_track(track, sorted(refs.iterdir()), tmp_path / work, tmp_path / out, HalfSeparator())
+
+
+def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_path):
+    track, refs = inputs
+    result = timbre_round(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), seed=5
+    )
+    key = json.loads((result.run_dir / "key.json").read_text())
+    assert key["axis"] == "timbre"
+    assert sorted(key["key"].values()) == sorted(["original", "base", *TIMBRES])
+    assert len(list(result.listen_dir.iterdir())) == 2 + len(TIMBRES)
