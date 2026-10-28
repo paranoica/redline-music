@@ -53,6 +53,16 @@ def build_parser() -> argparse.ArgumentParser:
     vocal.add_argument(
         "--vocal-db", type=float, default=0.0, help="vocal against the beat on the dirt axis, dB"
     )
+    master = commands.add_parser(
+        "master", help="blind round on the master: the chosen vocal, clipped to reference loudness"
+    )
+    master.add_argument("--track", type=Path, required=True, help="the track from Suno")
+    master.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    master.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    master.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
+    master.add_argument("--seed", type=int, help="seed of the letter shuffle")
     return parser
 
 
@@ -111,6 +121,25 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
+def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
+    from redline.final_run import master_round
+    from redline.separate import RoformerSeparator, SeparationError
+
+    refs = reference_files(args.ref)
+    if not refs:
+        print("redline: no reference audio files given", file=sys.stderr)
+        return 2
+    try:
+        result = master_round(
+            args.track, refs, args.work, args.out, separator or RoformerSeparator(), args.seed
+        )
+    except (AudioError, SeparationError, ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    print(result.listen_dir)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None) -> int:
     """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
@@ -120,5 +149,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _measure(args, separator)
     if args.command == "vocal":
         return _vocal(args, separator)
+    if args.command == "master":
+        return _master(args, separator)
     parser.print_help()
     return 0

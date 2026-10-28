@@ -58,6 +58,15 @@ def reference_target(refs: list[FileResult]) -> Target:
     return Target(centers, tuple(float(v) for v in median))
 
 
+def check_folders(work_dir: Path, out_dir: Path) -> None:
+    """Refuse an output folder inside the work folder or the reverse: the key lives in work."""
+    work, out = work_dir.resolve(), out_dir.resolve()
+    if work.is_relative_to(out) or out.is_relative_to(work):
+        raise ValueError(
+            f"keep --out and --work separate: the key in {work_dir} would sit with the files"
+        )
+
+
 def dirt_variants(
     vocals: dict[str, Samples], beat: Samples, vocal_db: float = 0.0
 ) -> dict[str, Samples]:
@@ -96,11 +105,7 @@ def vocal_run(
         raise ValueError(
             f"unknown dirt level {', '.join(unknown)}, expected some of {', '.join(ALL_LEVELS)}"
         )
-    work, out = work_dir.resolve(), out_dir.resolve()
-    if work.is_relative_to(out) or out.is_relative_to(work):
-        raise ValueError(
-            f"keep --out and --work separate: the key in {work_dir} would sit with the files"
-        )
+    check_folders(work_dir, out_dir)
     inputs = measure_inputs(track, refs, work_dir, separator)
     stems, upper = inputs.track_stems, inputs.upper
     rate = stems.rate
