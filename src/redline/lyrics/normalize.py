@@ -29,15 +29,17 @@ def clean(text: str) -> str:
     return unicodedata.normalize("NFC", text).translate(INVISIBLE)
 
 
-def words(text: str) -> list[str]:
+def words(text: str, keep_doubles: bool = False) -> list[str]:
     """Lower-case words with ё as е, look-alike letters folded and stretched letters collapsed.
 
     Apostrophes join a word, any other punctuation splits it; digit groups split by a space
-    ("100 000") read as one number.
+    ("100 000") read as one number. keep_doubles leaves repeated letters as written, for word
+    lists people read rather than for matching.
     """
     text = clean(text).lower().replace("ё", "е")
     for mark in APOSTROPHES:
         text = text.replace(mark, "")
     text = DIGIT_GROUP.sub("", text)
     raw = re.split(r"[^a-zа-я0-9]+", text)
-    return [REPEAT.sub(r"\1", _fold_script(t)) for t in raw if TOKEN.fullmatch(t)]
+    found = [_fold_script(t) for t in raw if TOKEN.fullmatch(t)]
+    return found if keep_doubles else [REPEAT.sub(r"\1", t) for t in found]

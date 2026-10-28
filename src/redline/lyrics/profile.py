@@ -54,10 +54,14 @@ STOP_TEXT = (
     "и в во не на я ты он она оно мы вы они что как а но да нет то это так же ли бы с со "
     "к ко по из за от до у о об для при над под про без через мой моя мое мои твой твоя "
     "твое твои его ее их наш ваш свой себя меня тебя мне тебе нас вас им ему ей все всё "
-    "вот там тут где кто когда если или уже еще только даже ну эй е "
+    "вот там тут где кто когда если или уже еще только даже ну "
     "the a an and or but to of in on at for is are was it i you me my your we he she they"
 )
+# interjections are adlibs, not vocabulary
+INTERJECTIONS = {"эй", "е"}
 STOP_WORDS = set(STOP_TEXT.split())
+MIN_LETTERS = 2
+OWNER_MIN_TEXTS = 2
 LATIN_WORD = re.compile(r"^[a-z]+$")
 ALPHA_WORD = re.compile(r"^[a-zа-я]+$")
 
@@ -82,9 +86,9 @@ def _is_host(who: str, names: Sequence[str]) -> bool:
 
 
 def _count_words(counts: Counts, kind: str, text: str) -> None:
-    found = [w for w in words(text) if ALPHA_WORD.match(w)]
+    found = [w for w in words(text, keep_doubles=True) if ALPHA_WORD.match(w)]
     counts["script"].update("latin" if LATIN_WORD.match(w) else "cyrillic" for w in found)
-    content = [w for w in found if w not in STOP_WORDS]
+    content = [w for w in found if w not in STOP_WORDS | INTERJECTIONS and len(w) >= MIN_LETTERS]
     for i, word in enumerate(content):
         family = "latin" if LATIN_WORD.match(word) else "words"
         counts[family][word] += 1
@@ -128,7 +132,11 @@ def _count_track(
             target["adlib_lines"]["yes" if line.adlibs else "no"] += 1
             target["adlib_end"]["yes" if line.text.rstrip().endswith(")") else "no"] += 1
             for adlib in line.adlibs:
-                target["adlibs"].update(w for w in words(adlib) if ALPHA_WORD.match(w))
+                target["adlibs"].update(
+                    w
+                    for w in words(adlib, keep_doubles=True)
+                    if ALPHA_WORD.match(w) and w not in STOP_WORDS
+                )
         if track.headerless:
             continue
         _count_section_lines(target, section.kind, sung, mark)
@@ -335,6 +343,35 @@ def load_profile(path: Path) -> dict[str, Any]:
     return profile
 
 
+WORD_FIELDS = (
+    "words",
+    "latin",
+    "adlibs",
+    *(f"{f}_{p}" for f in ("words", "latin") for p in ("start", "end", "hook", "verse")),
+)
+
+
+def _keep_words(counts: Counts, keep: Callable[[str], bool]) -> Counts:
+    out = dict(counts)
+    for field in WORD_FIELDS:
+        if field in counts:
+            out[field] = Counter({w: c for w, c in counts[field].items() if keep(w)})
+    return out
+
+
+def _owner_only_shared(counts: Counts, tracks: Sequence[Track]) -> Counts:
+    """Keep the owner's words and adlibs that come back in two texts or more."""
+    seen: Counter = Counter()
+    for track in tracks:
+        found = set()
+        for _, line in _sung(track):
+            found.update(words(line.plain, keep_doubles=True))
+            for adlib in line.adlibs:
+                found.update(words(adlib, keep_doubles=True))
+        seen.update(found)
+    return _keep_words(counts, lambda w: seen[w] >= OWNER_MIN_TEXTS)
+
+
 def _with_presence(counts: Counts, weight: int = 1) -> Counts:
     out = dict(counts)
     out["presence"] = Counter({w: weight for f in ("words", "latin") for w in counts.get(f, {})})
@@ -359,6 +396,16 @@ def build_profiles(
     of profile names and weights adds the target profile the writer works from.
     """
     profile_of = functools.partial(to_profile, stress=stress)
+    # a writer working from these lists must not name real people
+    names = {w for slug in artists for w in words(slug, keep_doubles=True)}
+    names |= {w for a in artists.values() for n in a.names for w in words(n, keep_doubles=True)}
+
+    def count(tracks: Sequence[Track], performers: Sequence[str]) -> tuple[Counts, Counts]:
+        own, guest = count_tracks(tracks, performers, mark)
+        return _keep_words(own, lambda w: w not in names), _keep_words(
+            guest, lambda w: w not in names
+        )
+
     counts_of: dict[str, Counts] = {}
     profiles: dict[str, dict[str, Any]] = {}
     own: dict[str, Counts] = {}
@@ -367,7 +414,7 @@ def build_profiles(
         if not tracks:
             continue
         artist = artists.get(slug)
-        counts, guest = count_tracks(dedupe(tracks), artist.names if artist else (), mark)
+        counts, guest = count(dedupe(tracks), artist.names if artist else ())
         own[slug] = _with_presence(counts)
         guests[slug] = guest
         counts_of[f"artist-{slug}"] = own[slug]
@@ -392,7 +439,9 @@ def build_profiles(
     scene = merge(scene_parts, [1.0] * len(scene_parts)) if scene_parts else {}
     profiles["scene"] = profile_of(scene, "scene", "scene", 2 if len(scene_parts) > 1 else 1, each)
     # the owner's words always pass the two-artist floor
-    owner = _with_presence(count_tracks(dedupe(mine), (), mark)[0], weight=2)
+    # with a handful of texts, a word of one text is its theme, not the owner's voice
+    kept = dedupe(mine)
+    owner = _with_presence(_owner_only_shared(count(kept, ())[0], kept), weight=2)
     profiles["mine"] = profile_of(owner, "mine", "mine")
     working = merge([owner, scene], [MINE_WEIGHT, 1 - MINE_WEIGHT]) if scene else owner
     halves = {"mine": MINE_WEIGHT, "scene": 1 - MINE_WEIGHT}

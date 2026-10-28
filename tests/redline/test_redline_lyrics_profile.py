@@ -102,7 +102,8 @@ def test_scene_words_need_two_artists_and_small_artists_stay_out():
         "b": [track(f"[Куплет]\nобщий звон номер {i}\n") for i in range(5)],
         "c": [track("[Куплет]\nредкое слово\n")],
     }
-    profiles = build_profiles(base, artists, mine=[track(ONE)], min_tracks=5)
+    mine = [track(ONE), track("[Куплет]\nгород опять\n")]
+    profiles = build_profiles(base, artists, mine=mine, min_tracks=5)
     scene_words = {w["word"] for w in profiles["scene"]["vocabulary"]["top"]}
     assert "общий" in scene_words
     assert "свет" not in scene_words
@@ -232,3 +233,37 @@ def test_every_structure_pattern_is_kept():
     own, _ = count_tracks([track("".join(f"[{k}]\nстрока\n" for k in s)) for s in shapes])
     assert len(own["structure"]) == 30
     assert len(to_profile(own, "artist", "x")["structure"]["patterns"]) == 30
+
+
+def test_the_owners_one_off_words_stay_out_of_their_profile():
+    # a word repeated inside one text is that text's theme, not the owner's voice
+    mine = [
+        track("[Куплет]\nмой перстень перстень и мой кэш (перстень)\n"),
+        track("[Куплет]\nкэш опять (опять)\n"),
+        track("[Куплет]\nснова кэш (опять)\n"),
+    ]
+    profiles = build_profiles({}, {}, mine=mine, min_tracks=5)
+    words = {w["word"] for w in profiles["mine"]["vocabulary"]["top"]}
+    assert "кэш" in words and "перстень" not in words
+    adlibs = {w for w, _ in profiles["mine"]["adlibs"]["top"]}
+    assert adlibs == {"опять"}
+
+
+def test_adlibs_hold_no_stop_words_and_words_are_two_letters_or_more():
+    own, _ = count_tracks([track("[Куплет]\nit's money s (и как эй)\n")])
+    assert own["adlibs"] == {"эй": 1}
+    assert "s" not in own["latin"] and "money" in own["latin"]
+
+
+def test_artist_names_stay_out_of_word_lists():
+    artists = {"a": Artist(("Some Name", "Nick"), "A")}
+    base = {"a": [track(f"[Куплет]\nsome name и nick жгут {i} (nick)\n") for i in range(5)]}
+    profile = build_profiles(base, artists, mine=[], min_tracks=5)["artist-a"]
+    found = {w["word"] for w in profile["vocabulary"]["top"] + profile["latin"]["top"]}
+    assert found == {"жгут"}
+    assert profile["adlibs"]["top"] == []
+
+
+def test_word_lists_keep_double_letters():
+    own, _ = count_tracks([track("[Куплет]\nинвестиции и bottles\n")])
+    assert "инвестиции" in own["words"] and "bottles" in own["latin"]
