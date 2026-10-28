@@ -1,6 +1,8 @@
-"""Rhymes of line-final words by their endings, without knowing the stress."""
+"""Rhymes of line-final words: by the stressed vowel when the stress is known, else by endings."""
 
 import re
+
+from redline.lyrics.parse import ADLIB
 
 VOWELS = set("аеиоуыэюяё")
 # unstressed vowels sound alike, and so do voiced and voiceless consonants at the end
@@ -12,6 +14,13 @@ LATIN = str.maketrans(
 )
 REPEAT = re.compile(r"(.)\1+")
 TAIL_VOWELS = 2
+# stressed vowels keep their sound; only the iotated letters and ы/и coincide
+STRESSED_FOLD = str.maketrans("яёюеы", "аоуэи")
+STRESS = "+"
+# a held sound: a letter three times or more, or repeated over hyphens
+STRETCH = re.compile(r"([а-яё])\1{2,}")
+HYPHEN_STRETCH = re.compile(r"(\w)(?:-\1)+", re.IGNORECASE)
+WORD = re.compile(r"[\w+'\u2019-]*[^\W\d_][\w+'\u2019-]*")
 
 
 def fold(word: str) -> str:
@@ -27,22 +36,70 @@ def _vowels(word: str) -> list[int]:
     return [i for i, c in enumerate(word) if c in VOWELS]
 
 
-def rhymes(a: str, b: str) -> bool:
-    """Whether two words rhyme by their endings.
+def last_word(line: str) -> str:
+    """The last word of a line, adlibs left out, stress mark kept."""
+    found = WORD.findall(ADLIB.sub(" ", line))
+    return found[-1] if found else ""
 
-    They rhyme with the same ending from the second-to-last vowel, or the same last two
-    vowels; a one-syllable word needs the same ending from its vowel.
+
+def _stressed(word: str) -> tuple[str, int] | None:
+    """The word in Cyrillic letters and the index of its stressed vowel, if known.
+
+    The stress is known from a "+" mark, a capital vowel inside a lower-case word, ё or a
+    single vowel.
     """
+    plain = word.replace(STRESS, "")
+    capitals = [i for i, c in enumerate(plain) if i and c.isupper() and c.lower() in VOWELS]
+    if len(capitals) == 1 and plain.upper() != plain:
+        # the author's capital vowel marks the stress and overrides a model's mark;
+        # a capital first letter only starts a sentence
+        at = capitals[0]
+        word = plain[:at] + STRESS + plain[at:].lower()
+    letters = re.sub(r"[^a-zа-яё+]", "", HYPHEN_STRETCH.sub(r"\1", word).lower()).translate(LATIN)
+    letters = STRETCH.sub(r"\1", letters.replace("ь", "").replace("ъ", ""))
+    if STRESS in letters:
+        at = letters.index(STRESS)
+        letters = letters.replace(STRESS, "")
+        return (letters, at) if at < len(letters) and letters[at] in VOWELS else None
+    vowels = _vowels(letters)
+    if "ё" in letters:
+        return letters, letters.index("ё")
+    return (letters, vowels[0]) if len(vowels) == 1 else None
+
+
+def _by_stress(a: tuple[str, int], b: tuple[str, int]) -> bool:
+    (wa, ia), (wb, ib) = a, b
+    if wa[ia].translate(STRESSED_FOLD) != wb[ib].translate(STRESSED_FOLD):
+        return False
+    after_a, after_b = wa[ia + 1 :], wb[ib + 1 :]
+    vowels_a, vowels_b = _vowels(after_a), _vowels(after_b)
+    if len(vowels_a) != len(vowels_b):
+        return False
+    if not vowels_a:
+        # stress on the last syllable: the same closing consonant, or none in both
+        return after_a[-1:].translate(DEVOICE) == after_b[-1:].translate(DEVOICE)
+    # otherwise the consonant that opens the next syllable carries the rhyme
+    before_a = after_a[vowels_a[0] - 1 : vowels_a[0]].translate(DEVOICE)
+    before_b = after_b[vowels_b[0] - 1 : vowels_b[0]].translate(DEVOICE)
+    return before_a == before_b
+
+
+def rhymes(a: str, b: str) -> bool:
+    """Whether two line-final words rhyme.
+
+    With the stress known: the same stressed vowel; on a last syllable the same closing
+    consonant; else the same consonant before the next vowel. Unknown stress: the same
+    ending from the second-to-last vowel.
+    """
+    sa, sb = _stressed(a), _stressed(b)
+    if sa and sb:
+        return _by_stress(sa, sb)
     fa, fb = fold(a), fold(b)
     va, vb = _vowels(fa), _vowels(fb)
     if not va or not vb:
         return False
     k = min(TAIL_VOWELS, len(va), len(vb))
-    if fa[va[-k] :] == fb[vb[-k] :]:
-        return True
-    if k < TAIL_VOWELS:
-        return False
-    return [fa[i] for i in va[-k:]] == [fb[i] for i in vb[-k:]]
+    return fa[va[-k] :] == fb[vb[-k] :]
 
 
 def letters(ends: list[str]) -> str:

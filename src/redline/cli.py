@@ -88,6 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
         "stats", help="syllables per line and rhyme letters per section"
     )
     stats.add_argument("file", type=Path, help="the text")
+    stats.add_argument(
+        "--stress", action="store_true", help="find rhymes by stress (needs the stress extra)"
+    )
     return parser
 
 
@@ -228,19 +231,21 @@ def _lyrics_check(args: argparse.Namespace) -> int:
 
 
 def _lyrics_stats(args: argparse.Namespace) -> int:
+    from redline.lyrics import stress
     from redline.lyrics.parse import parse_text
-    from redline.lyrics.rhyme import letters
+    from redline.lyrics.rhyme import last_word, letters
     from redline.lyrics.syllables import count_syllables
 
     try:
         track = parse_text(args.file.read_text(encoding="utf-8"))
+        marked = stress.load_stresser() if args.stress else str
     except (ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     for section in track.sections:
         print(f"[{section.name or section.kind}]")
         sung = [line for line in section.lines if line.plain]
-        rhyme = letters([line.plain.split()[-1] for line in sung])
+        rhyme = letters([last_word(marked(line.plain)) for line in sung])
         for line, letter in zip(sung, rhyme, strict=True):
             print(f"{count_syllables(line.text):>3} {letter}  {line.text}")
     return 0

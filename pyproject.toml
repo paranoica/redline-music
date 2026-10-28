@@ -20,6 +20,10 @@ separation = [
     "onnxruntime>=1.20",
     "audioread>=3.0",
 ]
+stress = [
+    "ruaccent>=1.5.8.3",
+    "transformers<5",
+]
 
 [project.scripts]
 redline = "redline.cli:main"
