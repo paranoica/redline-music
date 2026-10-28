@@ -210,3 +210,8 @@ def test_a_yaml_error_names_the_file_without_quoting_it(tmp_path):
 )
 def test_words_fold_unicode_forms_and_invisible_characters(text, expected):
     assert words(text) == expected
+
+
+def test_accented_latin_letters_lose_their_accents_and_cyrillic_keeps_its_letters():
+    assert words("Enfants Riches Déprimés, Garçons") == ["enfants", "riches", "deprimes", "garcons"]
+    assert words("мой йод") == ["мой", "йод"]

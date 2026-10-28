@@ -316,11 +316,55 @@ def test_private_style_notes_go_into_the_request(base):
 def test_each_seed_sees_its_own_part_of_the_style_notes():
     from redline.lyrics.generate import style_for
 
-    names = ["альфа", "бета", "гамма", "дельта", "эпсилон", "зета", "эта", "тета"]
+    names = [
+        "альфа",
+        "бета",
+        "гамма",
+        "дельта",
+        "эпсилон",
+        "зета",
+        "эта",
+        "тета",
+        "йота",
+        "каппа",
+        "лямбда",
+        "мю",
+    ]
     notes = f"Заголовок:\n- Бренды: {', '.join(names)}\n- Приём без списка\n"
     one, two = style_for(notes, 1), style_for(notes, 2)
     assert style_for(notes, 1) == one
     assert "Заголовок:" in one and "- Приём без списка" in one
     kept = one.split("\n")[1].split(": ")[1].split(", ")
-    assert 3 <= len(kept) < 8 and set(kept) <= set(names)
+    assert 3 <= len(kept) < len(names) and set(kept) <= set(names)
     assert one != two
+
+
+def test_style_notes_keep_brackets_and_prose_whole():
+    from redline.lyrics.generate import style_for
+
+    listed = (
+        "- Бренды: Rick Owens (DRKSHDW, Geobasket), Number (N)ine, Undercover, Kapital, "
+        "Visvim, Julius, Guidi, Acne, Sacai, Loewe, Alyx"
+    )
+    prose = (
+        "- Юмор: говори ровно, без улыбки, как факт, как сводку, как прогноз, как бухгалтер, "
+        "как диктор"
+    )
+    for seed in range(20):
+        cut = style_for(listed + "\n" + prose, seed).split("\n")
+        assert cut[1] == prose
+        assert cut[0].count("(") == cut[0].count(")")
+
+
+def test_style_notes_that_copy_the_base_are_refused(base):
+    (base[0] / "style.md").write_text(f"- пример: {SENTINEL} 0\n", encoding="utf-8")
+    assert run(base, 32) == 2
+
+
+def test_each_round_records_the_style_notes_it_used(base):
+    (base[0] / "style.md").write_text("- заметка\n", encoding="utf-8")
+    run(base, 33)
+    draft(base, 33, "[Куплет]\nне то\n")
+    run(base, 33)
+    checks = json.loads((folder(base, 33) / "checks-1.json").read_text(encoding="utf-8"))
+    assert len(checks["style"]) == 12

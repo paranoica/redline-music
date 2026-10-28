@@ -29,6 +29,14 @@ def clean(text: str) -> str:
     return unicodedata.normalize("NFC", text).translate(INVISIBLE)
 
 
+def _plain_latin(char: str) -> str:
+    # é, ç, ö and the like read as their base letter; Cyrillic й and ё stay as they are
+    if ord(char) < 0x80 or not unicodedata.name(char, "").startswith("LATIN"):
+        return char
+    base = unicodedata.normalize("NFKD", char)[0]
+    return base if base.isascii() else char
+
+
 def words(text: str, keep_doubles: bool = False) -> list[str]:
     """Lower-case words with ё as е, look-alike letters folded and stretched letters collapsed.
 
@@ -36,7 +44,7 @@ def words(text: str, keep_doubles: bool = False) -> list[str]:
     ("100 000") read as one number. keep_doubles leaves repeated letters as written, for word
     lists people read rather than for matching.
     """
-    text = clean(text).lower().replace("ё", "е")
+    text = "".join(map(_plain_latin, clean(text))).lower().replace("ё", "е")
     for mark in APOSTROPHES:
         text = text.replace(mark, "")
     text = DIGIT_GROUP.sub("", text)

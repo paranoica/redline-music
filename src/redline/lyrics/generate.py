@@ -1,5 +1,6 @@
 """Writing a text by seed: recipe, requests to the writer, checks, rounds and state."""
 
+import hashlib
 import json
 import re
 from collections.abc import Callable, Sequence
@@ -91,20 +92,35 @@ def excerpts(mine: Sequence[Track], index: FingerprintIndex, seed: int) -> tuple
 
 LISTED = re.compile(r"^(- [^:]+: )(.+)$")
 MIN_KEPT = 3
+# a bullet with this many comma-separated names is a list; fewer is a sentence
+MIN_LIST = 10
+
+
+def _items(text: str) -> list[str]:
+    """Comma-separated items, commas inside brackets left alone."""
+    items, depth, current = [], 0, ""
+    for char in text:
+        depth += (char == "(") - (char == ")")
+        if char == "," and depth == 0:
+            items.append(current.strip())
+            current = ""
+        else:
+            current += char
+    return [*items, current.strip()]
 
 
 def style_for(notes: str, seed: int) -> str:
-    """The style notes with each long list cut to a part chosen by seed.
+    """The style notes with each long list of names cut to a part chosen by seed.
 
     Every writer seeing the same examples writes the same jokes; a different part each seed
-    keeps the texts apart.
+    keeps the texts apart. Shorter bullets are left whole: they read as sentences.
     """
     rng = np.random.Generator(np.random.PCG64(seed))
     out = []
     for line in notes.splitlines():
         found = LISTED.match(line)
-        items = found.group(2).rstrip(".").split(", ") if found else []
-        if len(items) <= 2 * MIN_KEPT:
+        items = _items(found.group(2).rstrip(".")) if found else []
+        if len(items) < MIN_LIST:
             out.append(line)
             continue
         keep = max(MIN_KEPT, len(items) // 2)
@@ -140,6 +156,10 @@ class Session:
         self.mark = mark
         self.min_words = min_words
         self.style = style
+        if style.strip() and index.check(
+            parse_text("\n" + style), min_words=RUN, ignore=(OWNER, MADE)
+        ):
+            raise LyricsError("the style notes hold a stretch of another artist's text")
 
     def _state(self) -> dict[str, Any] | None:
         path = self.folder / "state.json"
@@ -258,6 +278,7 @@ class Session:
         checks = {
             "round": state["round"],
             "prompt": prompt_hash(),
+            "style": hashlib.sha256(style_for(self.style, state["seed"]).encode()).hexdigest()[:12],
             "min_words": self.min_words,
             "problems": reasons,
             "copies": sum(p.kind == "copy" for p in problems),

@@ -156,3 +156,12 @@ def test_a_recipe_is_never_a_lone_section_or_a_snippet(profile):
         recipe = make_recipe(profile, seed)
         assert len(recipe.sections) >= 2
         assert sum(s.lines for s in recipe.sections) >= MIN_LINES
+
+
+def test_growing_a_short_track_keeps_its_hooks_equal(profile):
+    profile["structure"]["patterns"] = [["hook-intro-hook", 1.0]]
+    profile["lines_per_section"]["hook"] = {"hist": {"4": 1.0}, "p10": 4, "p50": 4, "p90": 4}
+    profile["lines_per_section"]["intro"] = {"hist": {"2": 1.0}, "p10": 2, "p50": 2, "p90": 2}
+    for seed in range(10):
+        hooks = {s.lines for s in make_recipe(profile, seed).sections if s.kind == "hook"}
+        assert len(hooks) == 1

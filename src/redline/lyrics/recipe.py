@@ -162,12 +162,15 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         lines, scheme = plans[kind]
         syllables = _band_range(profile["line_syllables"].get(kind), band)
         sections.append(SectionPlan(kind, lines, syllables, scheme))
-    growing = [i for i, p in enumerate(sections) if p.kind == "verse"] or list(range(len(sections)))
+    # verses grow first, then other sections; hooks only all together, so they stay equal
+    hooks = [i for i, p in enumerate(sections) if p.kind == "hook"]
+    groups = [[i] for i, p in enumerate(sections) if p.kind == "verse"]
+    groups = groups or [[i] for i, p in enumerate(sections) if p.kind != "hook"] or [hooks]
     turn = 0
     while sum(p.lines for p in sections) < MIN_LINES:
-        i = growing[turn % len(growing)]
-        p = sections[i]
-        sections[i] = SectionPlan(p.kind, p.lines + 1, p.syllables, p.scheme)
+        for i in groups[turn % len(groups)]:
+            p = sections[i]
+            sections[i] = SectionPlan(p.kind, p.lines + 1, p.syllables, p.scheme)
         turn += 1
     while sum(s.lines for s in sections) > MAX_LINES and max(s.lines for s in sections) > 1:
         longest = max(range(len(sections)), key=lambda i: (sections[i].lines, -i))

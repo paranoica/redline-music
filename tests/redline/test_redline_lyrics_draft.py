@@ -187,3 +187,16 @@ def test_half_the_lines_off_the_band_is_still_fine():
     _, stats = check_draft(loose, recipe(VERSE))
     assert stats["syllables_in_range"] == 0.5
     assert "syllables" not in problems(loose, VERSE)
+
+
+def test_a_chanted_hook_line_is_not_a_held_rhyme():
+    plan = SectionPlan("hook", 6, (5, 9), "AABB")
+    chant = "[Припев]\n" + "я на дрипе снова тут\n" * 5 + "и другая строка\n"
+    _, stats = check_draft(chant, recipe(plan))
+    assert stats["longest_rhyme_run"] <= 2
+
+
+def test_a_held_rhyme_is_found_wherever_it_starts():
+    from redline.lyrics.form import _longest_run
+
+    assert _longest_run(["рома", "ка", "ка", "ка", "рука", "рука"]) == 5

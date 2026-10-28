@@ -15,7 +15,7 @@ from redline.lyrics.normalize import words
 from redline.lyrics.parse import LyricsError, Track
 
 MAGIC = "redline-lyrics-index"
-VERSION = 2
+VERSION = 3
 RUN = 5
 MIN_DISTINCT = 3
 DEFAULT_MIN_WORDS = 8

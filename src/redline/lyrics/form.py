@@ -80,16 +80,26 @@ def _not_lyrics(text: str) -> list[Problem]:
 
 
 def _longest_run(ends: list[str]) -> int:
-    """The most lines in a row that all rhyme with the first of them."""
+    """The most lines in a row that all rhyme with the first of them, from any line on."""
     longest = 0
-    start = 0
-    while start < len(ends):
+    for start in range(len(ends)):
         end = start + 1
         while end < len(ends) and (ends[end] == ends[start] or rhymes(ends[start], ends[end])):
             end += 1
         longest = max(longest, end - start)
-        start = end
     return longest
+
+
+def _distinct(lines: list[Any]) -> list[Any]:
+    # a chanted line said again is a repeat, not another rhyme
+    seen: list[list[str]] = []
+    out = []
+    for line in lines:
+        said = words(line.plain)
+        if said not in seen:
+            seen.append(said)
+            out.append(line)
+    return out
 
 
 def _sections(track: Any, recipe: Recipe, mark: StressMark) -> tuple[list[Problem], list, list]:
@@ -157,7 +167,9 @@ def check_draft(
             problems.append(Problem("syllables", f"line {number}", detail))
     run = max(
         (
-            _longest_run([last_word(mark(line.plain)) for line in section.lines if line.plain])
+            _longest_run(
+                [last_word(mark(line.plain)) for line in _distinct(section.lines) if line.plain]
+            )
             for section in track.sections
         ),
         default=0,
