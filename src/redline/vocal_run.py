@@ -10,6 +10,7 @@ import numpy as np
 import numpy.typing as npt
 
 from redline.chain import (
+    ALL_LEVELS,
     DIRT_LEVELS,
     EXTRA,
     ChainResult,
@@ -57,9 +58,12 @@ def reference_target(refs: list[FileResult]) -> Target:
     return Target(centers, tuple(float(v) for v in median))
 
 
-def dirt_variants(vocals: dict[str, Samples], beat: Samples) -> dict[str, Samples]:
-    """Each processed vocal over the untouched beat."""
-    return {name: vocal + beat for name, vocal in vocals.items()}
+def dirt_variants(
+    vocals: dict[str, Samples], beat: Samples, vocal_db: float = 0.0
+) -> dict[str, Samples]:
+    """Each processed vocal, moved by vocal_db, over the untouched beat."""
+    gain = np.float32(10 ** (vocal_db / 20))
+    return {name: vocal * gain + beat for name, vocal in vocals.items()}
 
 
 def balance_variants(vocal: Samples, beat: Samples) -> dict[str, Samples]:
@@ -77,14 +81,21 @@ def vocal_run(
     separator: Separator,
     seed: int | None = None,
     axis: str = "dirt",
+    levels: tuple[str, ...] = tuple(level.name for level in DIRT_LEVELS),
+    vocal_db: float = 0.0,
 ) -> VocalRun:
     """Measure, process the vocal, write the listening set for one axis, the key and the chain.
 
-    The dirt axis holds the balance and steps through the dirt levels; the balance axis holds
-    the dirt at EXTRA and lowers the vocal against the beat.
+    The dirt axis holds the vocal at vocal_db against the beat and steps through the named
+    levels; the balance axis holds the dirt at EXTRA and lowers the vocal against the beat.
     """
     if axis not in AXES:
         raise ValueError(f"unknown axis {axis!r}, expected one of {', '.join(AXES)}")
+    unknown = [name for name in levels if name not in ALL_LEVELS]
+    if unknown:
+        raise ValueError(
+            f"unknown dirt level {', '.join(unknown)}, expected some of {', '.join(ALL_LEVELS)}"
+        )
     work, out = work_dir.resolve(), out_dir.resolve()
     if work.is_relative_to(out) or out.is_relative_to(work):
         raise ValueError(
@@ -99,7 +110,7 @@ def vocal_run(
     variants = {ORIGINAL: original}
     chains: list[ChainResult] = []
     vocals = {ORIGINAL: stems.vocal}
-    for level in DIRT_LEVELS if axis == "dirt" else (EXTRA,):
+    for level in [ALL_LEVELS[name] for name in levels] if axis == "dirt" else (EXTRA,):
         log.info("processing the vocal: %s", level.name)
         vocal, chain = process_vocal(stems.vocal, rate, level, target, upper)
         chains.append(chain)
@@ -108,7 +119,7 @@ def vocal_run(
             variants.update(balance_variants(vocal, stems.beat))
     if axis == "dirt":
         variants.update(
-            dirt_variants({k: v for k, v in vocals.items() if k != ORIGINAL}, stems.beat)
+            dirt_variants({k: v for k, v in vocals.items() if k != ORIGINAL}, stems.beat, vocal_db)
         )
     run_dir = new_run_dir(work_dir / "runs")
     out_run = new_run_dir(out_dir)
@@ -116,7 +127,7 @@ def vocal_run(
     listen_dir = out_run / "listen"
     seed = secrets.randbits(32) if seed is None else seed
     key = write_listen_set(variants, rate, listen_dir, seed)
-    _write_records(run_dir, axis, seed, key, listen_dir, rate, upper, target, chains)
+    _write_records(run_dir, axis, seed, key, listen_dir, rate, upper, target, chains, vocal_db)
     write_vocal_report(
         run_dir / "report.md",
         vocals,
@@ -139,6 +150,7 @@ def _write_records(
     upper: float,
     target: Target,
     chains: list[ChainResult],
+    vocal_db: float,
 ) -> None:
     (run_dir / "key.json").write_text(
         json.dumps(
@@ -154,8 +166,9 @@ def _write_records(
                 "target": asdict(target),
                 "axis": axis,
                 "chains": [asdict(c) for c in chains],
-                "levels": [asdict(level) for level in (*DIRT_LEVELS, EXTRA)],
+                "levels": [asdict(level) for level in ALL_LEVELS.values()],
                 "balance_db": list(BALANCE_DB),
+                "vocal_db": vocal_db,
             },
             indent=1,
         ),

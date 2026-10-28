@@ -9,6 +9,7 @@ from redline.chain import (
     EQ_BANDS,
     EXTRA,
     GAIN_LIMIT_DB,
+    LOUDEST,
     Compressor,
     DirtLevel,
     Target,
@@ -144,7 +145,7 @@ def test_dirt_flattens_peaks_level_by_level():
     x = speechlike(floor=0.3)
     target = target_of(x)
     crests = [gated_crest_db(x, RATE)]
-    for level in (LEVELS["light"], LEVELS["medium"], LEVELS["heavy"], EXTRA):
+    for level in (LEVELS["light"], LEVELS["medium"], LEVELS["heavy"], EXTRA, LOUDEST):
         out, _ = process_vocal(x, RATE, level, target, UPPER)
         crests.append(gated_crest_db(out, RATE))
     assert all(a > b for a, b in itertools.pairwise(crests)), crests

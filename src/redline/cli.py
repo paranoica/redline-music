@@ -45,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="dirt",
         help="what the variants change: the dirt level, or the vocal level against the beat",
     )
+    vocal.add_argument(
+        "--levels",
+        default="eq,light,medium,heavy",
+        help="dirt axis levels, comma separated: eq, light, medium, heavy, extra, loudest",
+    )
+    vocal.add_argument(
+        "--vocal-db", type=float, default=0.0, help="vocal against the beat on the dirt axis, dB"
+    )
     return parser
 
 
@@ -93,6 +101,8 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
             separator or RoformerSeparator(),
             args.seed,
             args.axis,
+            tuple(name.strip() for name in args.levels.split(",") if name.strip()),
+            args.vocal_db,
         )
     except (AudioError, SeparationError, ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)

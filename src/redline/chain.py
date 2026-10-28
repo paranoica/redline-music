@@ -77,6 +77,8 @@ DIRT_LEVELS = (
 )
 # past heavy, for the rounds that hold the dirt and move something else
 EXTRA = DirtLevel("extra", Compressor(-34.0, 20.0, 1.0, 50.0), 24.0, 9.0)
+LOUDEST = DirtLevel("loudest", Compressor(-38.0, 30.0, 1.0, 40.0), 30.0, 12.0)
+ALL_LEVELS = {level.name: level for level in (*DIRT_LEVELS, EXTRA, LOUDEST)}
 
 
 @dataclass(frozen=True)

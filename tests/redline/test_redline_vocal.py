@@ -212,6 +212,29 @@ def test_a_reference_without_vocal_is_named():
         reference_target([ref_result("a.wav", [0.0, -3.0]), ref_result("b.wav", [])])
 
 
+def test_dirt_variants_lower_the_vocal_only():
+    rng = make_rng()
+    beat = rng.standard_normal((1000, 2)).astype(np.float32)
+    vocal = rng.standard_normal((1000, 2)).astype(np.float32)
+    mix = dirt_variants({"heavy": vocal}, beat, vocal_db=-6.0)["heavy"]
+    np.testing.assert_allclose(mix - beat, vocal * 10 ** (-6 / 20), atol=1e-6)
+
+
+def test_dirt_axis_takes_chosen_levels_at_a_chosen_balance(inputs, tmp_path):
+    levels = ("medium", "heavy", "extra", "loudest")
+    result = run(inputs, tmp_path, seed=10, levels=levels, vocal_db=-6.0)
+    key = json.loads((result.run_dir / "key.json").read_text())
+    assert sorted(key["key"].values()) == sorted(["original", *levels])
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert [c["level"] for c in chain["chains"]] == list(levels)
+    assert chain["vocal_db"] == -6.0
+
+
+def test_an_unknown_level_is_refused(inputs, tmp_path):
+    with pytest.raises(ValueError, match="unknown dirt level"):
+        run(inputs, tmp_path, levels=("heavy", "nuclear"))
+
+
 def test_dirt_variants_add_the_beat_untouched():
     rng = make_rng()
     beat = rng.standard_normal((1000, 2)).astype(np.float32)
@@ -247,3 +270,13 @@ def test_a_quiet_reference_vocal_is_refused_as_the_reference():
     with pytest.raises(ValueError, match=r"q\.wav: no vocal in the reference: ") as raised:
         reference_target([ref_result("a.wav", [0.0, -3.0]), quiet])
     assert "track" not in str(raised.value)
+
+
+def test_dirt_axis_applies_the_vocal_offset_to_the_files(inputs, tmp_path):
+    # the fake beat is the mix itself at half level: with the vocal 60 dB down every file
+    # is that beat, whatever the dirt did to the vocal
+    result = run(inputs, tmp_path, seed=11, levels=("loudest",), vocal_db=-60.0)
+    source, _ = sf.read(inputs[0], always_2d=True)
+    for path in sorted(result.listen_dir.iterdir()):
+        data, _ = sf.read(path, always_2d=True)
+        assert np.corrcoef(data[:, 0], source[:, 0])[0, 1] > 0.999, path.name
