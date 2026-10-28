@@ -6,8 +6,9 @@ import soundfile as sf
 from redline_signals import make_rng, write
 
 from redline.cli import main
-from redline.final_run import master_round, master_targets
+from redline.final_run import master_round, master_targets, run_track
 from redline.loudness import integrated_lufs
+from redline.master import CEILING_DB
 from redline.run import FileResult
 
 
@@ -116,3 +117,88 @@ def test_cli_master_without_references_exits_2(inputs, tmp_path):
     empty.mkdir()
     args = ["master", "--track", str(track), "--ref", str(empty), "--out", str(tmp_path / "o")]
     assert main(args, separator=HalfSeparator()) == 2
+
+
+SPEC_FILES = [
+    ".gitignore",
+    "chain.json",
+    "compare/final.wav",
+    "compare/original.wav",
+    "final.wav",
+    "original.wav",
+    "report.md",
+    "stems/beat.wav",
+    "stems/vocal.wav",
+]
+
+
+def make_track(inputs, tmp_path):
+    track, refs = inputs
+    return run_track(track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator())
+
+
+def test_run_writes_the_spec_folder(inputs, tmp_path):
+    folder = make_track(inputs, tmp_path)
+    files = sorted(str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file())
+    assert files == SPEC_FILES
+    assert (folder / ".gitignore").read_text() == "*\n"
+    assert folder.is_relative_to(tmp_path / "o")
+
+
+def test_final_is_hot_and_original_matches_its_loudness(inputs, tmp_path):
+    folder = make_track(inputs, tmp_path)
+    chain = json.loads((folder / "chain.json").read_text())
+    final, rate = sf.read(folder / "final.wav", always_2d=True)
+    original, _ = sf.read(folder / "original.wav", always_2d=True)
+    target = chain["master"]["target_lufs"]
+    assert integrated_lufs(final, rate) == pytest.approx(target, abs=0.5)
+    assert 20 * np.log10(np.abs(final).max()) <= CEILING_DB + 0.01
+    assert integrated_lufs(original, rate) == pytest.approx(integrated_lufs(final, rate), abs=0.2)
+    assert sf.info(folder / "original.wav").subtype == "FLOAT"
+
+
+def test_compare_pair_is_at_one_safe_loudness(inputs, tmp_path):
+    folder = make_track(inputs, tmp_path)
+    levels = []
+    for name in ("final", "original"):
+        data, rate = sf.read(folder / "compare" / f"{name}.wav", always_2d=True)
+        levels.append(integrated_lufs(data, rate))
+        assert 20 * np.log10(np.abs(data).max()) < 0
+    assert levels[0] == pytest.approx(levels[1], abs=0.1)
+
+
+def test_stems_rebuild_the_mix_before_the_master(inputs, tmp_path):
+    folder = make_track(inputs, tmp_path)
+    vocal, _ = sf.read(folder / "stems" / "vocal.wav", always_2d=True)
+    beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
+    chain = json.loads((folder / "chain.json").read_text())
+    final, _ = sf.read(folder / "final.wav", always_2d=True)
+    gain = 10 ** (chain["master"]["gain_db"] / 20)
+    # before the clip, final is the stems' sum times the master gain
+    unclipped = np.abs((vocal + beat) * gain) < 0.5
+    np.testing.assert_allclose(final[unclipped], ((vocal + beat) * gain)[unclipped], atol=2e-3)
+
+
+def test_report_says_what_was_done_in_words(inputs, tmp_path):
+    text = (make_track(inputs, tmp_path) / "report.md").read_text(encoding="utf-8")
+    for phrase in ("Вокал", "Мастер", "LUFS", "ближе", "референс"):
+        assert phrase in text
+    assert "лучше" not in text.replace("не «лучше»", "")
+
+
+def test_cli_run_prints_the_folder(inputs, tmp_path, capsys):
+    track, refs = inputs
+    args = ["run", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    args += ["--out", str(tmp_path / "o")]
+    assert main(args, separator=HalfSeparator()) == 0
+    printed = capsys.readouterr().out.strip()
+    (folder,) = list((tmp_path / "o").iterdir())
+    assert printed == str(folder)
+
+
+def test_run_masters_to_the_references_median(inputs, tmp_path):
+    folder = make_track(inputs, tmp_path)
+    chain = json.loads((folder / "chain.json").read_text())
+    refs = sorted(inputs[1].iterdir())
+    levels = [integrated_lufs(sf.read(r, always_2d=True)[0], 44100) for r in refs]
+    assert chain["master"]["target_lufs"] == pytest.approx(round(float(np.median(levels)), 1))

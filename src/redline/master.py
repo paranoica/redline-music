@@ -23,7 +23,7 @@ LUFS_TOLERANCE = 0.1
 
 @dataclass(frozen=True)
 class MasterResult:
-    """What the master did: the gain before the clip and whether the target was reached."""
+    """What the master did: the gain on unclipped samples and whether the target was reached."""
 
     target_lufs: float
     gain_db: float
@@ -48,13 +48,15 @@ def _clip_cheap(samples: Samples, gain_db: float) -> Samples:
     return hard_clip(samples * np.float32(10 ** (gain_db / 20)), _ceiling())
 
 
-def _clip_clean(samples: Samples, gain_db: float) -> Samples:
+def _clip_clean(samples: Samples, gain_db: float) -> tuple[Samples, float]:
     gained = samples * np.float32(10 ** (gain_db / 20))
     out = oversampled(lambda v: hard_clip(v, _ceiling()), gained, OVERSAMPLING)
     # the decimation filter rings a few tenths of a dB past the ceiling; turning the whole
     # result down keeps the peak under it without the aliasing a second clip would add
     peak = float(np.abs(out).max())
-    return out * np.float32(_ceiling() / peak) if peak > _ceiling() else out
+    if peak <= _ceiling():
+        return out, 0.0
+    return out * np.float32(_ceiling() / peak), 20 * math.log10(_ceiling() / peak)
 
 
 def master_clip(samples: Samples, rate: int, target_lufs: float) -> tuple[Samples, MasterResult]:
@@ -80,7 +82,7 @@ def master_clip(samples: Samples, rate: int, target_lufs: float) -> tuple[Sample
                 low = middle
             else:
                 high = middle
-    out = _clip_clean(samples, high)
+    out, trim = _clip_clean(samples, high)
     if reached:
         # the turn-down above costs a few tenths of a LU; push the gain to win them back
         for _ in range(CORRECTIONS):
@@ -92,6 +94,6 @@ def master_clip(samples: Samples, rate: int, target_lufs: float) -> tuple[Sample
                 _clip_cheap(samples, high), rate
             )
             high = min(high + short / max(slope, MIN_SLOPE), MAX_GAIN_DB)
-            out = _clip_clean(samples, high)
+            out, trim = _clip_clean(samples, high)
     clipped = float(np.mean(np.abs(samples * 10 ** (high / 20)) > _ceiling()))
-    return out, MasterResult(target_lufs, high, reached, clipped)
+    return out, MasterResult(target_lufs, high + trim, reached, clipped)

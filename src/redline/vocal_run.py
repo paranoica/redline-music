@@ -67,6 +67,14 @@ def check_folders(work_dir: Path, out_dir: Path) -> None:
         )
 
 
+def _check_levels(levels: tuple[str, ...]) -> None:
+    unknown = [name for name in levels if name not in ALL_LEVELS]
+    if unknown:
+        raise ValueError(
+            f"unknown dirt level {', '.join(unknown)}, expected some of {', '.join(ALL_LEVELS)}"
+        )
+
+
 def dirt_variants(
     vocals: dict[str, Samples], beat: Samples, vocal_db: float = 0.0
 ) -> dict[str, Samples]:
@@ -100,11 +108,7 @@ def vocal_run(
     """
     if axis not in AXES:
         raise ValueError(f"unknown axis {axis!r}, expected one of {', '.join(AXES)}")
-    unknown = [name for name in levels if name not in ALL_LEVELS]
-    if unknown:
-        raise ValueError(
-            f"unknown dirt level {', '.join(unknown)}, expected some of {', '.join(ALL_LEVELS)}"
-        )
+    _check_levels(levels)
     check_folders(work_dir, out_dir)
     inputs = measure_inputs(track, refs, work_dir, separator)
     stems, upper = inputs.track_stems, inputs.upper

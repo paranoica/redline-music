@@ -63,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     master.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     master.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
     master.add_argument("--seed", type=int, help="seed of the letter shuffle")
+    run = commands.add_parser(
+        "run", help="process a track with the chosen settings and write the result folder"
+    )
+    run.add_argument("--track", type=Path, required=True, help="the track from Suno")
+    run.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    run.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    run.add_argument("--out", type=Path, default=Path("output"), help="result folder")
     return parser
 
 
@@ -140,6 +149,23 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
+def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
+    from redline.final_run import run_track
+    from redline.separate import RoformerSeparator, SeparationError
+
+    refs = reference_files(args.ref)
+    if not refs:
+        print("redline: no reference audio files given", file=sys.stderr)
+        return 2
+    try:
+        folder = run_track(args.track, refs, args.work, args.out, separator or RoformerSeparator())
+    except (AudioError, SeparationError, ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    print(folder)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None) -> int:
     """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
@@ -151,5 +177,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _vocal(args, separator)
     if args.command == "master":
         return _master(args, separator)
+    if args.command == "run":
+        return _run(args, separator)
     parser.print_help()
     return 0
