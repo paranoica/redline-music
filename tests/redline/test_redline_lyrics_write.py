@@ -380,3 +380,16 @@ def test_cli_suno_writes_the_card_of_a_saved_seed(base, capsys):
     assert "Title:" in out and "Lyrics:" in out and "Variety: 0" in out
     assert (folder(base, 34) / "suno.md").read_text(encoding="utf-8") == out
     assert main(["lyrics", "suno", "--seed", "35", "--lyrics", str(base[0])]) == 2
+
+
+def test_cli_suno_takes_the_owners_style_file(base, capsys):
+    run(base, 36)
+    draft(base, 36, good_draft(recipe_of(base, 36)))
+    assert run(base, 36) == 0
+    (base[0] / "suno-style.txt").write_text("свой стиль, 150 bpm\n", encoding="utf-8")
+    capsys.readouterr()
+    assert main(["lyrics", "suno", "--seed", "36", "--lyrics", str(base[0])]) == 0
+    assert "Style: свой стиль, 150 bpm\n" in capsys.readouterr().out
+    (base[0] / "suno-style.txt").write_text("\n", encoding="utf-8")
+    assert main(["lyrics", "suno", "--seed", "36", "--lyrics", str(base[0])]) == 0
+    assert "Style: trap, " in capsys.readouterr().out

@@ -1,7 +1,6 @@
 import pytest
 
 from redline.lyrics.parse import parse_text
-from redline.lyrics.recipe import Recipe, SectionPlan
 from redline.lyrics.suno import MAX_CHARACTERS, card, convert, respell, title_of
 
 TEXT = """[Интро]
@@ -33,12 +32,6 @@ TEXT = """[Интро]
 [Аутро]
 тихо
 """
-
-
-def recipe(band="short"):
-    return Recipe(
-        1, "лёд, кэш", band, (SectionPlan("verse", 2, (5, 9), "AABB"),), (), (), (), 0, 0, 0
-    )
 
 
 def lines_of(text):
@@ -87,15 +80,33 @@ def test_the_title_comes_from_the_chorus():
 
 
 def test_the_card_holds_every_field_and_sliders_in_range():
-    text = card(parse_text(TEXT), recipe())
+    text = card(parse_text(TEXT))
     for field in ("Title", "Style", "Exclude", "Weirdness", "Style Influence", "Variety", "Lyrics"):
         assert field in text
     assert "Variety: 0" in text
 
 
+def field(text, name):
+    return text.split(f"{name}: ")[1].split("\n")[0]
+
+
 def test_style_tags_are_few_and_name_no_one():
-    style = card(parse_text(TEXT), recipe("long")).split("Style: ")[1].split("\n")[0]
+    style = field(card(parse_text(TEXT)), "Style")
     assert 3 <= len(style.split(", ")) <= 7 and len(style) < 1000
+
+
+def test_the_style_is_fast_trap_and_slow_low_vocals_are_excluded():
+    text = card(parse_text(TEXT))
+    style, exclude = field(text, "Style").split(", "), field(text, "Exclude").split(", ")
+    assert style[0] == "trap"
+    assert not {"slow", "deep", "underground", "laid-back", "hazy"} & set(" ".join(style).split())
+    assert {"slow", "deep vocals", "underground rap"} <= set(exclude)
+
+
+def test_an_own_style_replaces_the_default_and_keeps_the_rest():
+    text = card(parse_text(TEXT), style="мой стиль, 150 bpm")
+    assert field(text, "Style") == "мой стиль, 150 bpm"
+    assert field(text, "Exclude") == field(card(parse_text(TEXT)), "Exclude")
 
 
 def test_too_long_lyrics_are_refused():

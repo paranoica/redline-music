@@ -9,7 +9,6 @@ from collections.abc import Callable
 
 from redline.lyrics.normalize import DIGIT_GROUP
 from redline.lyrics.parse import Track
-from redline.lyrics.recipe import Recipe
 from redline.lyrics.rhyme import STRESS, VOWELS, last_word
 from redline.lyrics.syllables import number_words
 
@@ -29,14 +28,27 @@ LETTER_NAMES = (
 LETTERS = dict(zip("ABCDEFGHIJKLMNOPQRSTUVWXYZ", LETTER_NAMES.split(), strict=True))
 ACRONYM = re.compile(r"\b[A-Z]{2,4}\b")
 NUMBER = re.compile(r"\d+")
-# the scene's sound in words Suno knows; no names, which the style box must never hold
-STYLE = ["dark russian underground rap", "cloud rap", "autotuned male vocals", "distorted 808"]
-FLOW = {
-    "short": "fast bouncy flow",
-    "middle": "laid-back flow",
-    "long": "slow hazy flow",
-}
-EXCLUDE = ["pop", "acoustic", "female vocals", "clean vocals"]
+# the scene's sound in words Suno knows; no names, which the style box must never hold.
+# The tempo is the references' measured one, at full time rather than half
+STYLE = [
+    "trap",
+    "soundcloud rap",
+    "160 bpm",
+    "energetic high-pitched male vocals",
+    "heavy autotune",
+    "hard 808",
+    "fast hi-hats",
+]
+EXCLUDE = [
+    "slow",
+    "deep vocals",
+    "underground rap",
+    "boom bap",
+    "lo-fi",
+    "pop",
+    "acoustic",
+    "female vocals",
+]
 # starting points from user guides for v6: keep the tags as typed, follow them closely
 SETTINGS = {
     "Model": "v6",
@@ -111,13 +123,18 @@ def title_of(track: Track) -> str:
     return first[:1].upper() + first[1:]
 
 
-def card(track: Track, recipe: Recipe, mark: Mark | None = None) -> str:
-    """Everything to fill in Suno for one text, ready to copy field by field."""
-    style = ", ".join([*STYLE, FLOW[recipe.band]])
+def card(track: Track, mark: Mark | None = None, style: str | None = None) -> str:
+    """Everything to fill in Suno for one text, ready to copy field by field.
+
+    Args:
+        track: The saved text.
+        mark: Puts stress marks into a line, or None for none.
+        style: The owner's own style box, or None for the default one.
+    """
     out = [
         f"Title: {title_of(track)}",
         "",
-        f"Style: {style}",
+        f"Style: {style or ', '.join(STYLE)}",
         f"Exclude: {', '.join(EXCLUDE)}",
         "",
         *(f"{name}: {value}" for name, value in SETTINGS.items()),

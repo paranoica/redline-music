@@ -414,7 +414,6 @@ def _lyrics_write(args: argparse.Namespace) -> int:
 def _lyrics_suno(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.parse import LyricsError, parse_text
-    from redline.lyrics.recipe import recipe_from_json
     from redline.lyrics.suno import card
 
     folder = args.lyrics / "generated" / str(args.seed)
@@ -422,9 +421,11 @@ def _lyrics_suno(args: argparse.Namespace) -> int:
         if not (folder / "text.txt").exists():
             raise LyricsError(f"seed {args.seed} has no saved text")
         track = parse_text((folder / "text.txt").read_text(encoding="utf-8"))
-        recipe = recipe_from_json((folder / "recipe.json").read_text(encoding="utf-8"))
         mark = _lazy_stresser(stress) if args.stress else None
-        text = card(track, recipe, mark)
+        own = args.lyrics / "suno-style.txt"
+        lines = own.read_text(encoding="utf-8").splitlines() if own.exists() else []
+        style = ", ".join(line.strip() for line in lines if line.strip())
+        text = card(track, mark, style or None)
         (folder / "suno.md").write_text(text, encoding="utf-8")
     except (LyricsError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)
