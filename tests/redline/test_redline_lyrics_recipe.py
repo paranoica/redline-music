@@ -217,8 +217,9 @@ def test_hooks_of_a_beat_recipe_share_one_flow_after_growing(profile):
 
 
 def test_a_flow_too_fast_for_the_beat_is_never_drawn(profile):
-    flows = {s.flow for seed in range(60) for s in make_recipe(profile, seed, bpm=110.0).sections}
-    assert "sixteenths" not in flows and flows
+    for bpm in (100.0, 110.0):
+        flows = {s.flow for seed in range(60) for s in make_recipe(profile, seed, bpm=bpm).sections}
+        assert "sixteenths" not in flows and flows
     slow = {s.flow for seed in range(60) for s in make_recipe(profile, seed, bpm=60.0).sections}
     assert "sixteenths" in slow
 

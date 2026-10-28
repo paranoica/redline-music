@@ -10,6 +10,8 @@ from redline.pitch import tempo_candidates
 
 # one octave, so exactly one of a tempo, its half and its double falls in it
 HALF_TIME = (60.0, 120.0)
+# four bars at the slowest half-time tempo; anything shorter gives a tempo of noise
+MIN_SECONDS = 16.0
 
 
 def half_time(candidates: Iterable[float]) -> float:
@@ -22,8 +24,9 @@ def half_time(candidates: Iterable[float]) -> float:
             bpm *= 2
         while bpm >= high:
             bpm /= 2
-        if low <= bpm < high:
-            return round(bpm, 1)
+        # rounding can carry a value just under the octave's top onto it
+        bpm = round(bpm, 1)
+        return round(bpm / 2, 1) if bpm >= high else bpm
     raise LyricsError("no tempo found in the beat; pass --bpm")
 
 
@@ -33,4 +36,7 @@ def beat_bpm(path: Path) -> float:
         decoded = decode(path)
     except AudioError as error:
         raise LyricsError(str(error)) from error
+    seconds = len(decoded.samples) / decoded.rate
+    if seconds < MIN_SECONDS:
+        raise LyricsError(f"the beat lasts {seconds:.1f} seconds; a tempo needs {MIN_SECONDS:g}")
     return half_time(tempo_candidates(decoded.samples, decoded.rate))

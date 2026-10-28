@@ -17,9 +17,9 @@ recipe below; it was drawn from the statistics of the scene and of the owner's o
   brand next to a bus stop in a small town). Short. Never explain the punch.
 - Russian and English mix inside one line, the way people in the scene talk.
 - Hooks are chants: few words, repeated, easy to shout along.
-- Line lengths wander: short hits between long runs. Do not write every line the same length;
-  about a third of the lines may leave the recipe's syllable range. When the recipe names a
-  beat, the flow sets the length instead: at most one line in four leaves its range.
+- Without a beat, line lengths wander: short hits between long runs, and about a third of the
+  lines may leave the recipe's syllable range. When the recipe names a beat, the lines of a
+  section stay even instead, each filling its bar; at most one line in four leaves its range.
 - Pills, smoke and drink are part of the picture, named in the scene's slang. Mention them,
   never instruct (no doses, no how-to).
 

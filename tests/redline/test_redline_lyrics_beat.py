@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from redline_signals import write
+from redline_signals import make_rng, write
 
 from redline.lyrics.beat import beat_bpm, half_time
 from redline.lyrics.parse import LyricsError
@@ -21,6 +21,7 @@ def test_the_half_time_value_is_the_one_in_the_octave_from_60():
     assert half_time((40.0, 80.0, 160.0)) == 80.0
     assert half_time((30.0, 60.0, 120.0)) == 60.0
     assert half_time((59.9, 119.8, 239.6)) == 119.8
+    assert half_time((239.95,)) == 60.0
 
 
 def test_no_tempo_is_an_error():
@@ -36,6 +37,12 @@ def test_a_click_track_gives_its_half_time_tempo(tmp_path, played, heard):
 
 def test_silence_and_a_missing_file_are_errors(tmp_path):
     with pytest.raises(LyricsError):
-        beat_bpm(write(tmp_path, "quiet.wav", np.zeros((RATE * 5, 2), dtype=np.float32), RATE))
+        beat_bpm(write(tmp_path, "quiet.wav", np.zeros((RATE * 10, 2), dtype=np.float32), RATE))
     with pytest.raises(LyricsError):
         beat_bpm(tmp_path / "none.wav")
+
+
+def test_a_clip_shorter_than_a_few_bars_is_not_a_beat(tmp_path):
+    noise = (make_rng().standard_normal((RATE * 2, 2)) * 0.1).astype(np.float32)
+    with pytest.raises(LyricsError, match="seconds"):
+        beat_bpm(write(tmp_path, "short.wav", noise, RATE))
