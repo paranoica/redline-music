@@ -3,6 +3,8 @@ import pytest
 from redline_signals import make_rng, tone
 
 from redline.chain import Target
+from redline.compare import FEW_REFS, NO_DATA, metric_verdict
+from redline.compare import IN_RANGE as STAGE_1_IN_RANGE
 from redline.spectrum import tonal_curve
 from redline.vocal_report import (
     CLOSER,
@@ -18,36 +20,48 @@ from redline.vocal_report import (
 RATE = 44100
 
 
+# references 4 and 6, floor 0.5: stage 1 calls a value in range within half the spread plus
+# the floor past either end, so 2.5 … 7.5
+REFS = [4.0, 6.0]
+FLOOR = 0.5
+
+
 @pytest.mark.parametrize(
     ("value", "original", "expected"),
     [
         (5.0, 9.0, IN_RANGE),
-        (4.0, 9.0, IN_RANGE),
-        (6.0, 4.0, IN_RANGE),
-        (7.0, 9.0, CLOSER),
+        (7.5, 9.0, IN_RANGE),
+        (2.5, 1.0, IN_RANGE),
+        (7.6, 9.0, CLOSER),
+        (2.4, 1.0, CLOSER),
         (9.5, 9.0, FARTHER),
-        (3.5, 3.0, CLOSER),
-        (2.0, 3.0, FARTHER),
-        (9.0, 9.0, SAME),
+        (1.0, 2.0, FARTHER),
+        (9.2, 9.0, SAME),
+        (8.8, 9.0, SAME),
     ],
 )
 def test_against_refs_words_a_variant_relative_to_the_original(value, original, expected):
-    # references span 4 … 6
-    assert against_refs(value, original, [4.0, 6.0, 5.0]) == expected
+    assert against_refs(value, original, REFS, FLOOR) == expected
 
 
 def test_against_refs_for_the_original_itself():
-    assert against_refs(5.0, None, [4.0, 6.0]) == IN_RANGE
-    assert against_refs(9.0, None, [4.0, 6.0]) == OUT_OF_RANGE
+    assert against_refs(7.5, None, REFS, FLOOR) == IN_RANGE
+    assert against_refs(7.6, None, REFS, FLOOR) == OUT_OF_RANGE
+
+
+@pytest.mark.parametrize("value", [2.0, 2.5, 4.0, 7.5, 7.6, 9.0])
+def test_against_refs_agrees_with_stage_1_on_the_range(value):
+    stage_1 = metric_verdict(value, REFS, FLOOR).status == STAGE_1_IN_RANGE
+    assert (against_refs(value, None, REFS, FLOOR) == IN_RANGE) == stage_1
 
 
 @pytest.mark.parametrize("refs", [[], [5.0], [5.0, None, float("nan")]])
 def test_against_refs_needs_two_references(refs):
-    assert against_refs(5.0, 4.0, refs) == "мало референсов"
+    assert against_refs(5.0, 4.0, refs, FLOOR) == FEW_REFS
 
 
 def test_against_refs_without_a_value():
-    assert against_refs(None, 4.0, [4.0, 6.0]) == "нет данных"
+    assert against_refs(None, 4.0, REFS, FLOOR) == NO_DATA
 
 
 def test_gap_level_reads_pauses_against_the_loud_part():
@@ -85,6 +99,7 @@ def test_report_has_a_row_per_variant_and_the_reference_range(tmp_path):
         assert row in text
     assert "0.50 … 1.50" in text
     assert "лучше" not in text.replace("не «лучше»", "")
+    assert "чище" not in text
     assert "48" not in text
 
 

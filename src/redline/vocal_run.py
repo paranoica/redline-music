@@ -42,8 +42,13 @@ class VocalRun:
 def reference_target(refs: list[FileResult]) -> Target:
     """Per-band median of the references' vocal tonal curves."""
     for ref in refs:
-        if not ref.info["vocal.tonal_curve"]["db"]:
-            raise ValueError(f"{ref.name}: no vocal in the reference")
+        vocal, mix = ref.values.get("vocal.lufs"), ref.values.get("mix.lufs")
+        try:
+            if not ref.info["vocal.tonal_curve"]["db"] or vocal is None or mix is None:
+                raise ValueError("the vocal stem is silent")
+            check_vocal(vocal, mix)
+        except ValueError as error:
+            raise ValueError(f"{ref.name}: no vocal in the reference ({error})") from error
     curves = [r.info["vocal.tonal_curve"] for r in refs]
     centers = tuple(curves[0]["centers_hz"])
     if any(tuple(c["centers_hz"]) != centers for c in curves):

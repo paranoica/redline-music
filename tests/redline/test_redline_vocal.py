@@ -196,7 +196,8 @@ def test_a_run_never_writes_into_an_existing_output_folder(inputs, tmp_path):
 
 def ref_result(name, curve_db):
     curve = {"centers_hz": [1000.0 * k for k in range(1, len(curve_db) + 1)], "db": curve_db}
-    return FileResult(name, "wav", 44100, False, info={"vocal.tonal_curve": curve})
+    values = {"vocal.lufs": -20.0, "mix.lufs": -14.0}
+    return FileResult(name, "wav", 44100, False, values=values, info={"vocal.tonal_curve": curve})
 
 
 def test_reference_target_is_the_median_curve():
@@ -219,3 +220,21 @@ def test_dirt_variants_add_the_beat_untouched():
     assert list(variants) == ["eq", "heavy"]
     for name, mix in variants.items():
         np.testing.assert_allclose(mix - vocals[name], beat, atol=1e-6)
+
+
+class ResidueRefsSeparator:
+    """The 8 s track keeps its vocal; the 6 s references give only residue."""
+
+    id = "fake:residue-refs"
+
+    def __call__(self, samples, rate):
+        share = 0.5 if len(samples) > 7 * rate else 0.0001
+        return samples * share, samples * (1 - share)
+
+
+def test_a_reference_with_only_residue_is_named(inputs, tmp_path):
+    track, refs = inputs
+    with pytest.raises(ValueError, match=r"a\.wav: no vocal"):
+        vocal_run(
+            track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", ResidueRefsSeparator()
+        )

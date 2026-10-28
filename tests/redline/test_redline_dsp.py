@@ -91,6 +91,16 @@ def test_expander_turns_a_gap_down_by_its_range_at_most():
     assert steady_gain(x, gate_db=-40.0, **SETTINGS) == pytest.approx(-EXPANDER_RANGE_DB, abs=0.5)
 
 
+def test_one_click_does_not_duck_the_compressor():
+    x = tone(400, 2, amp=level(-20))
+    x[RATE] = 0.99
+    gain = compressor_gain_db(
+        x, RATE, threshold_db=-30.0, ratio=10.0, attack_ms=2.0, release_ms=60.0, gate_db=-60.0
+    )
+    steady = float(np.median(gain[RATE // 2 : RATE - 1000]))
+    assert gain[RATE - 1000 : RATE + 10000].min() > steady - 1.0
+
+
 def test_compressor_is_stereo_linked():
     rng = make_rng()
     n = RATE * 3

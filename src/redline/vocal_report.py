@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 
 from redline.chain import FIT_FROM_HZ, Target, curve_distance
+from redline.compare import FEW_REFS, IN_RANGE, METRICS, NO_DATA, SPREAD_MARGIN
 from redline.dsp import block_levels_db
 from redline.dynamics import waveform_kurtosis
 from redline.loudness import measure_loudness
@@ -15,13 +16,10 @@ from redline.spectrum import tonal_curve
 
 Samples = npt.NDArray[np.floating]
 
-IN_RANGE = "в диапазоне"
 OUT_OF_RANGE = "вне диапазона"
 CLOSER = "ближе"
 FARTHER = "дальше"
 SAME = "так же"
-FEW_REFS = "мало референсов"
-NO_DATA = "нет данных"
 GAP_PERCENTILE = 10
 LOUD_PERCENTILE = 95
 
@@ -44,24 +42,28 @@ def _distance(value: float, low: float, high: float) -> float:
     return max(low - value, 0.0, value - high)
 
 
-def against_refs(value: float | None, original: float | None, refs: Sequence[float | None]) -> str:
+def against_refs(
+    value: float | None, original: float | None, refs: Sequence[float | None], floor: float
+) -> str:
     """Where a value sits against the references' range, and whether it moved toward it.
 
-    With no original, only in or out of the range.
+    The range is stage 1's: half the references' spread plus the metric's floor past either
+    end. A move smaller than the floor reads as no move. With no original, only in or out.
     """
     known = [r for r in refs if r is not None and math.isfinite(r)]
     if len(known) < 2:
         return FEW_REFS
     if value is None or not math.isfinite(value):
         return NO_DATA
-    low, high = min(known), max(known)
+    margin = SPREAD_MARGIN * (max(known) - min(known)) + floor
+    low, high = min(known) - margin, max(known) + margin
     distance = _distance(value, low, high)
     if distance == 0:
         return IN_RANGE
     if original is None or not math.isfinite(original):
         return OUT_OF_RANGE
     before = _distance(original, low, high)
-    if math.isclose(distance, before):
+    if abs(distance - before) < floor:
         return SAME
     return CLOSER if distance < before else FARTHER
 
@@ -102,8 +104,8 @@ def write_vocal_report(
         "# Вокал: что сделал каждый вариант",
         "",
         "Цифры показывают «ближе / дальше от референсов», а не «лучше»: это решает слух.",
-        "Слово в ячейке: где вариант против диапазона референсов и сдвинулся ли он к нему "
-        "по сравнению с оригиналом.",
+        "Слово в ячейке: где вариант против диапазона референсов (тот же, что на этапе 1) и "
+        "сдвинулся ли он к нему по сравнению с оригиналом.",
         "",
         "| вариант | " + " | ".join(head) + " | расстояние кривой, дБ | паузы, дБ |",
         "|---" * (len(COLUMNS) + 3) + "|",
@@ -113,7 +115,7 @@ def write_vocal_report(
         for key, _, _ in COLUMNS:
             ref_values = [r.get(key) for r in refs]
             base = None if row is original else original[key]
-            word = against_refs(row[key], base, ref_values)
+            word = against_refs(row[key], base, ref_values, METRICS[key].floor)
             cells.append(f"{_number(row[key])} ({word})")
         cells += [_number(row["distance"]), _number(row["gap"])]
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
@@ -127,7 +129,7 @@ def write_vocal_report(
         f"Расстояние кривой: среднее по полосам от {FIT_FROM_HZ:.0f} Гц отличие тональной кривой "
         "вокала от медианы вокала референсов, меньше = ближе.",
         f"Паузы: уровень тихой части вокала ({GAP_PERCENTILE}-й процентиль) под громкой "
-        f"({LOUD_PERCENTILE}-й); ниже = чище паузы.",
+        f"({LOUD_PERCENTILE}-й); ниже = тише паузы под вокалом.",
     ]
     if native_rate != rate:
         lines.append(f"Трек пришёл в {native_rate} Гц и обработан в {rate} Гц.")

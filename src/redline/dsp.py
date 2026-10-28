@@ -93,7 +93,10 @@ def compressor_gain_db(
     channels (the loudest one per 1 ms block), so the stereo image does not move.
     """
     block = max(1, round(rate * BLOCK_SECONDS))
-    level = block_levels_db(samples, rate)
+    blocks = block_levels_db(samples, rate)
+    # the median of three neighbouring blocks: a one-block click does not reach the gain
+    padded = np.concatenate([blocks[:1], blocks, blocks[-1:]])
+    level = np.median(np.stack([padded[:-2], padded[1:-1], padded[2:]]), axis=0)
     count = len(level)
     squash = np.where(level > threshold_db, (threshold_db - level) * (1 - 1 / ratio), 0.0)
     expand = np.maximum(np.where(level < gate_db, level - gate_db, 0.0), -EXPANDER_RANGE_DB)
