@@ -1,0 +1,150 @@
+"""Checks of a draft against its recipe: lyrics only, sections, lines, syllables, rhymes."""
+
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+from redline.lyrics.normalize import words
+from redline.lyrics.parse import HEADER, parse_text
+from redline.lyrics.recipe import Recipe
+from redline.lyrics.rhyme import last_word, rhymes
+from redline.lyrics.syllables import count_syllables
+
+LINE_SLACK = 1
+# set from the owner's and the favourite artist's texts read as drafts of their own shape:
+# a quarter of them hold under 68 % and 61 % of lines within the band and one syllable,
+# and under 31 % of rhyme pairs by the owner's rule
+SYLLABLE_TOLERANCE = 1
+SYLLABLE_SHARE = 0.65
+NAMED_LINES = 5
+RHYME_SHARE = 0.3
+WINDOW = 4
+PAIRS = {
+    "AABB": ((0, 1), (2, 3)),
+    "ABAB": ((0, 2), (1, 3)),
+    "ABBA": ((0, 3), (1, 2)),
+    "AAAA": ((0, 1), (1, 2), (2, 3)),
+}
+# endings that rarely end anything but a verb; heuristics, so only reported
+VERB_ENDINGS = re.compile(
+    r"([аяеиуыо]ть|[ауяю]ет|[ауяюе]ют|ит|[аяеи]л|[аяеи]л[аи]|[аяеи]л(ся|ась))$"
+)
+SHORT_VERBS = 5
+NOT_VERBS_TEXT = (
+    "мать путь суть сеть нить кровать печать знать ртуть жуть плеть власть "
+    "вокал финал канал капитал сериал кристал нахал штурвал подвал скандал идеал причал "
+    "бокал вокзал журнал материал сигнал оригинал интервал криминал арсенал карнавал "
+    "предел пробел отдел удел крокодил кредит лимит магнит гранит динамит аппетит "
+    "бандит транзит визит депозит рубли нули корабли"
+)
+NOT_VERBS = set(NOT_VERBS_TEXT.split())
+StressMark = Callable[[str], str]
+
+
+@dataclass(frozen=True)
+class Problem:
+    """Something a draft must fix: what kind, where, and how."""
+
+    kind: str
+    where: str
+    detail: str
+
+
+def is_verb(word: str) -> bool:
+    """Whether a Russian word looks like a verb by its ending (a heuristic)."""
+    found = words(word, keep_doubles=True)
+    if not found:
+        return False
+    w = found[-1]
+    if w in NOT_VERBS:
+        return False
+    if w.endswith(("ться", "тся")) or re.search(r"([её]шь|ишь)$", w):
+        return True
+    return len(w) >= SHORT_VERBS and bool(VERB_ENDINGS.search(w))
+
+
+def _not_lyrics(text: str) -> list[Problem]:
+    if "```" in text:
+        return [Problem("not lyrics", "the draft", "code fences: write the lyrics only")]
+    for line in text.splitlines():
+        if line.strip():
+            if not HEADER.match(line.strip()):
+                return [Problem("not lyrics", "line 1", "start with a section header")]
+            break
+    return []
+
+
+def _sections(track: Any, recipe: Recipe, mark: StressMark) -> tuple[list[Problem], list, list]:
+    """Line counts per section, every line's distance from its band, and the scheme's pairs."""
+    problems: list[Problem] = []
+    lines: list[tuple[int, int, str]] = []
+    pairs: list[tuple[str, str]] = []
+    for i, (section, plan) in enumerate(zip(track.sections, recipe.sections, strict=True), 1):
+        sung = [line for line in section.lines if line.plain]
+        if abs(len(sung) - plan.lines) > LINE_SLACK:
+            problems.append(
+                Problem(
+                    "lines", f"section {i} ({plan.kind})", f"{len(sung)} lines, need {plan.lines}"
+                )
+            )
+        low, high = plan.syllables
+        for line in sung:
+            count = count_syllables(line.text)
+            miss = max(low - count, count - high, 0)
+            lines.append((miss, len(lines) + 1, f"{count} syllables, need {low}-{high}"))
+        for start in range(0, len(sung) - WINDOW + 1, WINDOW):
+            window = sung[start : start + WINDOW]
+            for a, b in PAIRS[plan.scheme]:
+                if words(window[a].plain) != words(window[b].plain):
+                    pairs.append(
+                        (last_word(mark(window[a].plain)), last_word(mark(window[b].plain)))
+                    )
+    return problems, lines, pairs
+
+
+def check_draft(
+    text: str,
+    recipe: Recipe,
+    mark: StressMark = str,
+    syllable_share: float = SYLLABLE_SHARE,
+    rhyme_share: float = RHYME_SHARE,
+) -> tuple[list[Problem], dict[str, Any]]:
+    """What the draft must fix to match the recipe, and the numbers behind the verdicts."""
+    problems = _not_lyrics(text)
+    if problems:
+        return problems, {}
+    track = parse_text(text)
+    got = [s.kind for s in track.sections]
+    wanted = [s.kind for s in recipe.sections]
+    if got != wanted:
+        detail = f"sections should be {'-'.join(wanted)}, got {'-'.join(got) or 'none'}"
+        return [Problem("sections", "the draft", detail)], {}
+    problems, lines, pairs = _sections(track, recipe, mark)
+    off = [line for line in lines if line[0] > SYLLABLE_TOLERANCE]
+    share = 1 - len(off) / len(lines) if lines else 1.0
+    if share < syllable_share:
+        problems.append(
+            Problem(
+                "syllables",
+                "the draft",
+                f"{share:.0%} of lines in range, need {syllable_share:.0%}",
+            )
+        )
+        for _, number, detail in sorted(off, key=lambda o: (-o[0], o[1]))[:NAMED_LINES]:
+            problems.append(Problem("syllables", f"line {number}", detail))
+    rhymed = sum(rhymes(a, b) for a, b in pairs) / len(pairs) if pairs else 1.0
+    if rhymed < rhyme_share:
+        problems.append(
+            Problem(
+                "rhymes", "the draft", f"{rhymed:.0%} of rhyme pairs rhyme, need {rhyme_share:.0%}"
+            )
+        )
+    verbs = sum(is_verb(a) and is_verb(b) for a, b in pairs)
+    stats = {
+        "syllables_in_range": round(share, 4),
+        "rhyme_pairs": len(pairs),
+        "rhymed_pairs": round(rhymed, 4),
+        "verb_rhymes": round(verbs / len(pairs), 4) if pairs else 0.0,
+    }
+    return problems, stats
