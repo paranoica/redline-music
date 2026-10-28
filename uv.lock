@@ -947,6 +947,7 @@ dependencies = [
     { name = "librosa" },
     { name = "numpy" },
     { name = "pyloudnorm" },
+    { name = "pyyaml" },
     { name = "scipy" },
     { name = "soundfile" },
 ]
@@ -974,6 +975,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "onnxruntime", marker = "extra == 'separation'", specifier = ">=1.20" },
     { name = "pyloudnorm", specifier = ">=0.2" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "soundfile", specifier = ">=0.13" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'separation'", specifier = ">=2.14,<2.15", index = "https://download.pytorch.org/whl/cu126" },
