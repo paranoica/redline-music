@@ -92,7 +92,7 @@ def _count_words(counts: Counts, kind: str, text: str) -> None:
 
 
 def _count_section_lines(counts: Counts, kind: str, lines: list[Any], mark: Stresser) -> None:
-    ends = [last_word(mark(line.plain)) for line in lines]
+    ends = [mark(last_word(line.plain)) for line in lines]
     for i in range(0, len(ends) - 3, 4):
         found = scheme(ends[i : i + 4])
         if found:

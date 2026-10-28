@@ -1,6 +1,7 @@
 """Command line entry point."""
 
 import argparse
+import functools
 import logging
 import sys
 from collections.abc import Sequence
@@ -14,7 +15,8 @@ if TYPE_CHECKING:
     from redline.separate import Separator
 
 AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".aif", ".aiff"}
-LYRICS_BUILD = Path("private/lyrics/build")
+LYRICS = Path("private/lyrics")
+LYRICS_BUILD = LYRICS / "build"
 
 
 def _inputs(command: argparse.ArgumentParser, out_help: str | None = None) -> None:
@@ -83,6 +85,20 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--build", type=Path, default=LYRICS_BUILD, help="the index folder")
     check.add_argument(
         "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
+    )
+    build = lyrics_commands.add_parser(
+        "index", help="build the copy-check digests and the style profiles from the lyrics base"
+    )
+    build.add_argument("--lyrics", type=Path, default=LYRICS, help="the lyrics base folder")
+    build.add_argument("--build", type=Path, default=LYRICS_BUILD, help="where to write")
+    build.add_argument(
+        "--without-mine", action="store_true", help="leave the owner's texts out of the check"
+    )
+    build.add_argument(
+        "--force", action="store_true", help="replace an index built from more texts"
+    )
+    build.add_argument(
+        "--stress", action="store_true", help="rhymes by stress in profiles (stress extra)"
     )
     stats = lyrics_commands.add_parser(
         "stats", help="syllables per line and rhyme letters per section"
@@ -230,6 +246,44 @@ def _lyrics_check(args: argparse.Namespace) -> int:
     return 1 if matches else 0
 
 
+def _lyrics_index(args: argparse.Namespace) -> int:
+    from redline.lyrics import stress
+    from redline.lyrics.fingerprint import KEY_FILE, FingerprintIndex, new_key
+    from redline.lyrics.parse import LyricsError, read_artists, read_track
+    from redline.lyrics.profile import build_profiles, dumps
+
+    others = args.lyrics / "others"
+    try:
+        if not others.is_dir():
+            raise LyricsError(f"no lyrics base in {args.lyrics}: {others} is missing")
+        artists = read_artists(others / "artists.yaml")
+        base = {
+            folder.name: [read_track(p) for p in sorted(folder.glob("*.txt"))]
+            for folder in sorted(others.iterdir())
+            if folder.is_dir()
+        }
+        mine = [read_track(p, mine=True) for p in sorted((args.lyrics / "mine").glob("*.txt"))]
+        pairs = [(slug, t) for slug, tracks in base.items() for t in tracks]
+        if not args.without_mine:
+            pairs += [("mine", t) for t in mine]
+        key_path = args.build / KEY_FILE
+        key = key_path.read_bytes() if key_path.exists() else new_key()
+        index = FingerprintIndex.build(pairs, key)
+        # profiles stress line-final words only, and the same words come back often
+        mark = functools.cache(stress.load_stresser()) if args.stress else str
+        profiles = build_profiles(base, artists, mine, mark=mark)
+        index.save(args.build, force=args.force)
+        folder = args.build / "profiles"
+        folder.mkdir(exist_ok=True)
+        for name, profile in profiles.items():
+            (folder / f"{name}.json").write_text(dumps(profile), encoding="utf-8")
+    except (LyricsError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    print(f"{index.n_texts} texts, {len(index.digests)} digests, {len(profiles)} profiles")
+    return 0
+
+
 def _lyrics_stats(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.parse import parse_text
@@ -266,6 +320,8 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _run(args, separator)
     if args.command == "lyrics" and args.lyrics_command == "check":
         return _lyrics_check(args)
+    if args.command == "lyrics" and args.lyrics_command == "index":
+        return _lyrics_index(args)
     if args.command == "lyrics" and args.lyrics_command == "stats":
         return _lyrics_stats(args)
     parser.print_help()
