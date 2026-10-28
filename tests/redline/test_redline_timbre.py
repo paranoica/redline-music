@@ -36,6 +36,19 @@ def test_pitch_shift_moves_the_pitch_and_keeps_the_length(semitones, expected):
     assert peak_freq(y) == pytest.approx(expected, abs=3.0)
 
 
+@pytest.mark.parametrize("semitones", [12.0, -12.0])
+def test_pitch_shift_keeps_the_level_of_a_noisy_voice(semitones):
+    # the phase vocoder smears the phases of a noisy signal and the overlap-add loses level
+    x = (make_rng().standard_normal((RATE * 3, 2)) * 0.1).astype(np.float32)
+    y = pitch_shift(x, RATE, semitones)
+    assert 20 * np.log10(np.std(y) / np.std(x)) == pytest.approx(0.0, abs=0.5)
+
+
+def test_pitch_shift_of_silence_is_silence():
+    y = pitch_shift(np.zeros((RATE, 2), dtype=np.float32), RATE, 12.0)
+    assert np.all(y == 0)
+
+
 @pytest.mark.parametrize(("octaves", "layer_hz"), [(-1, 220), (1, 880)])
 def test_octave_layer_adds_the_octave_under_the_voice(octaves, layer_hz):
     x = tone(440, 2, amp=0.5)

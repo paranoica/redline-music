@@ -20,7 +20,7 @@ from redline.master import master_clip, saturate_low
 from redline.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
 from redline.spectrum import low_end
-from redline.timbre import bitcrush, double, octave_layer, pitch_shift
+from redline.timbre import bitcrush, double, octave_layer
 from redline.vocal_run import ORIGINAL, VocalRun, check_folders, reference_target
 
 Samples = npt.NDArray[np.floating]
@@ -30,12 +30,14 @@ VOCAL_DB = -6.0
 QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
 BASE = "base"
-EFFECTS = ("doubles", "octave down", "octave up", "octave up loud", "pitched up", "bitcrush")
-TIMBRES = ("doubles", "octave down", "octave up", "bitcrush")
+EFFECTS = ("doubles", "octave down", "bitcrush")
+TIMBRES = EFFECTS
 TIMBRE = "octave down + doubles"
 BASS_FREQ_HZ = 120.0
 BASS_DRIVES_DB = (0.0, 6.0, 12.0, 18.0, 24.0)
-OCTAVE_LEVEL_DB = -6.0
+BASS_DRIVE_DB = 18.0
+# the level picked by ear
+OCTAVE_LEVEL_DB = -9.5
 CRUSH_BITS = 8
 CRUSH_HOLD = 3
 log = logging.getLogger(__name__)
@@ -72,6 +74,11 @@ def _chosen_mix(
     return inputs, original, vocal * np.float32(10 ** (VOCAL_DB / 20)), chain
 
 
+def _chosen_sound(vocal: Samples, beat: Samples, rate: int) -> tuple[Samples, Samples]:
+    """The chosen timbre on the vocal and the chosen drive on the 808."""
+    return _with_timbre(TIMBRE, vocal, rate), saturate_low(beat, rate, BASS_FREQ_HZ, BASS_DRIVE_DB)
+
+
 def master_round(
     track: Path,
     refs: list[Path],
@@ -84,7 +91,8 @@ def master_round(
     check_folders(work_dir, out_dir)
     inputs, original, vocal, chain = _chosen_mix(track, refs, work_dir, separator)
     rate = inputs.track_stems.rate
-    mix = vocal + inputs.track_stems.beat
+    vocal, beat = _chosen_sound(vocal, inputs.track_stems.beat, rate)
+    mix = vocal + beat
     variants = {ORIGINAL: original, NO_MASTER: mix}
     masters = []
     for name, target in master_targets(inputs.refs).items():
@@ -94,7 +102,13 @@ def master_round(
         masters.append(
             {"name": name, **asdict(result), "final_lufs": integrated_lufs(mastered, rate)}
         )
-    record = {"vocal": asdict(chain), "vocal_db": VOCAL_DB, "masters": masters}
+    record = {
+        "vocal": asdict(chain),
+        "vocal_db": VOCAL_DB,
+        "timbre": TIMBRE,
+        "bass_drive_db": BASS_DRIVE_DB,
+        "masters": masters,
+    }
     return _write_round(work_dir, out_dir, "master", variants, rate, seed, record)
 
 
@@ -110,12 +124,6 @@ def _with_timbre(name: str, vocal: Samples, rate: int) -> Samples:
             out = double(out, rate)
         elif effect == "octave down":
             out = octave_layer(out, rate, -1, OCTAVE_LEVEL_DB)
-        elif effect == "octave up":
-            out = octave_layer(out, rate, 1, OCTAVE_LEVEL_DB)
-        elif effect == "octave up loud":
-            out = octave_layer(out, rate, 1, 0.0)
-        elif effect == "pitched up":
-            out = pitch_shift(out, rate, 12.0)
         elif effect == "bitcrush":
             # the crush works on the vocal's own scale, not on its level under the beat
             peak = float(np.abs(out).max())
@@ -142,7 +150,8 @@ def timbre_round(
         )
     check_folders(work_dir, out_dir)
     inputs, original, vocal, _ = _chosen_mix(track, refs, work_dir, separator)
-    beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
+    rate = inputs.track_stems.rate
+    beat = saturate_low(inputs.track_stems.beat, rate, BASS_FREQ_HZ, BASS_DRIVE_DB)
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
     variants = {ORIGINAL: original, BASE: master_clip(vocal + beat, rate, target)[0]}
     for name in timbres:
@@ -221,7 +230,7 @@ def run_track(
     check_folders(work_dir, out_dir)
     inputs, original, vocal, chain = _chosen_mix(track, refs, work_dir, separator)
     beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
-    vocal = _with_timbre(TIMBRE, vocal, rate)
+    vocal, beat = _chosen_sound(vocal, beat, rate)
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
     final, master = master_clip(vocal + beat, rate, target)
     final_lufs = integrated_lufs(final, rate)
@@ -243,6 +252,7 @@ def run_track(
         "vocal_level": VOCAL_LEVEL,
         "vocal_db": VOCAL_DB,
         "timbre": TIMBRE,
+        "bass_drive_db": BASS_DRIVE_DB,
         "vocal": asdict(chain),
         "master": {**asdict(master), "final_lufs": final_lufs},
     }
@@ -259,6 +269,7 @@ def run_track(
         VOCAL_LEVEL,
         VOCAL_DB,
         TIMBRE,
+        BASS_DRIVE_DB,
         master,
         final_lufs,
         inputs.track.values,

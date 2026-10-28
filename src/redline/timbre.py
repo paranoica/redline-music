@@ -22,13 +22,22 @@ def bitcrush(samples: Samples, rate: int, bits: int, hold: int) -> Samples:
     return np.clip(out, -1.0, 1.0).astype(np.float32)
 
 
+def _rms(samples: Samples) -> float:
+    return float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
+
+
 def pitch_shift(samples: Samples, rate: int, semitones: float) -> Samples:
-    """Shift the pitch and keep the length (phase vocoder, per channel)."""
+    """Shift the pitch and keep the length and the level (phase vocoder, per channel)."""
     channels = [
         librosa.effects.pitch_shift(np.ascontiguousarray(samples[:, c]), sr=rate, n_steps=semitones)
         for c in range(samples.shape[1])
     ]
-    return np.column_stack(channels)[: len(samples)].astype(np.float32)
+    shifted = np.column_stack(channels)[: len(samples)]
+    # the vocoder loses level on noisy material, several dB on a dirty voice
+    before, after = _rms(samples), _rms(shifted)
+    if after > 0:
+        shifted = shifted * (before / after)
+    return shifted.astype(np.float32)
 
 
 def octave_layer(samples: Samples, rate: int, octaves: int, level_db: float) -> Samples:

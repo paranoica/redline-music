@@ -20,6 +20,7 @@ from redline.final_run import (
 from redline.loudness import integrated_lufs
 from redline.master import CEILING_DB
 from redline.run import FileResult
+from redline.spectrum import low_end
 
 
 class HalfSeparator:
@@ -95,6 +96,26 @@ def test_master_round_writes_the_original_and_four_masters(inputs, tmp_path):
     for m in masters:
         assert m["reached"] is True
         assert m["final_lufs"] == pytest.approx(m["target_lufs"], abs=0.2)
+
+
+def test_master_round_masters_the_chosen_sound(inputs, tmp_path):
+    track, refs = inputs
+    result = master_round(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), seed=3
+    )
+    letters = {
+        v: k for k, v in json.loads((result.run_dir / "key.json").read_text())["key"].items()
+    }
+    heard, _ = sf.read(result.listen_dir / f"{letters['no master']}.wav", always_2d=True)
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w2", tmp_path / "o2", HalfSeparator()
+    )
+    vocal, _ = sf.read(folder / "stems" / "vocal.wav", always_2d=True)
+    beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
+    # the listening file is the final's mix before the master, only at another level
+    assert np.corrcoef(heard[:, 0], (vocal + beat)[:, 0])[0, 1] > 0.999
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert (chain["timbre"], chain["bass_drive_db"]) == ("octave down + doubles", 18.0)
 
 
 def test_louder_targets_clip_more(inputs, tmp_path):
@@ -229,7 +250,7 @@ WORDS = {
 def test_report_says_what_was_done_in_words(hot_inputs, tmp_path):
     folder = make_track(hot_inputs, tmp_path)
     text = (folder / "report.md").read_text(encoding="utf-8")
-    for phrase in ("Вокал", "октав", "Мастер", "медианн", "срезано"):
+    for phrase in ("Вокал", "октав", "808", "Мастер", "медианн", "срезано"):
         assert phrase in text
     assert "лучше" not in text
     rows = [line for line in text.splitlines() if line.startswith("| ") and "(" in line]
@@ -239,6 +260,13 @@ def test_report_says_what_was_done_in_words(hot_inputs, tmp_path):
         assert word in WORDS, row
     final_lufs = json.loads((folder / "chain.json").read_text())["master"]["final_lufs"]
     assert f"{final_lufs:.1f} LUFS" in text
+
+
+def test_report_says_the_beat_was_left_alone_without_drive(hot_inputs, tmp_path, monkeypatch):
+    monkeypatch.setattr("redline.final_run.BASS_DRIVE_DB", 0.0)
+    text = (make_track(hot_inputs, tmp_path) / "report.md").read_text(encoding="utf-8")
+    assert "**Бит:** не трогал." in text
+    assert "808" not in text
 
 
 def test_reference_audio_never_reaches_the_result(hot_inputs, tmp_path):
@@ -258,6 +286,19 @@ def test_run_clips_to_reach_hot_references(hot_inputs, tmp_path):
     chain = json.loads((make_track(hot_inputs, tmp_path) / "chain.json").read_text())
     assert chain["master"]["clipped_share"] > 0
     assert chain["timbre"] == "octave down + doubles"
+
+
+def test_run_drives_the_808_and_keeps_its_level(inputs, tmp_path):
+    track, refs = inputs
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator()
+    )
+    assert json.loads((folder / "chain.json").read_text())["bass_drive_db"] == 18.0
+    played, rate = sf.read(track, always_2d=True)
+    beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
+    before, after = low_end(played * 0.5, rate), low_end(beat, rate)
+    assert after.crest_db < before.crest_db - 0.3
+    assert after.share_db == pytest.approx(before.share_db, abs=1.5)
 
 
 def test_cli_run_without_references_exits_2(inputs, tmp_path):
@@ -319,9 +360,33 @@ def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_p
     assert len(list(result.listen_dir.iterdir())) == 2 + len(TIMBRES)
 
 
+def test_timbre_round_plays_the_chosen_timbre_as_the_final(inputs, tmp_path):
+    track, refs = inputs
+    result = timbre_round(
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w",
+        tmp_path / "o",
+        HalfSeparator(),
+        6,
+        ("octave down + doubles",),
+    )
+    letters = {
+        v: k for k, v in json.loads((result.run_dir / "key.json").read_text())["key"].items()
+    }
+    heard, _ = sf.read(
+        result.listen_dir / f"{letters['octave down + doubles']}.wav", always_2d=True
+    )
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w2", tmp_path / "o2", HalfSeparator()
+    )
+    final, _ = sf.read(folder / "final.wav", always_2d=True)
+    assert np.corrcoef(heard[:, 0], final[:, 0])[0, 1] > 0.999
+
+
 def test_timbre_round_takes_chosen_combinations(inputs, tmp_path):
     track, refs = inputs
-    chosen = ("octave down + doubles", "pitched up", "octave up loud")
+    chosen = ("octave down + doubles", "bitcrush + doubles")
     result = timbre_round(
         track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), 6, chosen
     )
@@ -329,7 +394,8 @@ def test_timbre_round_takes_chosen_combinations(inputs, tmp_path):
     assert sorted(key["key"].values()) == sorted(["original", "base", *chosen])
 
 
-def test_an_unknown_timbre_is_refused(inputs, tmp_path):
+@pytest.mark.parametrize("timbre", ["nightcore", "octave up", "pitched up", "doubles + octave up"])
+def test_an_unknown_timbre_is_refused(inputs, tmp_path, timbre):
     track, refs = inputs
     with pytest.raises(ValueError, match="unknown timbre"):
         timbre_round(
@@ -339,7 +405,7 @@ def test_an_unknown_timbre_is_refused(inputs, tmp_path):
             tmp_path / "o",
             HalfSeparator(),
             6,
-            ("nightcore",),
+            (timbre,),
         )
 
 

@@ -23,7 +23,6 @@ def _number(value: float | None) -> str:
 
 TIMBRE_WORDS = {
     "octave down": "подложил под голос его же копию на октаву ниже",
-    "octave up": "подложил над голосом его же копию на октаву выше",
     "doubles": "добавил два «плавающих» дубля по бокам",
     "bitcrush": "пропустил голос через бит-крашер",
 }
@@ -43,12 +42,19 @@ def _master_line(master: MasterResult, before_lufs: float | None, final_lufs: fl
     return line
 
 
+def _beat_line(bass_drive_db: float) -> str:
+    if bass_drive_db <= 0:
+        return "- **Бит:** не трогал."
+    return f"- **Бит:** перегрузил 808 на {bass_drive_db:.0f} дБ, громкость низа оставил прежней."
+
+
 def write_final_report(
     path: Path,
     chain: ChainResult,
     vocal_level: str,
     vocal_db: float,
     timbre: str,
+    bass_drive_db: float,
     master: MasterResult,
     final_lufs: float,
     before: Mapping[str, float | None],
@@ -64,7 +70,7 @@ def write_final_report(
         f"- **Вокал:** сжал и перегрузил (уровень `{vocal_level}`), подогнал окраску под вокал "
         f"референсов (эквалайзер, дБ по полосам 200 Гц … 8 кГц: {eq}), {timbre_words}, "
         f"утопил на {abs(vocal_db):.0f} дБ под бит.",
-        "- **Бит:** не трогал.",
+        _beat_line(bass_drive_db),
         _master_line(master, before.get("mix.lufs"), final_lufs),
         "",
         "## Цифры до и после",
