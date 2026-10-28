@@ -71,6 +71,8 @@ DIRT_LEVELS = (
     DirtLevel("medium", Compressor(-24.0, 6.0, 5.0, 80.0), 12.0, 3.0),
     DirtLevel("heavy", Compressor(-30.0, 10.0, 2.0, 60.0), 18.0, 6.0),
 )
+# past heavy, for the rounds that hold the dirt and move something else
+EXTRA = DirtLevel("extra", Compressor(-34.0, 20.0, 1.0, 50.0), 24.0, 9.0)
 
 
 @dataclass(frozen=True)

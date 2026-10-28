@@ -39,6 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
     vocal.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     vocal.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
     vocal.add_argument("--seed", type=int, help="seed of the letter shuffle")
+    vocal.add_argument(
+        "--axis",
+        choices=("dirt", "balance"),
+        default="dirt",
+        help="what the variants change: the dirt level, or the vocal level against the beat",
+    )
     return parser
 
 
@@ -80,7 +86,13 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
         return 2
     try:
         result = vocal_run(
-            args.track, refs, args.work, args.out, separator or RoformerSeparator(), args.seed
+            args.track,
+            refs,
+            args.work,
+            args.out,
+            separator or RoformerSeparator(),
+            args.seed,
+            args.axis,
         )
     except (AudioError, SeparationError, ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)

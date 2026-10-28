@@ -6,7 +6,7 @@ import soundfile as sf
 from redline_signals import make_rng, tone, write
 
 from redline.cli import main
-from redline.vocal_run import vocal_run
+from redline.vocal_run import BALANCE_DB, balance_variants, vocal_run
 
 MARKER_HZ = 7300
 
@@ -135,3 +135,25 @@ def test_cli_vocal_without_references_exits_2(inputs, tmp_path, capsys):
     empty.mkdir()
     args = ["vocal", "--track", str(track), "--ref", str(empty), "--out", str(tmp_path / "o")]
     assert main(args, separator=HalfSeparator()) == 2
+
+
+def test_balance_variants_lower_only_the_vocal():
+    rng = make_rng()
+    vocal = rng.standard_normal((1000, 2)).astype(np.float32)
+    beat = rng.standard_normal((1000, 2)).astype(np.float32)
+    variants = balance_variants(vocal, beat)
+    assert list(variants) == ["vocal 0", "vocal -3", "vocal -6", "vocal -9"]
+    for offset, mix in zip(BALANCE_DB, variants.values(), strict=True):
+        np.testing.assert_allclose(mix - beat, vocal * 10 ** (-offset / 20), atol=1e-6)
+
+
+def test_balance_axis_writes_original_and_four_balances(inputs, tmp_path):
+    result = run(inputs, tmp_path, seed=6, axis="balance")
+    key = json.loads((result.run_dir / "key.json").read_text())
+    assert sorted(key["key"].values()) == sorted(
+        ["original", "vocal 0", "vocal -3", "vocal -6", "vocal -9"]
+    )
+    assert key["axis"] == "balance"
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert [c["level"] for c in chain["chains"]] == ["extra"]
+    assert chain["balance_db"] == [0, 3, 6, 9]

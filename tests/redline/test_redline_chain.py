@@ -7,6 +7,7 @@ from redline_signals import make_rng
 from redline.chain import (
     DIRT_LEVELS,
     EQ_BANDS,
+    EXTRA,
     GAIN_LIMIT_DB,
     Compressor,
     DirtLevel,
@@ -133,8 +134,8 @@ def test_dirt_flattens_peaks_level_by_level():
     x = speechlike(floor=0.3)
     target = target_of(x)
     crests = [gated_crest_db(x, RATE)]
-    for name in ("light", "medium", "heavy"):
-        out, _ = process_vocal(x, RATE, LEVELS[name], target, UPPER)
+    for level in (LEVELS["light"], LEVELS["medium"], LEVELS["heavy"], EXTRA):
+        out, _ = process_vocal(x, RATE, level, target, UPPER)
         crests.append(gated_crest_db(out, RATE))
     assert all(a > b for a, b in itertools.pairwise(crests)), crests
 

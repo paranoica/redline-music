@@ -7,9 +7,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 
 from redline.chain import (
     DIRT_LEVELS,
+    EXTRA,
     FIT_FROM_HZ,
     ChainResult,
     Target,
@@ -23,7 +25,11 @@ from redline.run import FileResult, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
 from redline.spectrum import tonal_curve
 
+Samples = npt.NDArray[np.floating]
+
 ORIGINAL = "original"
+AXES = ("dirt", "balance")
+BALANCE_DB = (0, 3, 6, 9)
 log = logging.getLogger(__name__)
 
 
@@ -45,6 +51,13 @@ def reference_target(refs: list[FileResult]) -> Target:
     return Target(centers, tuple(float(v) for v in median))
 
 
+def balance_variants(vocal: Samples, beat: Samples) -> dict[str, Samples]:
+    """The processed vocal over the untouched beat, lowered by each BALANCE_DB step."""
+    return {
+        f"vocal {-offset}": vocal * np.float32(10 ** (-offset / 20)) + beat for offset in BALANCE_DB
+    }
+
+
 def vocal_run(
     track: Path,
     refs: list[Path],
@@ -52,8 +65,15 @@ def vocal_run(
     out_dir: Path,
     separator: Separator,
     seed: int | None = None,
+    axis: str = "dirt",
 ) -> VocalRun:
-    """Measure, process the vocal at every level, write the listening set, the key and the chain."""
+    """Measure, process the vocal, write the listening set for one axis, the key and the chain.
+
+    The dirt axis holds the balance and steps through the dirt levels; the balance axis holds
+    the dirt at EXTRA and lowers the vocal against the beat.
+    """
+    if axis not in AXES:
+        raise ValueError(f"unknown axis {axis!r}, expected one of {', '.join(AXES)}")
     inputs = measure_inputs(track, refs, work_dir, separator)
     stems, upper = inputs.track_stems, inputs.upper
     rate = stems.rate
@@ -63,19 +83,24 @@ def vocal_run(
     variants = {ORIGINAL: original}
     chains: list[ChainResult] = []
     distances = {ORIGINAL: curve_distance(tonal_curve(stems.vocal, rate, upper), target)}
-    for level in DIRT_LEVELS:
+    for level in DIRT_LEVELS if axis == "dirt" else (EXTRA,):
         log.info("processing the vocal: %s", level.name)
         vocal, chain = process_vocal(stems.vocal, rate, level, target, upper)
-        variants[level.name] = vocal + stems.beat
         chains.append(chain)
         distances[level.name] = curve_distance(tonal_curve(vocal, rate, upper), target)
+        if axis == "dirt":
+            variants[level.name] = vocal + stems.beat
+        else:
+            variants.update(balance_variants(vocal, stems.beat))
     run_dir = new_run_dir(work_dir / "runs")
     listen_dir = out_dir / run_dir.name / "listen"
     keep_out_of_git(out_dir / run_dir.name)
     seed = secrets.randbits(32) if seed is None else seed
     key = write_listen_set(variants, rate, listen_dir, seed)
     (run_dir / "key.json").write_text(
-        json.dumps({"seed": seed, "key": key, "listen_dir": str(listen_dir)}, indent=1),
+        json.dumps(
+            {"axis": axis, "seed": seed, "key": key, "listen_dir": str(listen_dir)}, indent=1
+        ),
         encoding="utf-8",
     )
     (run_dir / "chain.json").write_text(
@@ -84,8 +109,10 @@ def vocal_run(
                 "rate": rate,
                 "compared_up_to_hz": upper,
                 "target": asdict(target),
+                "axis": axis,
                 "chains": [asdict(c) for c in chains],
-                "levels": [asdict(level) for level in DIRT_LEVELS],
+                "levels": [asdict(level) for level in (*DIRT_LEVELS, EXTRA)],
+                "balance_db": list(BALANCE_DB),
             },
             indent=1,
         ),
