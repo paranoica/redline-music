@@ -202,3 +202,20 @@ def test_run_masters_to_the_references_median(inputs, tmp_path):
     refs = sorted(inputs[1].iterdir())
     levels = [integrated_lufs(sf.read(r, always_2d=True)[0], 44100) for r in refs]
     assert chain["master"]["target_lufs"] == pytest.approx(round(float(np.median(levels)), 1))
+
+
+def test_master_round_output_holds_only_the_letters(inputs, tmp_path):
+    result = run(inputs, tmp_path, seed=4)
+    out_files = sorted(
+        str(p.relative_to(tmp_path / "out")) for p in (tmp_path / "out").rglob("*") if p.is_file()
+    )
+    stamp = result.listen_dir.parent.name
+    expected = [f"{stamp}/.gitignore"] + [f"{stamp}/listen/{c}.wav" for c in "ABCDE"]
+    assert out_files == expected
+
+
+@pytest.mark.parametrize(("work", "out"), [("w", "w/o"), ("o/w", "o")])
+def test_run_refuses_overlapping_folders(inputs, tmp_path, work, out):
+    track, refs = inputs
+    with pytest.raises(ValueError, match="separate"):
+        run_track(track, sorted(refs.iterdir()), tmp_path / work, tmp_path / out, HalfSeparator())
