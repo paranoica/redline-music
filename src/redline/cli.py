@@ -74,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="process a track with the chosen settings and write the result folder"
     )
     _inputs(run, "result folder")
-    lyrics = commands.add_parser("lyrics", help="the lyrics base: copy check")
+    lyrics = commands.add_parser("lyrics", help="lyrics: copy check and line form")
     lyrics_commands = lyrics.add_subparsers(dest="lyrics_command", metavar="command")
     check = lyrics_commands.add_parser(
         "check", help="exit 1 if the text copies 8 or more words in a row from the base"
@@ -84,6 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
     )
+    stats = lyrics_commands.add_parser(
+        "stats", help="syllables per line and rhyme letters per section"
+    )
+    stats.add_argument("file", type=Path, help="the text")
     return parser
 
 
@@ -223,6 +227,25 @@ def _lyrics_check(args: argparse.Namespace) -> int:
     return 1 if matches else 0
 
 
+def _lyrics_stats(args: argparse.Namespace) -> int:
+    from redline.lyrics.parse import parse_text
+    from redline.lyrics.rhyme import letters
+    from redline.lyrics.syllables import count_syllables
+
+    try:
+        track = parse_text(args.file.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    for section in track.sections:
+        print(f"[{section.name or section.kind}]")
+        sung = [line for line in section.lines if line.plain]
+        rhyme = letters([line.plain.split()[-1] for line in sung])
+        for line, letter in zip(sung, rhyme, strict=True):
+            print(f"{count_syllables(line.text):>3} {letter}  {line.text}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None) -> int:
     """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
@@ -238,5 +261,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _run(args, separator)
     if args.command == "lyrics" and args.lyrics_command == "check":
         return _lyrics_check(args)
+    if args.command == "lyrics" and args.lyrics_command == "stats":
+        return _lyrics_stats(args)
     parser.print_help()
     return 0
