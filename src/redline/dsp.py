@@ -94,8 +94,8 @@ def compressor_gain_db(
     """
     block = max(1, round(rate * BLOCK_SECONDS))
     blocks = block_levels_db(samples, rate)
-    # the median of five neighbouring blocks: a click shorter than about 2 ms does not
-    # reach the gain, a phrase start does
+    # the median of five neighbouring blocks: a click within two blocks (any click up to
+    # 1 ms) does not reach the gain, a phrase start does
     padded = np.concatenate([blocks[:1], blocks[:1], blocks, blocks[-1:], blocks[-1:]])
     level = np.median(np.stack([padded[i : i + len(blocks)] for i in range(5)]), axis=0)
     count = len(level)

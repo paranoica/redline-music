@@ -49,17 +49,18 @@ def against_refs(
 
     The range is stage 1's: half the references' spread plus the metric's floor past either
     end. A move from the original smaller than the floor reads as no move. With no original,
-    only in or out.
+    or when the original was in range, only in or out.
     """
     if value is None or not math.isfinite(value):
         return NO_DATA
     bounds = stage_1_range(refs, floor)
     if bounds is None:
-        return FEW_REFS
+        known = [r for r in refs if r is not None and math.isfinite(r)]
+        return FEW_REFS if known else NO_DATA
     distance = _distance(value, *bounds)
     if distance == 0:
         return IN_RANGE
-    if original is None or not math.isfinite(original):
+    if original is None or not math.isfinite(original) or _distance(original, *bounds) == 0:
         return OUT_OF_RANGE
     if abs(value - original) < floor:
         return SAME
@@ -111,8 +112,9 @@ def write_vocal_report(
         "# Вокал: что сделал каждый вариант",
         "",
         "Цифры показывают «ближе / дальше от референсов», а не «лучше»: это решает слух.",
-        "Слово в ячейке: где вариант против диапазона референсов (тот же, что на этапе 1) и "
-        "сдвинулся ли он к нему по сравнению с оригиналом.",
+        "Слово в ячейке: где вариант против диапазона референсов и сдвинулся ли он к нему по "
+        "сравнению с оригиналом. Диапазон как в вердиктах этапа 1: от меньшего референса до "
+        "большего плюс половина разброса и порог замера с каждой стороны.",
         "",
         "| вариант | " + " | ".join(head) + " | расстояние кривой, дБ | паузы, дБ |",
         "|---" * (len(COLUMNS) + 3) + "|",
@@ -130,7 +132,7 @@ def write_vocal_report(
     for key, _, _ in COLUMNS:
         bounds = stage_1_range([r.get(key) for r in refs], METRICS[key].floor)
         ranges.append("—" if bounds is None else f"{bounds[0]:.2f} … {bounds[1]:.2f}")
-    lines.append("| диапазон референсов | " + " | ".join(ranges) + " | 0 | — |")
+    lines.append("| диапазон референсов с запасом этапа 1 | " + " | ".join(ranges) + " | 0 | — |")
     lines += [
         "",
         f"Расстояние кривой: среднее по полосам от {FIT_FROM_HZ:.0f} Гц отличие тональной кривой "

@@ -239,3 +239,11 @@ def test_a_reference_with_only_residue_is_named(inputs, tmp_path):
             track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", ResidueRefsSeparator()
         )
     assert "track" not in str(raised.value)
+
+
+def test_a_quiet_reference_vocal_is_refused_as_the_reference():
+    quiet = ref_result("q.wav", [0.0, -3.0])
+    quiet.values.update({"vocal.lufs": -50.0, "mix.lufs": -14.0})
+    with pytest.raises(ValueError, match=r"q\.wav: no vocal in the reference: ") as raised:
+        reference_target([ref_result("a.wav", [0.0, -3.0]), quiet])
+    assert "track" not in str(raised.value)

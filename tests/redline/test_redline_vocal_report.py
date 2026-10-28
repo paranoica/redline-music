@@ -38,7 +38,8 @@ FLOOR = 0.5
         (1.0, 2.0, FARTHER),
         (9.2, 9.0, SAME),
         (8.8, 9.0, SAME),
-        (7.9, 7.0, FARTHER),
+        (7.9, 7.0, OUT_OF_RANGE),
+        (7.6, 7.4, OUT_OF_RANGE),
         (9.1, 1.0, FARTHER),
     ],
 )
@@ -57,9 +58,14 @@ def test_against_refs_agrees_with_stage_1_on_the_range(value):
     assert (against_refs(value, None, REFS, FLOOR) == IN_RANGE) == stage_1
 
 
-@pytest.mark.parametrize("refs", [[], [5.0], [5.0, None, float("nan")]])
+@pytest.mark.parametrize("refs", [[5.0], [5.0, None, float("nan")]])
 def test_against_refs_needs_two_references(refs):
     assert against_refs(5.0, 4.0, refs, FLOOR) == FEW_REFS
+
+
+@pytest.mark.parametrize("refs", [[], [None, float("nan")]])
+def test_against_refs_without_any_reference_value_matches_stage_1(refs):
+    assert against_refs(5.0, 4.0, refs, FLOOR) == metric_verdict(5.0, refs, FLOOR).status
 
 
 def test_against_refs_without_a_value():
@@ -99,7 +105,7 @@ def report_text(tmp_path, native_rate):
 
 def test_report_has_a_row_per_variant_and_the_reference_range(tmp_path):
     text = report_text(tmp_path, RATE)
-    for row in ("| original |", "| heavy |", "| диапазон референсов |"):
+    for row in ("| original |", "| heavy |", "| диапазон референсов с запасом этапа 1 |"):
         assert row in text
     # tilt references 0.5 and 1.5, floor 0.5: the stage 1 range is -0.5 … 2.5
     assert "-0.50 … 2.50" in text

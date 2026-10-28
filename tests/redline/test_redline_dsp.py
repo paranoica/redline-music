@@ -91,11 +91,12 @@ def test_expander_turns_a_gap_down_by_its_range_at_most():
     assert steady_gain(x, gate_db=-40.0, **SETTINGS) == pytest.approx(-EXPANDER_RANGE_DB, abs=0.5)
 
 
-@pytest.mark.parametrize("width", [1, 6, 60])
-def test_one_click_does_not_duck_the_compressor(width):
+# 44-sample blocks, RATE sits 12 samples into one: offset 0 is a single sample, offset 31
+# puts 45 samples across two blocks, offset 32 puts 88 samples into exactly two blocks
+@pytest.mark.parametrize(("offset", "width"), [(0, 1), (31, 45), (32, 88)])
+def test_a_click_within_two_blocks_does_not_duck_the_compressor(offset, width):
     x = tone(400, 2, amp=level(-20))
-    # RATE is not a multiple of the 44-sample block, so wider clicks cross a block edge
-    x[RATE : RATE + width] = 0.99
+    x[RATE + offset : RATE + offset + width] = 0.99
     gain = compressor_gain_db(
         x, RATE, threshold_db=-30.0, ratio=10.0, attack_ms=2.0, release_ms=60.0, gate_db=-60.0
     )
