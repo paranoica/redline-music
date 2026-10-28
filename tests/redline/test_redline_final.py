@@ -150,6 +150,18 @@ def test_cli_master_without_references_exits_2(inputs, tmp_path):
     assert main(args, separator=HalfSeparator()) == 2
 
 
+@pytest.mark.parametrize(
+    ("axis", "timbres"),
+    [("808", "doubles"), ("master", "doubles"), ("timbre", ","), ("timbre", "")],
+)
+def test_cli_master_refuses_timbres_it_cannot_use(inputs, tmp_path, axis, timbres):
+    track, refs = inputs
+    args = ["master", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    args += ["--out", str(tmp_path / "o"), "--axis", axis, "--timbres", timbres]
+    assert main(args, separator=HalfSeparator()) == 2
+    assert not (tmp_path / "o").exists()
+
+
 SPEC_FILES = [
     ".gitignore",
     "chain.json",
@@ -271,7 +283,14 @@ def test_report_says_the_beat_was_left_alone_without_drive(hot_inputs, tmp_path,
 
 def test_reference_audio_never_reaches_the_result(hot_inputs, tmp_path):
     folder = make_track(hot_inputs, tmp_path)
-    for name in ("final.wav", "compare/final.wav", "stems/vocal.wav", "stems/beat.wav"):
+    for name in (
+        "final.wav",
+        "original.wav",
+        "compare/final.wav",
+        "compare/original.wav",
+        "stems/vocal.wav",
+        "stems/beat.wav",
+    ):
         data, rate = sf.read(folder / name, always_2d=True)
         spec = np.abs(np.fft.rfft(data[:, 0] * np.hanning(len(data)))) ** 2
         freqs = np.fft.rfftfreq(len(data), 1 / rate)

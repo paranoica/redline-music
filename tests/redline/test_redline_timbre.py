@@ -59,7 +59,7 @@ def test_octave_layer_adds_the_octave_under_the_voice(octaves, layer_hz):
     def at(freq):
         return spec[np.abs(freqs - freq) <= 3].max()
 
-    assert at(440) > at(layer_hz) > 0.1 * at(440)
+    assert 20 * np.log10(at(layer_hz) / at(440)) == pytest.approx(-6.0, abs=1.5)
 
 
 def test_double_widens_a_centred_voice_and_keeps_it_on_top():

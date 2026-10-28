@@ -135,6 +135,15 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.final_run import bass_round, master_round, timbre_round
     from redline.separate import RoformerSeparator, SeparationError
 
+    chosen = None
+    if args.timbres is not None:
+        if args.axis != "timbre":
+            print("redline: --timbres works only with --axis timbre", file=sys.stderr)
+            return 2
+        chosen = tuple(t.strip() for t in args.timbres.split(",") if t.strip())
+        if not chosen:
+            print("redline: --timbres names no timbre", file=sys.stderr)
+            return 2
     refs = reference_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
@@ -148,8 +157,7 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
             separator or RoformerSeparator(),
             args.seed,
         )
-        if args.axis == "timbre" and args.timbres:
-            chosen = tuple(t.strip() for t in args.timbres.split(",") if t.strip())
+        if chosen:
             result = timbre_round(*common, chosen)
         elif args.axis == "timbre":
             result = timbre_round(*common)
