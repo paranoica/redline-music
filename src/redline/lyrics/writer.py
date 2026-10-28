@@ -75,7 +75,13 @@ def prompt_hash() -> str:
 def render(request: WriterRequest, answer_to: Path | None = None) -> str:
     """The request as one Markdown page."""
     r = request.recipe
-    out = [request.prompt.rstrip(), "", "## Recipe", "", f"- Topic: {r.topic}"]
+    out = [
+        request.prompt.rstrip(),
+        "",
+        "## Recipe",
+        "",
+        f"- Vibe and anchor words, not a story: {r.topic}",
+    ]
     out.append(f"- Line length: {r.band}")
     out.append("- Sections, in this order:")
     for i, s in enumerate(r.sections, 1):
