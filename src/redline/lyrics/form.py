@@ -12,6 +12,8 @@ from redline.lyrics.rhyme import last_word, rhymes
 from redline.lyrics.syllables import count_syllables
 
 LINE_SLACK = 1
+# past about 3000 characters Suno rushes the lyrics or drops sections
+MAX_CHARACTERS = 3000
 # set from the owner's and the favourite artist's texts read as drafts of their own shape:
 # a quarter of them hold under 68 % and 61 % of lines within the band and one syllable,
 # and under 31 % of rhyme pairs by the owner's rule
@@ -114,6 +116,9 @@ def check_draft(
     problems = _not_lyrics(text)
     if problems:
         return problems, {}
+    if len(text) > MAX_CHARACTERS:
+        detail = f"{len(text)} characters; Suno takes about {MAX_CHARACTERS}, shorten the lines"
+        return [Problem("length", "the draft", detail)], {}
     track = parse_text(text)
     got = [s.kind for s in track.sections]
     wanted = [s.kind for s in recipe.sections]

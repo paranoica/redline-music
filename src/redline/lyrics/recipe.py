@@ -13,6 +13,8 @@ WORDS = 25
 LATIN = 7
 ADLIBS = 4
 FALLBACK_LINES = 4
+# about 3000 characters, which Suno sings without rushing
+MAX_LINES = 48
 FALLBACK_SYLLABLES = (8, 12)
 TOPICS = (
     "ночь в городе",
@@ -123,6 +125,17 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         lines, scheme = plans[kind]
         syllables = _band_range(profile["line_syllables"].get(kind), band)
         sections.append(SectionPlan(kind, lines, syllables, scheme))
+    while sum(s.lines for s in sections) > MAX_LINES:
+        longest = max(range(len(sections)), key=lambda i: (sections[i].lines, -i))
+        s = sections[longest]
+        sections = [
+            (
+                SectionPlan(p.kind, p.lines - 1, p.syllables, p.scheme)
+                if p.kind == s.kind and p.lines == s.lines and (p.kind == "hook" or i == longest)
+                else p
+            )
+            for i, p in enumerate(sections)
+        ]
     vocabulary = [(w["word"], w["per_1000"]) for w in profile["vocabulary"]["top"]]
     latin = [(w["word"], w["per_1000"]) for w in profile["latin"]["top"]]
     return Recipe(

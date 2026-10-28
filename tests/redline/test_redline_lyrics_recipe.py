@@ -110,3 +110,12 @@ def test_short_and_long_bands_give_different_line_lengths(profile):
             by_band.setdefault(recipe.band, verses[0].syllables)
     assert by_band["short"][0] < by_band["long"][0]
     assert by_band["short"][1] < by_band["long"][1]
+
+
+def test_a_recipe_stays_short_enough_for_suno(profile):
+    from redline.lyrics.recipe import MAX_LINES
+
+    profile["structure"]["patterns"] = [["verse-hook-verse-hook-verse-bridge-hook-outro", 1.0]]
+    profile["lines_per_section"]["verse"] = {"hist": {"16": 1.0}, "p10": 16, "p50": 16, "p90": 16}
+    for seed in range(20):
+        assert sum(s.lines for s in make_recipe(profile, seed).sections) <= MAX_LINES

@@ -136,3 +136,17 @@ def test_verb_rhymes_are_reported_not_refused():
     found, stats = check_draft(verbs, recipe(VERSE))
     assert stats["verb_rhymes"] == 0.5
     assert "verbs" not in {p.kind for p in found}
+
+
+def test_a_draft_too_long_for_suno_goes_back():
+    plan = SectionPlan("verse", 4, (1, 400), "AABB")
+
+    def text_of(width):
+        filler = "та " * width
+        return "[Куплет]\n" + "\n".join([filler + "дом", filler + "лом"] * 2) + "\n"
+
+    fits = text_of(240)
+    too_long = text_of(260)
+    assert len(fits) <= 3000 < len(too_long)
+    assert "length" not in problems(fits, plan)
+    assert "length" in problems(too_long, plan)
