@@ -38,6 +38,8 @@ FLOOR = 0.5
         (1.0, 2.0, FARTHER),
         (9.2, 9.0, SAME),
         (8.8, 9.0, SAME),
+        (7.9, 7.0, FARTHER),
+        (9.1, 1.0, FARTHER),
     ],
 )
 def test_against_refs_words_a_variant_relative_to_the_original(value, original, expected):
@@ -62,6 +64,8 @@ def test_against_refs_needs_two_references(refs):
 
 def test_against_refs_without_a_value():
     assert against_refs(None, 4.0, REFS, FLOOR) == NO_DATA
+    # stage 1 checks the value first
+    assert against_refs(None, 4.0, [], FLOOR) == NO_DATA
 
 
 def test_gap_level_reads_pauses_against_the_loud_part():
@@ -97,7 +101,8 @@ def test_report_has_a_row_per_variant_and_the_reference_range(tmp_path):
     text = report_text(tmp_path, RATE)
     for row in ("| original |", "| heavy |", "| диапазон референсов |"):
         assert row in text
-    assert "0.50 … 1.50" in text
+    # tilt references 0.5 and 1.5, floor 0.5: the stage 1 range is -0.5 … 2.5
+    assert "-0.50 … 2.50" in text
     assert "лучше" not in text.replace("не «лучше»", "")
     assert "чище" not in text
     assert "48" not in text

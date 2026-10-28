@@ -48,24 +48,31 @@ def against_refs(
     """Where a value sits against the references' range, and whether it moved toward it.
 
     The range is stage 1's: half the references' spread plus the metric's floor past either
-    end. A move smaller than the floor reads as no move. With no original, only in or out.
+    end. A move from the original smaller than the floor reads as no move. With no original,
+    only in or out.
     """
-    known = [r for r in refs if r is not None and math.isfinite(r)]
-    if len(known) < 2:
-        return FEW_REFS
     if value is None or not math.isfinite(value):
         return NO_DATA
-    margin = SPREAD_MARGIN * (max(known) - min(known)) + floor
-    low, high = min(known) - margin, max(known) + margin
-    distance = _distance(value, low, high)
+    bounds = stage_1_range(refs, floor)
+    if bounds is None:
+        return FEW_REFS
+    distance = _distance(value, *bounds)
     if distance == 0:
         return IN_RANGE
     if original is None or not math.isfinite(original):
         return OUT_OF_RANGE
-    before = _distance(original, low, high)
-    if abs(distance - before) < floor:
+    if abs(value - original) < floor:
         return SAME
-    return CLOSER if distance < before else FARTHER
+    return CLOSER if distance < _distance(original, *bounds) else FARTHER
+
+
+def stage_1_range(refs: Sequence[float | None], floor: float) -> tuple[float, float] | None:
+    """The references' range widened as stage 1 does; None with fewer than two references."""
+    known = [r for r in refs if r is not None and math.isfinite(r)]
+    if len(known) < 2:
+        return None
+    margin = SPREAD_MARGIN * (max(known) - min(known)) + floor
+    return min(known) - margin, max(known) + margin
 
 
 def _vocal_values(
@@ -121,8 +128,8 @@ def write_vocal_report(
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     ranges = []
     for key, _, _ in COLUMNS:
-        known = [v for r in refs if (v := r.get(key)) is not None and math.isfinite(v)]
-        ranges.append(f"{min(known):.2f} … {max(known):.2f}" if len(known) >= 2 else "—")
+        bounds = stage_1_range([r.get(key) for r in refs], METRICS[key].floor)
+        ranges.append("—" if bounds is None else f"{bounds[0]:.2f} … {bounds[1]:.2f}")
     lines.append("| диапазон референсов | " + " | ".join(ranges) + " | 0 | — |")
     lines += [
         "",

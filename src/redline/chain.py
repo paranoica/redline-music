@@ -98,11 +98,11 @@ class ChainResult:
     passes_error_db: tuple[float, ...]
 
 
-def check_vocal(vocal_lufs: float, mix_lufs: float) -> None:
+def check_vocal(vocal_lufs: float, mix_lufs: float, what: str = "the track") -> None:
     """Refuse a vocal stem that is only separation residue."""
     if not math.isfinite(vocal_lufs) or vocal_lufs < mix_lufs - VOCAL_MIN_LU_BELOW_MIX:
         raise ValueError(
-            f"no vocal in the track: the vocal stem reads {vocal_lufs:.1f} LUFS "
+            f"no vocal in {what}: the vocal stem reads {vocal_lufs:.1f} LUFS "
             f"against {mix_lufs:.1f} LUFS for the mix"
         )
 

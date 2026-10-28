@@ -234,7 +234,8 @@ class ResidueRefsSeparator:
 
 def test_a_reference_with_only_residue_is_named(inputs, tmp_path):
     track, refs = inputs
-    with pytest.raises(ValueError, match=r"a\.wav: no vocal"):
+    with pytest.raises(ValueError, match=r"a\.wav: no vocal in the reference") as raised:
         vocal_run(
             track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", ResidueRefsSeparator()
         )
+    assert "track" not in str(raised.value)
