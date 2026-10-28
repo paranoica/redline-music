@@ -387,6 +387,7 @@ def build_profiles(
     mark: Stresser = str,
     stress: bool = False,
     mix: Mapping[str, float] | None = None,
+    more_names: Sequence[str] = (),
 ) -> dict[str, dict[str, Any]]:
     """Profiles per artist, per group, of the scene, the owner's and the working one.
 
@@ -399,6 +400,7 @@ def build_profiles(
     # a writer working from these lists must not name real people
     names = {w for slug in artists for w in words(slug, keep_doubles=True)}
     names |= {w for a in artists.values() for n in a.names for w in words(n, keep_doubles=True)}
+    names |= {w for n in more_names for w in words(n, keep_doubles=True)}
 
     def count(tracks: Sequence[Track], performers: Sequence[str]) -> tuple[Counts, Counts]:
         own, guest = count_tracks(tracks, performers, mark)
@@ -473,3 +475,14 @@ def read_mix(path: Path) -> dict[str, float] | None:
             raise LyricsError(f"{path}: {name} needs a positive weight")
         mix[str(name)] = float(weight)
     return mix
+
+
+def read_names(path: Path) -> list[str]:
+    """More names to keep out of the word lists, one per line; none without the file."""
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as error:
+        raise LyricsError(f"{path}: not a readable list of names") from error
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]

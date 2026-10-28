@@ -175,3 +175,15 @@ def test_profiles_record_whether_stress_marks_were_used(lyrics, tmp_path, monkey
     index(lyrics, build, "--stress")
     marked = json.loads((build / "profiles" / "scene.json").read_text(encoding="utf-8"))
     assert (plain["meta"]["stress"], marked["meta"]["stress"]) == (False, True)
+
+
+def test_a_private_names_file_keeps_more_names_out_of_profiles(lyrics, tmp_path):
+    for path in (lyrics / "others" / "a").glob("*.txt"):
+        path.write_text(path.read_text(encoding="utf-8") + "(producertag)\n", encoding="utf-8")
+    build = tmp_path / "build"
+    index(lyrics, build)
+    scene = (build / "profiles" / "artist-a.json").read_text(encoding="utf-8")
+    assert "producertag" in scene
+    (lyrics / "names.txt").write_text("# producers\nProducerTag\n", encoding="utf-8")
+    index(lyrics, build)
+    assert "producertag" not in (build / "profiles" / "artist-a.json").read_text(encoding="utf-8")
