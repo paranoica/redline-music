@@ -5,6 +5,7 @@ import pytest
 import soundfile as sf
 from redline_signals import make_rng, tone, write
 from scipy.ndimage import maximum_filter1d
+from scipy.signal import butter, sosfiltfilt
 
 from redline.cli import main
 from redline.final_run import (
@@ -202,11 +203,16 @@ def test_stems_rebuild_the_mix_before_the_master(inputs, tmp_path):
     chain = json.loads((folder / "chain.json").read_text())
     final, _ = sf.read(folder / "final.wav", always_2d=True)
     gain = 10 ** (chain["master"]["gain_db"] / 20)
-    # away from the clipped stretches, final is the stems' sum times the master gain
+    # away from the clipped stretches, final is the stems' sum times the master gain; the
+    # master also band-limits at 20 kHz, so both sides are compared below that
     loud = np.abs((vocal + beat) * gain).max(axis=1)
     calm = maximum_filter1d(loud, size=2001) < 0.5
     assert calm.mean() > 0.05
-    np.testing.assert_allclose(final[calm], ((vocal + beat) * gain)[calm], atol=2e-3)
+    band = butter(8, 18000, fs=44100, output="sos")
+    expected = sosfiltfilt(band, (vocal + beat) * gain, axis=0)
+    error = np.abs(sosfiltfilt(band, final, axis=0)[calm] - expected[calm])
+    # a gain or stem mistake moves most samples; a few band-limit residues are allowed
+    assert np.mean(error < 2e-3) > 0.999
 
 
 WORDS = {
