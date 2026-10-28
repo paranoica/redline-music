@@ -115,6 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
     )
     write.add_argument("--force", action="store_true", help="start a pending or failed seed over")
+    suno = lyrics_commands.add_parser(
+        "suno", help="a saved text as a Suno card: title, style, settings, tagged lyrics"
+    )
+    suno.add_argument("--seed", type=int, required=True, help="the saved text's seed")
+    suno.add_argument("--lyrics", type=Path, default=LYRICS, help="the lyrics base folder")
+    suno.add_argument(
+        "--stress",
+        action="store_true",
+        help="capitalise the stressed vowel of line-final words (needs the stress extra)",
+    )
     stats = lyrics_commands.add_parser(
         "stats", help="syllables per line and rhyme letters per section"
     )
@@ -401,6 +411,28 @@ def _lyrics_write(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lyrics_suno(args: argparse.Namespace) -> int:
+    from redline.lyrics import stress
+    from redline.lyrics.parse import LyricsError, parse_text
+    from redline.lyrics.recipe import recipe_from_json
+    from redline.lyrics.suno import card
+
+    folder = args.lyrics / "generated" / str(args.seed)
+    try:
+        if not (folder / "text.txt").exists():
+            raise LyricsError(f"seed {args.seed} has no saved text")
+        track = parse_text((folder / "text.txt").read_text(encoding="utf-8"))
+        recipe = recipe_from_json((folder / "recipe.json").read_text(encoding="utf-8"))
+        mark = _lazy_stresser(stress) if args.stress else None
+        text = card(track, recipe, mark)
+        (folder / "suno.md").write_text(text, encoding="utf-8")
+    except (LyricsError, OSError, ValueError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    print(text, end="")
+    return 0
+
+
 def _lyrics_stats(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.parse import parse_text
@@ -441,6 +473,8 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _lyrics_index(args)
     if args.command == "lyrics" and args.lyrics_command == "write":
         return _lyrics_write(args)
+    if args.command == "lyrics" and args.lyrics_command == "suno":
+        return _lyrics_suno(args)
     if args.command == "lyrics" and args.lyrics_command == "stats":
         return _lyrics_stats(args)
     parser.print_help()

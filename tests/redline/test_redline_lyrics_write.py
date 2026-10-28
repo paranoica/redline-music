@@ -368,3 +368,15 @@ def test_each_round_records_the_style_notes_it_used(base):
     run(base, 33)
     checks = json.loads((folder(base, 33) / "checks-1.json").read_text(encoding="utf-8"))
     assert len(checks["style"]) == 12
+
+
+def test_cli_suno_writes_the_card_of_a_saved_seed(base, capsys):
+    run(base, 34)
+    draft(base, 34, good_draft(recipe_of(base, 34)))
+    assert run(base, 34) == 0
+    capsys.readouterr()
+    assert main(["lyrics", "suno", "--seed", "34", "--lyrics", str(base[0])]) == 0
+    out = capsys.readouterr().out
+    assert "Title:" in out and "Lyrics:" in out and "Variety: 0" in out
+    assert (folder(base, 34) / "suno.md").read_text(encoding="utf-8") == out
+    assert main(["lyrics", "suno", "--seed", "35", "--lyrics", str(base[0])]) == 2
