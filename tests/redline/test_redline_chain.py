@@ -80,6 +80,16 @@ def test_eq_ignores_the_bands_under_the_fit_range():
     assert np.all(np.abs(chain.eq_gains_db) <= 0.5)
 
 
+def test_one_click_does_not_move_the_clip_level():
+    # peaks around -20 dBFS and one separation click near full scale
+    x = speechlike(floor=0.3) * 0.1
+    clicked = x.copy()
+    clicked[len(x) // 2] = 0.99
+    _, clip = render_dirt(x, RATE, LEVELS["medium"])
+    _, clip_with_click = render_dirt(clicked, RATE, LEVELS["medium"])
+    assert 20 * np.log10(clip_with_click / clip) == pytest.approx(0.0, abs=0.5)
+
+
 def test_compression_keeps_the_level_going_into_the_drive():
     x = speechlike(floor=0.3)
     level = DirtLevel("compressor only", Compressor(-30.0, 10.0, 2.0, 60.0), 0.0, None)

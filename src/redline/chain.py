@@ -27,6 +27,8 @@ Samples = npt.NDArray[np.floating]
 PRE_GAIN_LUFS = -18.0
 OVERSAMPLING = 8
 GATE_BELOW_P95_DB = 30.0
+# the loud part of the vocal, so a single click cannot set the clip level
+PEAK_PERCENTILE = 99.9
 # a vocal stem below 200 Hz is mostly bass and 808 bleeding through the separation
 FIT_FROM_HZ = 200.0
 GAIN_LIMIT_DB = 12.0
@@ -129,7 +131,7 @@ def render_dirt(samples: Samples, rate: int, level: DirtLevel) -> tuple[Samples,
     clip = None
     if level.drive_db > 0:
         if level.clip_below_peak_db is not None:
-            peak = float(np.abs(out).max())
+            peak = 10 ** (float(np.percentile(block_levels_db(out, rate), PEAK_PERCENTILE)) / 20)
             driven_peak = math.tanh(peak * 10 ** (level.drive_db / 20))
             clip = driven_peak * 10 ** (-level.clip_below_peak_db / 20)
 
