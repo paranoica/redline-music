@@ -35,7 +35,7 @@ TIMBRES = EFFECTS
 TIMBRE = "octave down + doubles"
 BASS_FREQ_HZ = 120.0
 BASS_DRIVES_DB = (0.0, 6.0, 12.0, 18.0, 24.0)
-BASS_DRIVE_DB = 18.0
+BASS_DRIVE_DB = 12.0
 # the level picked by ear
 OCTAVE_LEVEL_DB = -9.5
 CRUSH_BITS = 8

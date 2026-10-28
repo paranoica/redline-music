@@ -115,7 +115,7 @@ def test_master_round_masters_the_chosen_sound(inputs, tmp_path):
     # the listening file is the final's mix before the master, only at another level
     assert np.corrcoef(heard[:, 0], (vocal + beat)[:, 0])[0, 1] > 0.999
     chain = json.loads((result.run_dir / "chain.json").read_text())
-    assert (chain["timbre"], chain["bass_drive_db"]) == ("octave down + doubles", 18.0)
+    assert (chain["timbre"], chain["bass_drive_db"]) == ("octave down + doubles", 12.0)
 
 
 def test_louder_targets_clip_more(inputs, tmp_path):
@@ -293,12 +293,20 @@ def test_run_drives_the_808_and_keeps_its_level(inputs, tmp_path):
     folder = run_track(
         track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator()
     )
-    assert json.loads((folder / "chain.json").read_text())["bass_drive_db"] == 18.0
+    assert json.loads((folder / "chain.json").read_text())["bass_drive_db"] == 12.0
     played, rate = sf.read(track, always_2d=True)
     beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
     before, after = low_end(played * 0.5, rate), low_end(beat, rate)
-    assert after.crest_db < before.crest_db - 0.3
     assert after.share_db == pytest.approx(before.share_db, abs=1.5)
+
+    def third_over_fundamental(x):
+        spec = np.abs(np.fft.rfft(x[:, 0])) ** 2
+        freqs = np.fft.rfftfreq(len(x), 1 / rate)
+        third = spec[(freqs > 150) & (freqs < 180)].sum()
+        return 10 * np.log10(third / spec[(freqs > 45) & (freqs < 65)].sum())
+
+    # tanh on the kick's 55 Hz adds its odd harmonics; this kick is quiet, so only a few dB
+    assert third_over_fundamental(beat) > third_over_fundamental(played * 0.5) + 1
 
 
 def test_cli_run_without_references_exits_2(inputs, tmp_path):
