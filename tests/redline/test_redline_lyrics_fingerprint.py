@@ -221,3 +221,10 @@ def test_cli_check_with_a_broken_index_exits_2(index, tmp_path):
     path = tmp_path / "candidate.txt"
     path.write_text("строка\n", encoding="utf-8")
     assert main(["lyrics", "check", str(path), "--build", str(build)]) == 2
+
+
+def test_check_can_leave_out_some_artists(index):
+    text = "[Куплет]\nвот мы гуляем по крышам пока город молчит и дальше\n"
+    assert found(index, text)
+    assert found(index, text, ignore=("a",)) == []
+    assert found(index, text, ignore=("b",))

@@ -100,6 +100,21 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument(
         "--stress", action="store_true", help="rhymes by stress in profiles (stress extra)"
     )
+    write = lyrics_commands.add_parser(
+        "write",
+        help="write a new text by seed: run it again after the writer answers (exit 3 = waiting)",
+    )
+    write.add_argument("--seed", type=int, required=True, help="the text's seed, 0 or more")
+    write.add_argument("--topic", help="what the text is about; drawn by seed if left out")
+    write.add_argument(
+        "--profile", help="the profile to write from (default: target, else working)"
+    )
+    write.add_argument("--lyrics", type=Path, default=LYRICS, help="the lyrics base folder")
+    write.add_argument("--build", type=Path, default=LYRICS_BUILD, help="the index folder")
+    write.add_argument(
+        "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
+    )
+    write.add_argument("--force", action="store_true", help="start a pending or failed seed over")
     stats = lyrics_commands.add_parser(
         "stats", help="syllables per line and rhyme letters per section"
     )
@@ -319,6 +334,52 @@ def _lyrics_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lyrics_write(args: argparse.Namespace) -> int:
+    import functools
+    import re
+
+    from redline.lyrics import stress
+    from redline.lyrics.fingerprint import FingerprintIndex
+    from redline.lyrics.generate import Failed, Pending, Session
+    from redline.lyrics.parse import LyricsError, read_track
+    from redline.lyrics.profile import load_profile
+    from redline.lyrics.writer import HandoffWriter
+
+    try:
+        if args.seed < 0:
+            raise LyricsError("a seed is a whole number from 0")
+        name = args.profile or (
+            "target" if (args.build / "profiles" / "target.json").exists() else "working"
+        )
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            raise LyricsError(f"no such profile: {name}")
+        folder = args.lyrics / "generated" / str(args.seed)
+        if _git_would_track(folder):
+            raise LyricsError(f"{folder} is not ignored by git; keep the lyrics base in private/")
+        profile = load_profile(args.build / "profiles" / f"{name}.json")
+        index = FingerprintIndex.load(args.build)
+        mine = [read_track(p, mine=True) for p in sorted((args.lyrics / "mine").glob("*.txt"))]
+        mark = functools.cache(stress.load_stresser()) if profile["meta"]["stress"] else str
+        session = Session(
+            folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words
+        )
+        result = session.run(args.seed, args.topic, args.force)
+    except (LyricsError, OSError, ValueError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    if isinstance(result, Pending):
+        print(f"waiting for the writer: {result.request}")
+        print(f"the draft goes to: {result.draft}")
+        return 3
+    if isinstance(result, Failed):
+        print(f"seed {args.seed} {result.status}:")
+        for reason in result.reasons:
+            print(f"  {reason}")
+        return 1
+    print(result.text, end="")
+    return 0
+
+
 def _lyrics_stats(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.parse import parse_text
@@ -357,6 +418,8 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         return _lyrics_check(args)
     if args.command == "lyrics" and args.lyrics_command == "index":
         return _lyrics_index(args)
+    if args.command == "lyrics" and args.lyrics_command == "write":
+        return _lyrics_write(args)
     if args.command == "lyrics" and args.lyrics_command == "stats":
         return _lyrics_stats(args)
     parser.print_help()

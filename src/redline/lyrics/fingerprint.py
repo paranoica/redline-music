@@ -129,13 +129,16 @@ class FingerprintIndex:
             artists,
         )
 
-    def _places_of(self, digest: int) -> set[tuple[int, int]]:
+    def _places_of(self, digest: int, ignore: frozenset[int]) -> set[tuple[int, int]]:
         value = np.uint64(digest)
         lo = int(np.searchsorted(self.digests, value, side="left"))
         hi = int(np.searchsorted(self.digests, value, side="right"))
-        return set(zip(self.texts[lo:hi].tolist(), self.places[lo:hi].tolist(), strict=True))
+        found = zip(self.texts[lo:hi].tolist(), self.places[lo:hi].tolist(), strict=True)
+        return {(t, p) for t, p in found if t not in ignore}
 
-    def _spans(self, stream: list[tuple[str, int]], min_words: int) -> list[tuple[int, int]]:
+    def _spans(
+        self, stream: list[tuple[str, int]], min_words: int, ignore: frozenset[int]
+    ) -> list[tuple[int, int]]:
         # a stretch grows while each next run sits right after the previous one in the same
         # base text; an interjection run proves nothing and only carries the stretch on
         active: dict[tuple[int, int], tuple[int, int]] = {}
@@ -149,7 +152,7 @@ class FingerprintIndex:
             if digest is None:
                 active = {(t, p + 1): v for (t, p), v in active.items()}
                 continue
-            hits = self._places_of(digest)
+            hits = self._places_of(digest, ignore)
             grown: dict[tuple[int, int], tuple[int, int]] = {}
             for (text_id, place), (start, last) in active.items():
                 if (text_id, place) in hits:
@@ -163,16 +166,21 @@ class FingerprintIndex:
             close(start, last)
         return spans
 
-    def check(self, track: Track, min_words: int = DEFAULT_MIN_WORDS) -> list[Match]:
+    def check(
+        self, track: Track, min_words: int = DEFAULT_MIN_WORDS, ignore: Iterable[str] = ()
+    ) -> list[Match]:
         """Stretches of min_words or more words in a row that one text of the base also has.
 
-        Pieces of different base texts, or of different places in one, never add up.
+        Pieces of different base texts, or of different places in one, never add up. Texts
+        of the artists in `ignore` are left out.
         """
         if min_words < RUN:
             raise ValueError(f"a copy is at least {RUN} words long, got {min_words}")
+        skip = set(ignore)
+        left_out = frozenset(i for i, artist in enumerate(self.artists) if artist in skip)
         found = []
         for stream in _streams(track):
-            for a, b in self._spans(stream, min_words):
+            for a, b in self._spans(stream, min_words, left_out):
                 found.append((stream[a][1], stream[b][1], b - a + 1))
         lines = [line.text for section in track.sections for line in section.lines]
         return _matches(found, lines)
