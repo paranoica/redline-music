@@ -16,6 +16,16 @@ if TYPE_CHECKING:
 AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".aif", ".aiff"}
 
 
+def _inputs(command: argparse.ArgumentParser, out_help: str | None = None) -> None:
+    command.add_argument("--track", type=Path, required=True, help="the track from Suno")
+    command.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    if out_help is not None:
+        command.add_argument("--out", type=Path, default=Path("output"), help=out_help)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Return the top-level parser with its subcommands."""
     parser = argparse.ArgumentParser(prog="redline", description=__doc__)
@@ -24,20 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     measure = commands.add_parser(
         "measure", help="measure a track against references and write a report (stage 1)"
     )
-    measure.add_argument("--track", type=Path, required=True, help="the track from Suno")
-    measure.add_argument(
-        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
-    )
-    measure.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    _inputs(measure)
     vocal = commands.add_parser(
         "vocal", help="process the vocal at every dirt level and write blind listening files"
     )
-    vocal.add_argument("--track", type=Path, required=True, help="the track from Suno")
-    vocal.add_argument(
-        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
-    )
-    vocal.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
-    vocal.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
+    _inputs(vocal, "listening files folder")
     vocal.add_argument("--seed", type=int, help="seed of the letter shuffle")
     vocal.add_argument(
         "--axis",
@@ -56,19 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     master = commands.add_parser(
         "master", help="blind round on the master: the chosen vocal, clipped to reference loudness"
     )
+    _inputs(master, "listening files folder")
+    master.add_argument("--seed", type=int, help="seed of the letter shuffle")
     master.add_argument(
         "--axis",
         choices=("master", "timbre"),
         default="master",
         help="what the variants change: the master's loudness, or the vocal's timbre",
     )
-    master.add_argument("--track", type=Path, required=True, help="the track from Suno")
-    master.add_argument(
-        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
-    )
-    master.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
-    master.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
-    master.add_argument("--seed", type=int, help="seed of the letter shuffle")
     master.add_argument(
         "--timbres",
         help="timbre variants, comma separated; join effects with +: 'octave down + doubles'",
@@ -76,12 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = commands.add_parser(
         "run", help="process a track with the chosen settings and write the result folder"
     )
-    run.add_argument("--track", type=Path, required=True, help="the track from Suno")
-    run.add_argument(
-        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
-    )
-    run.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
-    run.add_argument("--out", type=Path, default=Path("output"), help="result folder")
+    _inputs(run, "result folder")
     return parser
 
 
