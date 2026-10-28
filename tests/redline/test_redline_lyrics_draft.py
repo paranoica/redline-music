@@ -159,3 +159,31 @@ def test_verbs_with_stress_marks_are_still_verbs():
 def test_words_after_the_last_section_are_refused():
     signed = GOOD_VERSE + "надеюсь тебе понравится\n"
     assert "lines" in problems(signed, VERSE)
+
+
+def test_one_rhyme_held_for_more_than_four_lines_goes_back():
+    plan = SectionPlan("verse", 6, (5, 9), "AAAA")
+    held = (
+        "[Куплет]\n"
+        + "\n".join(f"та та та {w}" for w in ["дом", "лом", "сом", "ком", "гном", "ром"])
+        + "\n"
+    )
+    found, stats = check_draft(held, recipe(plan))
+    assert stats["longest_rhyme_run"] == 6
+    assert "rhymes" in {p.kind for p in found}
+    four = (
+        "[Куплет]\n"
+        + "\n".join(f"та та та {w}" for w in ["дом", "лом", "сом", "ком", "сыр", "мир"])
+        + "\n"
+    )
+    found, stats = check_draft(four, recipe(plan))
+    assert stats["longest_rhyme_run"] == 4
+    assert not [p for p in found if p.kind == "rhymes" and "run" in p.detail]
+
+
+def test_half_the_lines_off_the_band_is_still_fine():
+    loose = GOOD_VERSE.replace("и вокруг огромный мир", "и вокруг огромный и очень тихий мир")
+    loose = loose.replace("на столе лежит мой сыр", "на моем столе давно лежит мой сыр")
+    _, stats = check_draft(loose, recipe(VERSE))
+    assert stats["syllables_in_range"] == 0.5
+    assert "syllables" not in problems(loose, VERSE)

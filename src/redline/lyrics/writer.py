@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from redline.lyrics.recipe import Recipe
+from redline.lyrics.recipe import DEVICES, Recipe
 
 PROMPT = Path(__file__).with_name("writer_prompt.md")
 REFUSAL = "REFUSED:"
@@ -29,6 +29,7 @@ class WriterRequest:
     excerpts: tuple[str, ...]
     reasons: tuple[str, ...]
     round: int
+    style: str = ""
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,11 @@ def render(request: WriterRequest, answer_to: Path | None = None) -> str:
     out.append(f"- Adlibs: {', '.join(r.adlibs) or '-'}; on about {r.adlib_share:.0%} of lines")
     out.append(f"- Repeated lines inside a hook: about {r.hook_repeat_share:.0%}")
     out.append(f"- Words in Latin letters: about {r.en_share:.0%}")
+    if r.devices:
+        out.append("- What this text must also do:")
+        out += [f"  - {count} times: {DEVICES[name]}" for name, count in r.devices]
+    if request.style.strip():
+        out += ["", "## Notes on the scene's style", "", request.style.strip()]
     if request.excerpts:
         out += ["", "## The owner's voice (manner only, never these lines)", ""]
         for excerpt in request.excerpts:

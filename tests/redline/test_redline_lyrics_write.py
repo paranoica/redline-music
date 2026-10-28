@@ -304,3 +304,10 @@ def test_each_round_records_the_prompt_it_was_written_under(base):
     run(base, 27)
     checks = json.loads((folder(base, 27) / "checks-1.json").read_text(encoding="utf-8"))
     assert len(checks["prompt"]) == 12
+
+
+def test_private_style_notes_go_into_the_request(base):
+    (base[0] / "style.md").write_text("заметка про стиль сцены\n", encoding="utf-8")
+    run(base, 31)
+    request = (folder(base, 31) / "request-1.md").read_text(encoding="utf-8")
+    assert "заметка про стиль сцены" in request

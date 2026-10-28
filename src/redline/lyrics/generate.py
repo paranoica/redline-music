@@ -101,8 +101,9 @@ class Session:
         writer: Writer,
         mark: Stresser = str,
         min_words: int = 8,
+        style: str = "",
     ) -> None:
-        """Hold what one seed needs."""
+        """Hold what one seed needs; `style` is the private notes on the scene's style."""
         if OWNER not in index.artists:
             raise LyricsError("the lyrics index holds no texts of the owner; rebuild it with them")
         self.folder = folder
@@ -113,6 +114,7 @@ class Session:
         self.writer = writer
         self.mark = mark
         self.min_words = min_words
+        self.style = style
 
     def _state(self) -> dict[str, Any] | None:
         path = self.folder / "state.json"
@@ -212,6 +214,7 @@ class Session:
             excerpts(self.mine, self.index, seed),
             tuple(state["reasons"]),
             state["round"],
+            self.style,
         )
         answer = self.writer.ask(request)
         if isinstance(answer, Waiting):

@@ -14,13 +14,15 @@ from redline.lyrics.syllables import count_syllables
 LINE_SLACK = 1
 # past about 3000 characters Suno rushes the lyrics or drops sections
 MAX_CHARACTERS = 3000
-# set from the owner's and the favourite artist's texts read as drafts of their own shape:
-# a quarter of them hold under 68 % and 61 % of lines within the band and one syllable,
-# and under 31 % of rhyme pairs by the owner's rule
+# a floor, not a target: real lines wander off the band (in a quarter of the owner's and the
+# favourite artist's texts under 68 % and 61 % of lines sit within the band and one), and
+# the owner heard a text held to the band as flat
 SYLLABLE_TOLERANCE = 1
-SYLLABLE_SHARE = 0.65
+SYLLABLE_SHARE = 0.5
 NAMED_LINES = 5
 RHYME_SHARE = 0.3
+# one rhyme held longer than this reads as a monotone
+MAX_RHYME_RUN = 4
 WINDOW = 4
 PAIRS = {
     "AABB": ((0, 1), (2, 3)),
@@ -75,6 +77,19 @@ def _not_lyrics(text: str) -> list[Problem]:
                 return [Problem("not lyrics", "line 1", "start with a section header")]
             break
     return []
+
+
+def _longest_run(ends: list[str]) -> int:
+    """The most lines in a row that all rhyme with the first of them."""
+    longest = 0
+    start = 0
+    while start < len(ends):
+        end = start + 1
+        while end < len(ends) and (ends[end] == ends[start] or rhymes(ends[start], ends[end])):
+            end += 1
+        longest = max(longest, end - start)
+        start = end
+    return longest
 
 
 def _sections(track: Any, recipe: Recipe, mark: StressMark) -> tuple[list[Problem], list, list]:
@@ -140,6 +155,16 @@ def check_draft(
         )
         for _, number, detail in sorted(off, key=lambda o: (-o[0], o[1]))[:NAMED_LINES]:
             problems.append(Problem("syllables", f"line {number}", detail))
+    run = max(
+        (
+            _longest_run([last_word(mark(line.plain)) for line in section.lines if line.plain])
+            for section in track.sections
+        ),
+        default=0,
+    )
+    if run > MAX_RHYME_RUN:
+        detail = f"one rhyme held for a run of {run} lines; change the rhyme every 2-4 lines"
+        problems.append(Problem("rhymes", "the draft", detail))
     rhymed = sum(rhymes(a, b) for a, b in pairs) / len(pairs) if pairs else 1.0
     if rhymed < rhyme_share:
         problems.append(
@@ -153,5 +178,6 @@ def check_draft(
         "rhyme_pairs": len(pairs),
         "rhymed_pairs": round(rhymed, 4),
         "verb_rhymes": round(verbs / len(pairs), 4) if pairs else 0.0,
+        "longest_rhyme_run": run,
     }
     return problems, stats

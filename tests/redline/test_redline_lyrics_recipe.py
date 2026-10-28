@@ -128,3 +128,12 @@ def test_trimming_never_empties_a_section(profile):
     recipe = make_recipe(profile, 0)
     assert all(s.lines >= 1 for s in recipe.sections)
     assert sum(s.lines for s in recipe.sections) <= max(MAX_LINES, len(recipe.sections))
+
+
+def test_each_seed_draws_its_own_set_of_devices(profile):
+    from redline.lyrics.recipe import DEVICES
+
+    sets = {make_recipe(profile, seed).devices for seed in range(30)}
+    assert len(sets) > 5
+    for devices in sets:
+        assert devices and all(name in DEVICES and count >= 1 for name, count in devices)

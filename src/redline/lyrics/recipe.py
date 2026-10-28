@@ -17,22 +17,37 @@ FALLBACK_LINES = 4
 MAX_LINES = 48
 FALLBACK_SYLLABLES = (8, 12)
 TOPICS = (
-    "ночь в городе",
-    "деньги",
-    "бывшая",
-    "одиночество",
-    "слава и зависть",
-    "дорога",
-    "друзья, которых больше нет",
-    "зависимость",
-    "бессонница",
-    "зима",
-    "старый район",
-    "любовь, которой не было",
-    "холод внутри",
-    "шоу и пустота",
-    "телефон молчит",
+    "флекс в клубе до утра",
+    "новый дроп шмота",
+    "отходняк после выходных",
+    "она хочет только кэш",
+    "движ на районе",
+    "тур по городам",
+    "ночь в отеле",
+    "бывшая смотрит сторис",
+    "кэш пришёл, кэш ушёл",
+    "пацаны и общее дело",
+    "мама, я на телике",
+    "аптека открыта круглосуточно",
+    "проснулся богатым",
+    "фейки вокруг",
+    "рейв в заброшке",
 )
+# what a text does besides rhyming: the writer gets a few of these, so texts differ in kind
+DEVICES = {
+    "punch": "a punchline on a double meaning of one word",
+    "absurd": "an absurd, deadpan line that is funny because it is said straight",
+    "brand": "a brand with a detail: the model, the price, where it came from",
+    "pharma": "a reference to pills or a drug in the scene's slang, as an image, never a how-to",
+    "english": "a whole phrase in English in the middle of a Russian line",
+    "number": "an exact number: money, hours, kilometres, a year",
+    "place": "a real, ordinary place set against the flex (a small town, a shop, a stop)",
+    "dialogue": "a line said by someone else, with a dash",
+    "shout": "a line shouted in capitals, short",
+    "internet": "game or internet slang used straight, not as a joke about the internet",
+    "contrast": "a cold boast and a weak spot in the same line",
+}
+DEVICE_COUNT = (3, 5)
 
 
 @dataclass(frozen=True)
@@ -62,6 +77,7 @@ class Recipe:
     adlib_share: float
     hook_repeat_share: float
     en_share: float
+    devices: tuple[tuple[str, int], ...] = ()
 
 
 def _draw(rng: np.random.Generator, items: list[Any], weights: list[float]) -> Any:
@@ -138,6 +154,10 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         ]
     vocabulary = [(w["word"], w["per_1000"]) for w in profile["vocabulary"]["top"]]
     latin = [(w["word"], w["per_1000"]) for w in profile["latin"]["top"]]
+    names = sorted(DEVICES)
+    count = int(rng.integers(DEVICE_COUNT[0], DEVICE_COUNT[1] + 1))
+    picked = sorted(rng.choice(len(names), size=count, replace=False).tolist())
+    devices = tuple((names[i], int(rng.integers(1, 3))) for i in picked)
     return Recipe(
         seed=seed,
         topic=topic if topic else str(_draw(rng, list(TOPICS), [1.0] * len(TOPICS))),
@@ -149,6 +169,7 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
         adlib_share=float(profile["adlibs"]["line_share"] or 0.0),
         hook_repeat_share=float(profile["hook"]["repeated_line_share"] or 0.0),
         en_share=float(profile["latin"]["en_share"] or 0.0),
+        devices=devices,
     )
 
 
@@ -166,4 +187,5 @@ def recipe_from_json(text: str) -> Recipe:
     )
     for key in ("words", "latin", "adlibs"):
         data[key] = tuple(data[key])
+    data["devices"] = tuple((name, count) for name, count in data.get("devices", ()))
     return Recipe(**data)

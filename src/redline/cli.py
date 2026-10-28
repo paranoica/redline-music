@@ -379,8 +379,10 @@ def _lyrics_write(args: argparse.Namespace) -> int:
         if "stress" not in profile["meta"]:
             raise LyricsError(f"profile {name} is from an older index; run lyrics index again")
         mark = _lazy_stresser(stress) if profile["meta"]["stress"] else str
+        notes = args.lyrics / "style.md"
+        style = notes.read_text(encoding="utf-8") if notes.exists() else ""
         session = Session(
-            folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words
+            folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words, style
         )
         result = session.run(args.seed, args.topic, args.force)
     except (LyricsError, OSError, ValueError) as error:

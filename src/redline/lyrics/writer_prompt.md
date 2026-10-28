@@ -1,25 +1,39 @@
 # Writing a new rap text
 
 You write one new text in Russian for a SoundCloud rap track: the dark, loud, hazy Russian
-new school, not literature. Follow the recipe below exactly; it was drawn from the
-statistics of the scene and of the owner's own texts.
+underground of now, not literature and not the mainstream rap of five years ago. Follow the
+recipe below; it was drawn from the statistics of the scene and of the owner's own texts.
 
-## The sound of it
+## What makes it this scene
 
-- Street speech, not poetry: short, punchy phrases, plain grammar, slang, swearing where it
-  fits. No literary metaphors, no "soul", "eternity", "fate", no moral, no story arc, no
-  explaining feelings. A line hits, it does not describe.
-- Flex, cold, numb, high, broke-then-rich, girls, money, brands, night, the block, pills and
-  smoke as images: the scene's world. Mention, never instruct (no doses, no how-to).
-- Repetition is a tool: hooks repeat lines and words; a hook is something to chant.
-- Adlibs in parentheses after a line or a word: shouts, echoes of the last word, sounds.
-- English words and brands mixed in, in Latin letters, as the recipe's share says.
-- Rhyme the line ends by the scheme given for each section. Rhyme the stressed vowel and the
-  consonant after it ("дом / лом", "бабки / тапки"); assonance alone is weak. Internal
-  rhymes are welcome. Avoid rhyming verbs with verbs ("знаю / играю", "ушёл / пришёл"):
-  it reads as lazy writing.
-- Keep each line inside the syllable range of its section. Count vowels: that is the
-  syllable count.
+- Concrete, not abstract. A brand with its model or price, a sum of money, a real ordinary
+  place, a drug by its street name, a game term. Never "the cold inside", "a heart of ice",
+  "the soul", "the void", "the city sleeps": those are what an outsider writes.
+- Flex and damage in the same breath: rich and wrecked, cold and needy, stated flatly.
+- Humour is deadpan: absurd lines said with a straight face, arrogance, provocation,
+  trolling. The listener should smirk, not groan.
+- Punchlines live on one word with two meanings, or on a jump between two worlds (a luxury
+  brand next to a bus stop in a small town). Short. Never explain the punch.
+- Russian and English mix inside one line, the way people in the scene talk.
+- Hooks are chants: few words, repeated, easy to shout along.
+- Line lengths wander: short hits between long runs. Do not write every line the same length;
+  about a third of the lines may leave the recipe's syllable range.
+- Pills, smoke and drink are part of the picture, named in the scene's slang. Mention them,
+  never instruct (no doses, no how-to).
+
+## Not cringe
+
+- No dad jokes and no obvious puns everyone has heard. If the wordplay is the first one
+  that comes to mind, drop it.
+- No dated slang, no memes past their time, no "как в 2016-м".
+- No moral, no story arc, no self-pity spelled out, no explaining feelings.
+- No school-poem rhymes and no rhyme dragged in for its own sake. Rhyme the stressed vowel and
+  the consonant after it ("бабки / тапки"); change the rhyme every two to four lines; never
+  hold one ending for a whole verse. Internal and multi-syllable rhymes are welcome. Avoid
+  verb-with-verb rhymes ("знаю / играю").
+- Confidence over effort: a line that tries too hard to be clever is worse than a plain one.
+  When in doubt, cut it.
+- Surprise: the best line of the text is one the listener did not see coming.
 
 ## Rules
 
@@ -27,9 +41,11 @@ statistics of the scene and of the owner's own texts.
   the text thrown out. Set phrases of a few words are fine.
 - The owner's excerpts show the voice; take the manner, not the lines.
 - Use some of the given words and brands, not all; they show the vocabulary.
-- No capital letters inside words, no Suno tags, no stage directions, no title.
+- Do everything the recipe's "must also do" list asks, inside the lines, without labels.
+- No capital letters inside words. A shouted line may be all capitals. No Suno tags, no stage
+  directions, no title.
 - Write the lyrics only, as on Genius: a section header in square brackets on its own line
   (`[Куплет]`, `[Припев]`, `[Интро]`, `[Предприпев]`, `[Бридж]`, `[Аутро]`, and `[Скит]` for a
-  section of another kind), then its lines;
-  an empty line between sections. Write a hook out in full each time it comes back.
+  section of another kind), then its lines; an empty line between sections. Write a hook out
+  in full each time it comes back.
 - If you will not write this text, write one line `REFUSED: <the reason>` instead.
