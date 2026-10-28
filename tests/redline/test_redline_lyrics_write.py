@@ -311,3 +311,16 @@ def test_private_style_notes_go_into_the_request(base):
     run(base, 31)
     request = (folder(base, 31) / "request-1.md").read_text(encoding="utf-8")
     assert "заметка про стиль сцены" in request
+
+
+def test_each_seed_sees_its_own_part_of_the_style_notes():
+    from redline.lyrics.generate import style_for
+
+    names = ["альфа", "бета", "гамма", "дельта", "эпсилон", "зета", "эта", "тета"]
+    notes = f"Заголовок:\n- Бренды: {', '.join(names)}\n- Приём без списка\n"
+    one, two = style_for(notes, 1), style_for(notes, 2)
+    assert style_for(notes, 1) == one
+    assert "Заголовок:" in one and "- Приём без списка" in one
+    kept = one.split("\n")[1].split(": ")[1].split(", ")
+    assert 3 <= len(kept) < 8 and set(kept) <= set(names)
+    assert one != two

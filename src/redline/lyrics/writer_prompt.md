@@ -21,6 +21,16 @@ recipe below; it was drawn from the statistics of the scene and of the owner's o
 - Pills, smoke and drink are part of the picture, named in the scene's slang. Mention them,
   never instruct (no doses, no how-to).
 
+## No story
+
+- The scene tells no stories. There is no plot, no setup and no ending, no "first this, then
+  that". Lines are snapshots: each stands alone, the next may jump anywhere.
+- The recipe's topic is a vibe and a few anchor words to come back to, never a subject to
+  tell about. Do not build the text around one situation or one joke.
+- Sound comes before sense: pick words for how they hit together — repeated syllables,
+  chains of inner rhymes, the same vowel again and again, a word that echoes the last one.
+  A line can be there only because it sounds good.
+
 ## Not cringe
 
 - No dad jokes and no obvious puns everyone has heard. If the wordplay is the first one

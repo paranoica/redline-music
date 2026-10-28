@@ -7,7 +7,7 @@ import pytest
 
 from redline.lyrics.parse import parse_text
 from redline.lyrics.profile import count_tracks, to_profile
-from redline.lyrics.recipe import TOPICS, make_recipe, recipe_json
+from redline.lyrics.recipe import ANCHORS, make_recipe, recipe_json
 
 COMMON = (
     "[Куплет]\n"
@@ -81,7 +81,7 @@ def test_words_come_from_the_profile_only(profile):
 
 def test_a_given_topic_is_kept_and_a_missing_one_is_drawn(profile):
     assert make_recipe(profile, 1, "ночь и деньги").topic == "ночь и деньги"
-    assert make_recipe(profile, 1).topic in TOPICS
+    assert set(make_recipe(profile, 1).topic.split(", ")) <= set(ANCHORS)
 
 
 def test_the_recipe_names_no_profile(profile):
@@ -137,3 +137,10 @@ def test_each_seed_draws_its_own_set_of_devices(profile):
     assert len(sets) > 5
     for devices in sets:
         assert devices and all(name in DEVICES and count >= 1 for name, count in devices)
+
+
+def test_a_drawn_topic_is_a_few_anchor_words_not_a_story(profile):
+    for seed in range(20):
+        topic = make_recipe(profile, seed).topic
+        assert 2 <= len(topic.split(", ")) <= 3
+        assert all(len(word.split()) == 1 for word in topic.split(", "))

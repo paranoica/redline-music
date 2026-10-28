@@ -1,6 +1,7 @@
 """Writing a text by seed: recipe, requests to the writer, checks, rounds and state."""
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,6 +87,30 @@ def excerpts(mine: Sequence[Track], index: FingerprintIndex, seed: int) -> tuple
     rng = np.random.Generator(np.random.PCG64(seed))
     picked = rng.choice(len(clean), size=min(EXCERPTS, len(clean)), replace=False)
     return tuple(clean[int(i)] for i in sorted(picked))
+
+
+LISTED = re.compile(r"^(- [^:]+: )(.+)$")
+MIN_KEPT = 3
+
+
+def style_for(notes: str, seed: int) -> str:
+    """The style notes with each long list cut to a part chosen by seed.
+
+    Every writer seeing the same examples writes the same jokes; a different part each seed
+    keeps the texts apart.
+    """
+    rng = np.random.Generator(np.random.PCG64(seed))
+    out = []
+    for line in notes.splitlines():
+        found = LISTED.match(line)
+        items = found.group(2).rstrip(".").split(", ") if found else []
+        if len(items) <= 2 * MIN_KEPT:
+            out.append(line)
+            continue
+        keep = max(MIN_KEPT, len(items) // 2)
+        picked = sorted(rng.choice(len(items), size=keep, replace=False).tolist())
+        out.append(found.group(1) + ", ".join(items[i] for i in picked))
+    return "\n".join(out)
 
 
 class Session:
@@ -214,7 +239,7 @@ class Session:
             excerpts(self.mine, self.index, seed),
             tuple(state["reasons"]),
             state["round"],
-            self.style,
+            style_for(self.style, seed),
         )
         answer = self.writer.ask(request)
         if isinstance(answer, Waiting):

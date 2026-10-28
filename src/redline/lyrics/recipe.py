@@ -16,23 +16,34 @@ FALLBACK_LINES = 4
 # about 3000 characters, which Suno sings without rushing
 MAX_LINES = 48
 FALLBACK_SYLLABLES = (8, 12)
-TOPICS = (
-    "флекс в клубе до утра",
-    "новый дроп шмота",
-    "отходняк после выходных",
-    "она хочет только кэш",
-    "движ на районе",
-    "тур по городам",
-    "ночь в отеле",
-    "бывшая смотрит сторис",
-    "кэш пришёл, кэш ушёл",
-    "пацаны и общее дело",
-    "мама, я на телике",
-    "аптека открыта круглосуточно",
-    "проснулся богатым",
-    "фейки вокруг",
-    "рейв в заброшке",
+# a drawn topic is a few anchor words that set the vibe; the scene tells no stories
+ANCHORS = (
+    "кэш",
+    "лёд",
+    "аптека",
+    "дроп",
+    "ночь",
+    "клуб",
+    "район",
+    "дым",
+    "сука",
+    "трасса",
+    "отель",
+    "свэг",
+    "блок",
+    "дрип",
+    "колёса",
+    "кровь",
+    "снег",
+    "бит",
+    "фейк",
+    "пачка",
+    "капсула",
+    "шмот",
+    "газ",
+    "сон",
 )
+ANCHOR_COUNT = (2, 3)
 # what a text does besides rhyming: the writer gets a few of these, so texts differ in kind
 DEVICES = {
     "punch": "a punchline on a double meaning of one word",
@@ -46,6 +57,7 @@ DEVICES = {
     "shout": "a line shouted in capitals, short",
     "internet": "game or internet slang used straight, not as a joke about the internet",
     "contrast": "a cold boast and a weak spot in the same line",
+    "sound": "a line built for its sound: repeated syllables, chained inner rhymes, alliteration",
 }
 DEVICE_COUNT = (3, 5)
 
@@ -123,6 +135,11 @@ def _scheme(rng: np.random.Generator, known: dict[str, Any] | None) -> str:
     return str(_draw(rng, [s for s, _ in named], [v for _, v in named]))
 
 
+def _anchors(rng: np.random.Generator) -> str:
+    count = int(rng.integers(ANCHOR_COUNT[0], ANCHOR_COUNT[1] + 1))
+    return ", ".join(ANCHORS[int(i)] for i in rng.choice(len(ANCHORS), size=count, replace=False))
+
+
 def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) -> Recipe:
     """Draw a text's shape and material from the profile; the same seed draws the same."""
     rng = np.random.Generator(np.random.PCG64(seed))
@@ -160,7 +177,7 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
     devices = tuple((names[i], int(rng.integers(1, 3))) for i in picked)
     return Recipe(
         seed=seed,
-        topic=topic if topic else str(_draw(rng, list(TOPICS), [1.0] * len(TOPICS))),
+        topic=topic or _anchors(rng),
         band=band,
         sections=tuple(sections),
         words=_sample(rng, vocabulary, WORDS),
