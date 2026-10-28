@@ -21,33 +21,58 @@ def _number(value: float | None) -> str:
     return "—" if value is None else f"{value:.1f}"
 
 
+TIMBRE_WORDS = {
+    "octave down": "подложил под голос его же копию на октаву ниже",
+    "octave up": "подложил над голосом его же копию на октаву выше",
+    "doubles": "добавил два «плавающих» дубля по бокам",
+    "bitcrush": "пропустил голос через бит-крашер",
+}
+
+
+def _master_line(master: MasterResult, before_lufs: float | None, final_lufs: float) -> str:
+    direction = "поднял" if before_lufs is None or final_lufs > before_lufs else "опустил"
+    line = (
+        f"- **Мастер:** {direction} громкость до {final_lufs:.1f} LUFS "
+        f"(цель {master.target_lufs:.1f}: медианная громкость референсов)"
+    )
+    if master.clipped_share > 0:
+        line += f" клиппингом; срезано {master.clipped_share * 100:.1f} % отсчётов"
+    line += "."
+    if not master.reached:
+        line += " Цель не достигнута: дальше клиппинг только развалит звук."
+    return line
+
+
 def write_final_report(
     path: Path,
     chain: ChainResult,
     vocal_level: str,
     vocal_db: float,
+    timbre: str,
     master: MasterResult,
+    final_lufs: float,
     before: Mapping[str, float | None],
     after: Mapping[str, float | None],
     refs: Sequence[Mapping[str, float | None]],
 ) -> None:
-    """Write the run's report in Russian; numbers say closer or further, never better."""
+    """Write the run's report in Russian; numbers say closer or further, never which is good."""
     eq = ", ".join(f"{g:+.1f}" for g in chain.eq_gains_db)
+    timbre_words = " и ".join(TIMBRE_WORDS[p.strip()] for p in timbre.split("+"))
     lines = [
         "# Что сделано с треком",
         "",
         f"- **Вокал:** сжал и перегрузил (уровень `{vocal_level}`), подогнал окраску под вокал "
-        f"референсов (эквалайзер, дБ по полосам 200 Гц … 8 кГц: {eq}), "
+        f"референсов (эквалайзер, дБ по полосам 200 Гц … 8 кГц: {eq}), {timbre_words}, "
         f"утопил на {abs(vocal_db):.0f} дБ под бит.",
         "- **Бит:** не трогал.",
-        f"- **Мастер:** поднял громкость до {master.target_lufs:.1f} LUFS (средняя громкость "
-        f"референсов) клиппингом; срезано {master.clipped_share * 100:.1f} % отсчётов."
-        + ("" if master.reached else " Цель не достигнута: дальше только развал звука."),
+        _master_line(master, before.get("mix.lufs"), final_lufs),
         "",
         "## Цифры до и после",
         "",
-        "Слово в скобках: где итог против референсов и сдвинулся ли к ним от оригинала "
-        "(«ближе / дальше / так же / в диапазоне»). Это не «лучше»: это решает слух.",
+        "Слово в скобках: где итог против диапазона референсов и сдвинулся ли к нему от "
+        "оригинала: «ближе», «дальше», «так же», «в диапазоне», «вне диапазона»; «мало "
+        "референсов» и «мало данных», когда сравнивать не с чем. Это не оценка звука: её "
+        "даёт только слух.",
         "",
         "| замер | оригинал | итог | референсы с запасом этапа 1 |",
         "|---|---|---|---|",

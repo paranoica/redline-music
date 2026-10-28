@@ -3,7 +3,7 @@ import pytest
 from redline_signals import make_rng, tone
 
 from redline.loudness import integrated_lufs
-from redline.master import CEILING_DB, crossover, master_clip
+from redline.master import CEILING_DB, MAX_GAIN_DB, crossover, master_clip
 
 RATE = 44100
 
@@ -95,3 +95,24 @@ def test_master_clip_tames_a_mix_already_over_full_scale():
 def test_master_clip_refuses_silence():
     with pytest.raises(ValueError, match="silent"):
         master_clip(np.zeros((RATE * 4, 2), dtype=np.float32), RATE, -9.0)
+
+
+def test_master_clip_reports_a_target_it_misses_after_the_clean_render():
+    # the base-rate clip reaches about -1 LUFS at +30 dB, the clean render far less
+    out, result = master_clip(beatlike(), RATE, -2.0)
+    assert not result.reached
+    assert integrated_lufs(out, RATE) < -2.5
+
+
+def test_master_clip_caps_the_plain_gain():
+    x = tone(440, 4, amp=1e-3)
+    out, result = master_clip(x, RATE, -14.0)
+    assert result.gain_db == pytest.approx(MAX_GAIN_DB)
+    assert not result.reached
+    np.testing.assert_allclose(out, x * 10 ** (MAX_GAIN_DB / 20), rtol=1e-5)
+
+
+def test_master_clip_keeps_its_turn_down_small():
+    # repeated clip and band limit at the high rate leave little for the decimation to ring
+    _, result = master_clip(beatlike(), RATE, -6.0)
+    assert result.trim_db > -1.5

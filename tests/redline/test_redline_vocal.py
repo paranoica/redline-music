@@ -280,3 +280,14 @@ def test_dirt_axis_applies_the_vocal_offset_to_the_files(inputs, tmp_path):
     for path in sorted(result.listen_dir.iterdir()):
         data, _ = sf.read(path, always_2d=True)
         assert np.corrcoef(data[:, 0], source[:, 0])[0, 1] > 0.999, path.name
+
+
+def test_no_levels_is_refused(inputs, tmp_path):
+    with pytest.raises(ValueError, match="no dirt level"):
+        run(inputs, tmp_path, levels=())
+
+
+@pytest.mark.parametrize("options", [{"levels": ("heavy",)}, {"vocal_db": -6.0}])
+def test_dirt_options_on_the_balance_axis_are_refused(inputs, tmp_path, options):
+    with pytest.raises(ValueError, match="dirt axis"):
+        run(inputs, tmp_path, axis="balance", **options)

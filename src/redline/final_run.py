@@ -29,7 +29,9 @@ VOCAL_DB = -6.0
 QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
 BASE = "base"
+EFFECTS = ("doubles", "octave down", "octave up", "bitcrush")
 TIMBRES = ("doubles", "octave down", "octave up", "bitcrush")
+TIMBRE = "octave down"
 OCTAVE_LEVEL_DB = -6.0
 CRUSH_BITS = 8
 CRUSH_HOLD = 3
@@ -46,8 +48,10 @@ def _reference_loudness(refs: list[FileResult]) -> list[float]:
 def master_targets(refs: list[FileResult]) -> dict[str, float]:
     """Loudness targets for a round: a quiet master, the references' median, their loudest."""
     known = _reference_loudness(refs)
-    targets = (QUIET_MASTER_LUFS, statistics.median(known), max(known))
-    return {f"master {t:.1f}": round(t, 1) for t in targets}
+    targets = sorted(
+        {round(t, 1) for t in (QUIET_MASTER_LUFS, statistics.median(known), max(known))}
+    )
+    return {f"master {t:.1f}": t for t in targets}
 
 
 def _chosen_mix(
@@ -106,16 +110,27 @@ def master_round(
     return VocalRun(run_dir, listen_dir)
 
 
+def _effects(name: str) -> list[str]:
+    return [part.strip() for part in name.split("+")]
+
+
 def _with_timbre(name: str, vocal: Samples, rate: int) -> Samples:
-    if name == "doubles":
-        return double(vocal, rate)
-    if name == "octave down":
-        return octave_layer(vocal, rate, -1, OCTAVE_LEVEL_DB)
-    if name == "octave up":
-        return octave_layer(vocal, rate, 1, OCTAVE_LEVEL_DB)
-    # the crush works on the vocal's own scale, not on its level under the beat
-    peak = float(np.abs(vocal).max())
-    return bitcrush(vocal / peak, rate, CRUSH_BITS, CRUSH_HOLD) * np.float32(peak)
+    """Apply one effect, or several joined by " + ", in order."""
+    out = vocal
+    for effect in _effects(name):
+        if effect == "doubles":
+            out = double(out, rate)
+        elif effect == "octave down":
+            out = octave_layer(out, rate, -1, OCTAVE_LEVEL_DB)
+        elif effect == "octave up":
+            out = octave_layer(out, rate, 1, OCTAVE_LEVEL_DB)
+        elif effect == "bitcrush":
+            # the crush works on the vocal's own scale, not on its level under the beat
+            peak = float(np.abs(out).max())
+            out = bitcrush(out / peak, rate, CRUSH_BITS, CRUSH_HOLD) * np.float32(peak)
+        else:
+            raise ValueError(f"unknown timbre {effect!r}, expected some of {', '.join(EFFECTS)}")
+    return out
 
 
 def timbre_round(
@@ -125,14 +140,20 @@ def timbre_round(
     out_dir: Path,
     separator: Separator,
     seed: int | None = None,
+    timbres: tuple[str, ...] = TIMBRES,
 ) -> VocalRun:
     """Blind round on the vocal's timbre: the original, the chosen sound, one file per effect."""
+    unknown = [e for name in timbres for e in _effects(name) if e not in EFFECTS]
+    if unknown:
+        raise ValueError(
+            f"unknown timbre {', '.join(unknown)}, expected some of {', '.join(EFFECTS)}"
+        )
     check_folders(work_dir, out_dir)
     inputs, original, vocal, _ = _chosen_mix(track, refs, work_dir, separator)
     beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
     variants = {ORIGINAL: original, BASE: master_clip(vocal + beat, rate, target)[0]}
-    for name in TIMBRES:
+    for name in timbres:
         log.info("timbre: %s", name)
         variants[name] = master_clip(_with_timbre(name, vocal, rate) + beat, rate, target)[0]
     run_dir = new_run_dir(work_dir / "runs")
@@ -155,6 +176,7 @@ def run_track(
     check_folders(work_dir, out_dir)
     inputs, original, vocal, chain = _chosen_mix(track, refs, work_dir, separator)
     beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
+    vocal = _with_timbre(TIMBRE, vocal, rate)
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
     final, master = master_clip(vocal + beat, rate, target)
     final_lufs = integrated_lufs(final, rate)
@@ -175,6 +197,7 @@ def run_track(
     record = {
         "vocal_level": VOCAL_LEVEL,
         "vocal_db": VOCAL_DB,
+        "timbre": TIMBRE,
         "vocal": asdict(chain),
         "master": {**asdict(master), "final_lufs": final_lufs},
     }
@@ -190,7 +213,9 @@ def run_track(
         chain,
         VOCAL_LEVEL,
         VOCAL_DB,
+        TIMBRE,
         master,
+        final_lufs,
         inputs.track.values,
         after,
         [r.values for r in inputs.refs],

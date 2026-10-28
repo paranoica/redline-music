@@ -69,6 +69,10 @@ def build_parser() -> argparse.ArgumentParser:
     master.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     master.add_argument("--out", type=Path, default=Path("output"), help="listening files folder")
     master.add_argument("--seed", type=int, help="seed of the letter shuffle")
+    master.add_argument(
+        "--timbres",
+        help="timbre variants, comma separated; join effects with +: 'octave down + doubles'",
+    )
     run = commands.add_parser(
         "run", help="process a track with the chosen settings and write the result folder"
     )
@@ -145,10 +149,21 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
     try:
-        rounds = {"master": master_round, "timbre": timbre_round}
-        result = rounds[args.axis](
-            args.track, refs, args.work, args.out, separator or RoformerSeparator(), args.seed
+        common = (
+            args.track,
+            refs,
+            args.work,
+            args.out,
+            separator or RoformerSeparator(),
+            args.seed,
         )
+        if args.axis == "timbre" and args.timbres:
+            chosen = tuple(t.strip() for t in args.timbres.split(",") if t.strip())
+            result = timbre_round(*common, chosen)
+        elif args.axis == "timbre":
+            result = timbre_round(*common)
+        else:
+            result = master_round(*common)
     except (AudioError, SeparationError, ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2

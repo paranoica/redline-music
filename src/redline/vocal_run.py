@@ -29,6 +29,7 @@ Samples = npt.NDArray[np.floating]
 ORIGINAL = "original"
 AXES = ("dirt", "balance")
 BALANCE_DB = (0, 3, 6, 9)
+DEFAULT_LEVELS = tuple(level.name for level in DIRT_LEVELS)
 log = logging.getLogger(__name__)
 
 
@@ -68,6 +69,8 @@ def check_folders(work_dir: Path, out_dir: Path) -> None:
 
 
 def _check_levels(levels: tuple[str, ...]) -> None:
+    if not levels:
+        raise ValueError("no dirt level given")
     unknown = [name for name in levels if name not in ALL_LEVELS]
     if unknown:
         raise ValueError(
@@ -98,7 +101,7 @@ def vocal_run(
     separator: Separator,
     seed: int | None = None,
     axis: str = "dirt",
-    levels: tuple[str, ...] = tuple(level.name for level in DIRT_LEVELS),
+    levels: tuple[str, ...] = DEFAULT_LEVELS,
     vocal_db: float = 0.0,
 ) -> VocalRun:
     """Measure, process the vocal, write the listening set for one axis, the key and the chain.
@@ -109,6 +112,8 @@ def vocal_run(
     if axis not in AXES:
         raise ValueError(f"unknown axis {axis!r}, expected one of {', '.join(AXES)}")
     _check_levels(levels)
+    if axis == "balance" and (levels != DEFAULT_LEVELS or vocal_db != 0.0):
+        raise ValueError("--levels and --vocal-db belong to the dirt axis")
     check_folders(work_dir, out_dir)
     inputs = measure_inputs(track, refs, work_dir, separator)
     stems, upper = inputs.track_stems, inputs.upper

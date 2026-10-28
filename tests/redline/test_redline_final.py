@@ -3,7 +3,8 @@ import json
 import numpy as np
 import pytest
 import soundfile as sf
-from redline_signals import make_rng, write
+from redline_signals import make_rng, tone, write
+from scipy.ndimage import maximum_filter1d
 
 from redline.cli import main
 from redline.final_run import TIMBRES, master_round, master_targets, run_track, timbre_round
@@ -132,21 +133,39 @@ SPEC_FILES = [
 ]
 
 
-def make_track(inputs, tmp_path):
-    track, refs = inputs
+MARKER_HZ = 7300
+
+
+@pytest.fixture
+def hot_inputs(tmp_path):
+    # references clipped hard and loud, with a marker tone the track lacks: the run has to
+    # clip to reach them, and nothing of theirs may reach the result
+    folder = tmp_path / "hot"
+    folder.mkdir()
+    track = write(folder, "track.wav", song(8), 44100)
+    refs = folder / "refs"
+    refs.mkdir()
+    for name, amp in (("a.wav", 2.0), ("b.wav", 3.0)):
+        loud = np.clip(song(6, amp=amp) + tone(MARKER_HZ, 6, amp=0.2), -1, 1)
+        write(refs, name, loud, 44100, subtype="FLOAT")
+    return track, refs
+
+
+def make_track(hot_inputs, tmp_path):
+    track, refs = hot_inputs
     return run_track(track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator())
 
 
-def test_run_writes_the_spec_folder(inputs, tmp_path):
-    folder = make_track(inputs, tmp_path)
+def test_run_writes_the_spec_folder(hot_inputs, tmp_path):
+    folder = make_track(hot_inputs, tmp_path)
     files = sorted(str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file())
     assert files == SPEC_FILES
     assert (folder / ".gitignore").read_text() == "*\n"
     assert folder.is_relative_to(tmp_path / "o")
 
 
-def test_final_is_hot_and_original_matches_its_loudness(inputs, tmp_path):
-    folder = make_track(inputs, tmp_path)
+def test_final_is_hot_and_original_matches_its_loudness(hot_inputs, tmp_path):
+    folder = make_track(hot_inputs, tmp_path)
     chain = json.loads((folder / "chain.json").read_text())
     final, rate = sf.read(folder / "final.wav", always_2d=True)
     original, _ = sf.read(folder / "original.wav", always_2d=True)
@@ -157,8 +176,8 @@ def test_final_is_hot_and_original_matches_its_loudness(inputs, tmp_path):
     assert sf.info(folder / "original.wav").subtype == "FLOAT"
 
 
-def test_compare_pair_is_at_one_safe_loudness(inputs, tmp_path):
-    folder = make_track(inputs, tmp_path)
+def test_compare_pair_is_at_one_safe_loudness(hot_inputs, tmp_path):
+    folder = make_track(hot_inputs, tmp_path)
     levels = []
     for name in ("final", "original"):
         data, rate = sf.read(folder / "compare" / f"{name}.wav", always_2d=True)
@@ -168,22 +187,76 @@ def test_compare_pair_is_at_one_safe_loudness(inputs, tmp_path):
 
 
 def test_stems_rebuild_the_mix_before_the_master(inputs, tmp_path):
+    # quiet references: a light master leaves stretches the clip never touches
     folder = make_track(inputs, tmp_path)
     vocal, _ = sf.read(folder / "stems" / "vocal.wav", always_2d=True)
     beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
     chain = json.loads((folder / "chain.json").read_text())
     final, _ = sf.read(folder / "final.wav", always_2d=True)
     gain = 10 ** (chain["master"]["gain_db"] / 20)
-    # before the clip, final is the stems' sum times the master gain
-    unclipped = np.abs((vocal + beat) * gain) < 0.5
-    np.testing.assert_allclose(final[unclipped], ((vocal + beat) * gain)[unclipped], atol=2e-3)
+    # away from the clipped stretches, final is the stems' sum times the master gain
+    loud = np.abs((vocal + beat) * gain).max(axis=1)
+    calm = maximum_filter1d(loud, size=2001) < 0.5
+    assert calm.mean() > 0.05
+    np.testing.assert_allclose(final[calm], ((vocal + beat) * gain)[calm], atol=2e-3)
 
 
-def test_report_says_what_was_done_in_words(inputs, tmp_path):
-    text = (make_track(inputs, tmp_path) / "report.md").read_text(encoding="utf-8")
-    for phrase in ("Вокал", "Мастер", "LUFS", "ближе", "референс"):
+WORDS = {
+    "ближе",
+    "дальше",
+    "так же",
+    "в диапазоне",
+    "вне диапазона",
+    "мало референсов",
+    "мало данных",
+}
+
+
+def test_report_says_what_was_done_in_words(hot_inputs, tmp_path):
+    folder = make_track(hot_inputs, tmp_path)
+    text = (folder / "report.md").read_text(encoding="utf-8")
+    for phrase in ("Вокал", "октав", "Мастер", "медианн", "срезано"):
         assert phrase in text
-    assert "лучше" not in text.replace("не «лучше»", "")
+    assert "лучше" not in text
+    rows = [line for line in text.splitlines() if line.startswith("| ") and "(" in line]
+    assert len(rows) == 4
+    for row in rows:
+        word = row.split("(")[1].split(")")[0]
+        assert word in WORDS, row
+    final_lufs = json.loads((folder / "chain.json").read_text())["master"]["final_lufs"]
+    assert f"{final_lufs:.1f} LUFS" in text
+
+
+def test_reference_audio_never_reaches_the_result(hot_inputs, tmp_path):
+    folder = make_track(hot_inputs, tmp_path)
+    for name in ("final.wav", "compare/final.wav", "stems/vocal.wav", "stems/beat.wav"):
+        data, rate = sf.read(folder / name, always_2d=True)
+        spec = np.abs(np.fft.rfft(data[:, 0] * np.hanning(len(data)))) ** 2
+        freqs = np.fft.rfftfreq(len(data), 1 / rate)
+        line = spec[np.abs(freqs - MARKER_HZ) <= 3].max()
+        floor = np.median(
+            spec[(np.abs(freqs - MARKER_HZ) > 20) & (np.abs(freqs - MARKER_HZ) <= 200)]
+        )
+        assert 10 * np.log10(line / floor) < 20, name
+
+
+def test_run_clips_to_reach_hot_references(hot_inputs, tmp_path):
+    chain = json.loads((make_track(hot_inputs, tmp_path) / "chain.json").read_text())
+    assert chain["master"]["clipped_share"] > 0
+    assert chain["timbre"] == "octave down"
+
+
+def test_cli_run_without_references_exits_2(inputs, tmp_path):
+    track, _ = inputs
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    args = ["run", "--track", str(track), "--ref", str(empty), "--out", str(tmp_path / "o")]
+    assert main(args, separator=HalfSeparator()) == 2
+
+
+def test_master_targets_drop_duplicates():
+    targets = master_targets([ref("a", -9.0), ref("b", -9.0)])
+    assert targets == {"master -11.0": -11.0, "master -9.0": -9.0}
 
 
 def test_cli_run_prints_the_folder(inputs, tmp_path, capsys):
@@ -196,10 +269,10 @@ def test_cli_run_prints_the_folder(inputs, tmp_path, capsys):
     assert printed == str(folder)
 
 
-def test_run_masters_to_the_references_median(inputs, tmp_path):
-    folder = make_track(inputs, tmp_path)
+def test_run_masters_to_the_references_median(hot_inputs, tmp_path):
+    folder = make_track(hot_inputs, tmp_path)
     chain = json.loads((folder / "chain.json").read_text())
-    refs = sorted(inputs[1].iterdir())
+    refs = sorted(hot_inputs[1].iterdir())
     levels = [integrated_lufs(sf.read(r, always_2d=True)[0], 44100) for r in refs]
     assert chain["master"]["target_lufs"] == pytest.approx(round(float(np.median(levels)), 1))
 
@@ -230,3 +303,27 @@ def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_p
     assert key["axis"] == "timbre"
     assert sorted(key["key"].values()) == sorted(["original", "base", *TIMBRES])
     assert len(list(result.listen_dir.iterdir())) == 2 + len(TIMBRES)
+
+
+def test_timbre_round_takes_chosen_combinations(inputs, tmp_path):
+    track, refs = inputs
+    chosen = ("octave down", "octave down + doubles")
+    result = timbre_round(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), 6, chosen
+    )
+    key = json.loads((result.run_dir / "key.json").read_text())
+    assert sorted(key["key"].values()) == sorted(["original", "base", *chosen])
+
+
+def test_an_unknown_timbre_is_refused(inputs, tmp_path):
+    track, refs = inputs
+    with pytest.raises(ValueError, match="unknown timbre"):
+        timbre_round(
+            track,
+            sorted(refs.iterdir()),
+            tmp_path / "w",
+            tmp_path / "o",
+            HalfSeparator(),
+            6,
+            ("nightcore",),
+        )
