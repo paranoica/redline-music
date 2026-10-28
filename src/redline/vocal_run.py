@@ -97,6 +97,22 @@ def vocal_run(
     keep_out_of_git(out_dir / run_dir.name)
     seed = secrets.randbits(32) if seed is None else seed
     key = write_listen_set(variants, rate, listen_dir, seed)
+    _write_records(run_dir, axis, seed, key, listen_dir, rate, upper, target, chains)
+    _write_report(run_dir / "report.md", distances)
+    return VocalRun(run_dir, listen_dir)
+
+
+def _write_records(
+    run_dir: Path,
+    axis: str,
+    seed: int,
+    key: dict[str, str],
+    listen_dir: Path,
+    rate: int,
+    upper: float,
+    target: Target,
+    chains: list[ChainResult],
+) -> None:
     (run_dir / "key.json").write_text(
         json.dumps(
             {"axis": axis, "seed": seed, "key": key, "listen_dir": str(listen_dir)}, indent=1
@@ -118,8 +134,6 @@ def vocal_run(
         ),
         encoding="utf-8",
     )
-    _write_report(run_dir / "report.md", distances)
-    return VocalRun(run_dir, listen_dir)
 
 
 def _write_report(path: Path, distances: dict[str, float]) -> None:
