@@ -271,8 +271,8 @@ def _git_would_track(folder: Path) -> bool:
 def _lyrics_index(args: argparse.Namespace) -> int:
     from redline.lyrics import stress
     from redline.lyrics.fingerprint import KEY_FILE, FingerprintIndex, new_key
-    from redline.lyrics.parse import LyricsError, read_artists, read_track
-    from redline.lyrics.profile import build_profiles, dumps
+    from redline.lyrics.parse import LyricsError, parse_text, read_artists, read_track
+    from redline.lyrics.profile import build_profiles, dumps, read_mix
 
     others = args.lyrics / "others"
     try:
@@ -291,12 +291,16 @@ def _lyrics_index(args: argparse.Namespace) -> int:
         pairs = [(slug, t) for slug, tracks in base.items() for t in tracks]
         if not args.without_mine:
             pairs += [("mine", t) for t in mine]
+        # written texts are checked against, never learned from
+        made = sorted((args.lyrics / "generated").glob("*/text.txt"))
+        pairs += [("generated", parse_text(p.read_text(encoding="utf-8"))) for p in made]
+        mix = read_mix(args.lyrics / "mix.yaml")
         key_path = args.build / KEY_FILE
         key = key_path.read_bytes() if key_path.exists() else new_key()
         index = FingerprintIndex.build(pairs, key)
         # profiles stress line-final words only, and the same words come back often
         mark = functools.cache(stress.load_stresser()) if args.stress else str
-        profiles = build_profiles(base, artists, mine, mark=mark)
+        profiles = build_profiles(base, artists, mine, mark=mark, stress=args.stress, mix=mix)
         index.save(args.build, force=args.force)
         folder = args.build / "profiles"
         folder.mkdir(exist_ok=True)

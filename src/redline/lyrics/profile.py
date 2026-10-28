@@ -1,5 +1,6 @@
 """Style profiles: mergeable counts per artist, merged into groups, the scene and the owner's."""
 
+import functools
 import hashlib
 import json
 import re
@@ -7,6 +8,8 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from redline.lyrics.normalize import words
 from redline.lyrics.parse import Artist, LyricsError, Track
@@ -16,7 +19,6 @@ from redline.lyrics.syllables import count_syllables
 SCHEMA_VERSION = 1
 KINDS = ("intro", "hook", "prehook", "verse", "bridge", "outro", "other")
 MAX_SYLLABLES = 30
-TOP_PATTERNS = 20
 TOP_ADLIBS = 50
 TOP_WORDS = 300
 TOP_LATIN = 100
@@ -216,7 +218,7 @@ def _yes_share(counter: Counter) -> float | None:
     return round(counter.get("yes", 0) / total, 4) if total else None
 
 
-def _top(counter: Counter, n: int) -> list[tuple[str, float]]:
+def _top(counter: Counter, n: int | None) -> list[tuple[str, float]]:
     return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
 
 
@@ -243,8 +245,13 @@ def to_profile(
     name: str,
     min_presence: int = 1,
     weights: Mapping[str, float] | None = None,
+    stress: bool = False,
 ) -> dict[str, Any]:
-    """The profile written to disk: shares, histograms with percentiles, top lists."""
+    """The profile written to disk: shares, histograms with percentiles, top lists.
+
+    `stress` records whether rhymes were found with stress marks, so text checked against
+    the profile is read the same way.
+    """
     presence = counts.get("presence", Counter())
     totals = counts.get("totals", Counter())
     profile: dict[str, Any] = {
@@ -255,11 +262,12 @@ def to_profile(
             "tracks": int(totals.get("tracks", 0)),
             "artists": int(totals.get("artists", 0)),
             "weights": dict(weights or {"each_track": 1.0}),
+            "stress": stress,
         },
         "structure": {
             "patterns": [
                 [p, round(s, 4)]
-                for p, s in _top(Counter(_shares(counts.get("structure", Counter()))), TOP_PATTERNS)
+                for p, s in _top(Counter(_shares(counts.get("structure", Counter()))), None)
             ],
             "sections_per_track": _histogram(counts.get("sections_per_track", Counter())),
         },
@@ -340,13 +348,18 @@ def build_profiles(
     mine: Sequence[Track],
     min_tracks: int = MIN_TRACKS,
     mark: Stresser = str,
+    stress: bool = False,
+    mix: Mapping[str, float] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Profiles per artist, per group, of the scene, the owner's and the working one.
 
     Groups and the scene give each artist with min_tracks tracks or more an equal say;
     their words must come from two artists at least. Guest sections go to the scene as one
-    more voice. The working profile is the owner's and the scene's, half and half.
+    more voice. The working profile is the owner's and the scene's, half and half. A mix
+    of profile names and weights adds the target profile the writer works from.
     """
+    profile_of = functools.partial(to_profile, stress=stress)
+    counts_of: dict[str, Counts] = {}
     profiles: dict[str, dict[str, Any]] = {}
     own: dict[str, Counts] = {}
     guests: dict[str, Counts] = {}
@@ -357,7 +370,8 @@ def build_profiles(
         counts, guest = count_tracks(dedupe(tracks), artist.names if artist else (), mark)
         own[slug] = _with_presence(counts)
         guests[slug] = guest
-        profiles[f"artist-{slug}"] = to_profile(own[slug], "artist", slug)
+        counts_of[f"artist-{slug}"] = own[slug]
+        profiles[f"artist-{slug}"] = profile_of(own[slug], "artist", slug)
     eligible = {s: c for s, c in own.items() if c["totals"]["tracks"] >= min_tracks}
     each = {"each_artist": 1.0}
     for group in sorted({artists[s].profile for s in eligible if s in artists} - {""}):
@@ -366,7 +380,8 @@ def build_profiles(
         parts = [c for s, c in eligible.items() if s in artists and artists[s].profile == group]
         floor = 2 if len(parts) > 1 else 1
         merged = merge(parts, [1.0] * len(parts))
-        profiles[f"group-{group}"] = to_profile(merged, "group", group, floor, each)
+        counts_of[f"group-{group}"] = merged
+        profiles[f"group-{group}"] = profile_of(merged, "group", group, floor, each)
     scene_parts = list(eligible.values())
     guest_parts = [guests[s] for s in eligible if guests[s]]
     if guest_parts:
@@ -375,11 +390,37 @@ def build_profiles(
         voice["totals"] = Counter({k: v for k, v in voice["totals"].items() if k != "artists"})
         scene_parts.append(voice)
     scene = merge(scene_parts, [1.0] * len(scene_parts)) if scene_parts else {}
-    profiles["scene"] = to_profile(scene, "scene", "scene", 2 if len(scene_parts) > 1 else 1, each)
+    profiles["scene"] = profile_of(scene, "scene", "scene", 2 if len(scene_parts) > 1 else 1, each)
     # the owner's words always pass the two-artist floor
     owner = _with_presence(count_tracks(dedupe(mine), (), mark)[0], weight=2)
-    profiles["mine"] = to_profile(owner, "mine", "mine")
+    profiles["mine"] = profile_of(owner, "mine", "mine")
     working = merge([owner, scene], [MINE_WEIGHT, 1 - MINE_WEIGHT]) if scene else owner
     halves = {"mine": MINE_WEIGHT, "scene": 1 - MINE_WEIGHT}
-    profiles["working"] = to_profile(working, "working", "working", 2, halves)
+    profiles["working"] = profile_of(working, "working", "working", 2, halves)
+    counts_of.update({"scene": scene, "mine": owner, "working": working})
+    if mix:
+        unknown = [name for name in mix if name not in counts_of]
+        if unknown:
+            raise LyricsError(f"the mix names no such profile: {', '.join(unknown)}")
+        parts = [counts_of[name] for name in mix]
+        target = merge(parts, list(mix.values()))
+        profiles["target"] = profile_of(target, "target", "target", 1, mix)
     return profiles
+
+
+def read_mix(path: Path) -> dict[str, float] | None:
+    """The private mix of profiles the writer works from: name to weight; None without a file."""
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
+        raise LyricsError(f"{path}: not a readable mix") from error
+    if not isinstance(data, dict) or not data:
+        raise LyricsError(f"{path}: a mix is profile names with weights")
+    mix = {}
+    for name, weight in data.items():
+        if not isinstance(weight, int | float) or weight <= 0:
+            raise LyricsError(f"{path}: {name} needs a positive weight")
+        mix[str(name)] = float(weight)
+    return mix

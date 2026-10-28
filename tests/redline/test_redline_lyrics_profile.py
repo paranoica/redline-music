@@ -222,3 +222,13 @@ def test_an_artist_without_a_group_is_in_no_group_but_in_the_scene():
     profiles = build_profiles(base, artists, mine=[], min_tracks=5)
     assert "group-" not in profiles and "group-A" in profiles
     assert profiles["scene"]["meta"]["artists"] == 2
+
+
+def test_every_structure_pattern_is_kept():
+    import itertools
+
+    kinds = ["Intro", "Verse", "Hook", "Bridge", "Outro"]
+    shapes = list(itertools.product(kinds, repeat=3))[:30]
+    own, _ = count_tracks([track("".join(f"[{k}]\nстрока\n" for k in s)) for s in shapes])
+    assert len(own["structure"]) == 30
+    assert len(to_profile(own, "artist", "x")["structure"]["patterns"]) == 30

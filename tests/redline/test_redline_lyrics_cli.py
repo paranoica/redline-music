@@ -131,3 +131,47 @@ def test_profiles_of_removed_artists_are_deleted(lyrics, tmp_path):
         path.unlink()
     assert index(lyrics, build, "--force") == 0
     assert not (build / "profiles" / "artist-b.json").exists()
+
+
+def test_index_builds_the_target_mix_from_a_private_file(lyrics, tmp_path):
+    (lyrics / "mix.yaml").write_text("artist-a: 0.5\nmine: 0.25\nscene: 0.25\n", encoding="utf-8")
+    build = tmp_path / "build"
+    assert index(lyrics, build) == 0
+    target = json.loads((build / "profiles" / "target.json").read_text(encoding="utf-8"))
+    assert target["meta"]["weights"] == {"artist-a": 0.5, "mine": 0.25, "scene": 0.25}
+    assert "пустые" in {w["word"] for w in target["vocabulary"]["top"]}
+
+
+def test_a_mix_naming_an_unknown_profile_stops_the_index(lyrics, tmp_path):
+    (lyrics / "mix.yaml").write_text("artist-zzz: 1.0\n", encoding="utf-8")
+    assert index(lyrics, tmp_path / "build") == 2
+
+
+def test_without_a_mix_file_there_is_no_target(lyrics, tmp_path):
+    build = tmp_path / "build"
+    index(lyrics, build)
+    assert not (build / "profiles" / "target.json").exists()
+
+
+def test_generated_texts_join_the_copy_check_but_not_the_profiles(lyrics, tmp_path):
+    build = tmp_path / "build"
+    index(lyrics, build)
+    before = {p.name: p.read_bytes() for p in (build / "profiles").glob("*.json")}
+    made = "новый текст про ветер который дует сквозь пустые окна ночью"
+    path = lyrics / "generated" / "1" / "text.txt"
+    path.parent.mkdir(parents=True)
+    path.write_text(f"[Куплет]\n{made}\n", encoding="utf-8")
+    assert index(lyrics, build) == 0
+    assert check(tmp_path, build, f"{made}\n") == 1
+    after = {p.name: p.read_bytes() for p in (build / "profiles").glob("*.json")}
+    assert after == before
+
+
+def test_profiles_record_whether_stress_marks_were_used(lyrics, tmp_path, monkeypatch):
+    build = tmp_path / "build"
+    index(lyrics, build)
+    plain = json.loads((build / "profiles" / "scene.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr("redline.lyrics.stress.load_stresser", lambda: str)
+    index(lyrics, build, "--stress")
+    marked = json.loads((build / "profiles" / "scene.json").read_text(encoding="utf-8"))
+    assert (plain["meta"]["stress"], marked["meta"]["stress"]) == (False, True)
