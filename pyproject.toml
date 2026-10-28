@@ -81,3 +81,5 @@ max-complexity = 10
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# /tmp is in memory here and the audio tests write large files: keep only failed tests' dirs
+tmp_path_retention_policy = "failed"

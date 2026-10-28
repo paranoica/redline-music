@@ -55,7 +55,11 @@ def test_the_recipe_is_the_same_in_another_process(profile, tmp_path):
 def test_seeds_reach_rare_shapes_and_both_line_lengths(profile):
     recipes = [make_recipe(profile, seed) for seed in range(300)]
     shapes = {"-".join(s.kind for s in r.sections) for r in recipes}
-    tracks = {p for p, _ in profile["structure"]["patterns"] if "-" in p}
+    tracks = {
+        p
+        for p, _ in profile["structure"]["patterns"]
+        if "-" in p and {"verse", "hook"} & set(p.split("-"))
+    }
     assert tracks == shapes
     assert {r.band for r in recipes} == {"short", "middle", "long"}
 
@@ -165,3 +169,10 @@ def test_growing_a_short_track_keeps_its_hooks_equal(profile):
     for seed in range(10):
         hooks = {s.lines for s in make_recipe(profile, seed).sections if s.kind == "hook"}
         assert len(hooks) == 1
+
+
+def test_a_track_has_a_verse_or_a_hook(profile):
+    profile["structure"]["patterns"] = [["other-other", 0.9], ["intro-verse-hook", 0.1]]
+    for seed in range(30):
+        kinds = {s.kind for s in make_recipe(profile, seed).sections}
+        assert kinds & {"verse", "hook"}

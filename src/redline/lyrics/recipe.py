@@ -147,7 +147,12 @@ def make_recipe(profile: dict[str, Any], seed: int, topic: str | None = None) ->
     """Draw a text's shape and material from the profile; the same seed draws the same."""
     rng = np.random.Generator(np.random.PCG64(seed))
     patterns = profile["structure"]["patterns"]
-    tracks = [(p, s) for p, s in patterns if len(p.split("-")) >= MIN_SECTIONS] or patterns
+    # a song has a verse or a hook; shapes of skits and intros alone are not songs
+    tracks = [
+        (p, s)
+        for p, s in patterns
+        if len(p.split("-")) >= MIN_SECTIONS and {"verse", "hook"} & set(p.split("-"))
+    ] or patterns
     shape = str(_draw(rng, [p for p, _ in tracks], [s for _, s in tracks])).split("-")
     band = str(_draw(rng, list(BANDS), [1.0] * len(BANDS)))
     plans: dict[str, tuple[int, str]] = {}
