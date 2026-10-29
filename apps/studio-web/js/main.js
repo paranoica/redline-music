@@ -38,6 +38,7 @@ let history;
 let defaults = {};
 let values = {};
 let rendered = null; // the settings of the last exact render, as JSON
+let exact = null; // that render's audio and loudness
 let seq = 0;
 let inflight = null;
 // blind mode: which lane each letter plays; null when names are shown
@@ -133,6 +134,7 @@ async function render(fromStage = 0) {
     player.setResult(buffer, 0, whole.lufs, schema.track.original_lufs);
     wave.setResult(buffer, 0);
     rendered = key;
+    exact = { buffer, lufs: whole.lufs };
     ui.ms.textContent = `${(whole.ms / 1000).toFixed(1)} с`;
     markStages(fromStage, "done");
     setState("exact", "точно");
@@ -152,6 +154,12 @@ function apply(next, record = true) {
   ui.undo.disabled = !history.past.length;
   ui.redo.disabled = !history.future.length;
   if (JSON.stringify(values) === rendered) {
+    // back to what was rendered last: play that render, drop whatever is still running
+    seq = Math.max(Date.now(), seq + 1);
+    inflight?.abort();
+    player.setResult(exact.buffer, 0, exact.lufs, schema.track.original_lufs);
+    wave.setResult(exact.buffer, 0);
+    markStages(0, "clear");
     setState("exact", "точно");
     return;
   }
@@ -267,8 +275,16 @@ function wire() {
     }
   });
   document.addEventListener("keydown", (event) => {
-    const typing = event.target instanceof HTMLInputElement && event.target.type !== "range";
-    if (typing || event.target instanceof HTMLSelectElement) return;
+    const input = event.target instanceof HTMLInputElement ? event.target.type : null;
+    const undoKey = event.code === "KeyZ" && (event.ctrlKey || event.metaKey);
+    // a number field's own undo would show a value the settings do not hold
+    if (input === "number" && undoKey) {
+      event.preventDefault();
+      event.target.blur();
+      (event.shiftKey ? ui.redo : ui.undo).click();
+      return;
+    }
+    if ((input && input !== "range") || event.target instanceof HTMLSelectElement) return;
     if (event.code === "Space") {
       event.preventDefault();
       togglePlay();
