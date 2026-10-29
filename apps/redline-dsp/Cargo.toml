@@ -1,0 +1,20 @@
+[package]
+name = "redline-dsp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The heavy inner loops of redline's master: oversampled clipping and BS.1770 loudness"
+publish = false
+
+[lib]
+name = "redline_dsp"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py312"] }
+numpy = "0.30"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

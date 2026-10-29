@@ -212,4 +212,5 @@ def test_oversampling_runs_the_channels_at_once_and_gives_the_serial_result():
             resample_poly(np.tanh(up * 4).astype(np.float32), 1, 8, window=OVERSAMPLING_WINDOW)
         )
     assert overlap[0]
-    assert np.array_equal(out, np.column_stack(serial)[: len(x)].astype(np.float32))
+    # the Rust resampler sums in another order than scipy; the last float bits may differ
+    np.testing.assert_allclose(out, np.column_stack(serial)[: len(x)], atol=2e-6, rtol=0)

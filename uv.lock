@@ -1026,6 +1026,7 @@ dependencies = [
     { name = "praat-parselmouth" },
     { name = "pyloudnorm" },
     { name = "pyyaml" },
+    { name = "redline-dsp" },
     { name = "scipy" },
     { name = "soundfile" },
 ]
@@ -1059,6 +1060,7 @@ requires-dist = [
     { name = "praat-parselmouth", specifier = ">=0.4.7" },
     { name = "pyloudnorm", specifier = ">=0.2" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "redline-dsp", directory = "apps/redline-dsp" },
     { name = "ruaccent", marker = "extra == 'stress'", specifier = ">=1.5.8.3" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "soundfile", specifier = ">=0.13" },
@@ -1073,6 +1075,11 @@ dev = [
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=9.1" },
 ]
+
+[[package]]
+name = "redline-dsp"
+version = "0.1.0"
+source = { directory = "apps/redline-dsp" }
 
 [[package]]
 name = "regex"

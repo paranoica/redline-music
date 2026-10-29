@@ -9,6 +9,7 @@ __pycache__/
 plugins/bedrock/evals/results/
 plugins/bedrock/evals-bench
 bench/results/
+/apps/redline-dsp/target/
 
 # Private data: never in this repository
 /private

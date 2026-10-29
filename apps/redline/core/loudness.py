@@ -7,6 +7,8 @@ import numpy as np
 import numpy.typing as npt
 import pyloudnorm as pyln
 
+from redline.core import native
+
 MIN_SECONDS = 3.0
 WINDOW_SECONDS = 0.4
 HOP_SECONDS = 0.1
@@ -30,7 +32,8 @@ def integrated_lufs(samples: Samples, rate: int) -> float:
     """Integrated loudness per ITU-R BS.1770-4; -inf for digital silence."""
     if not np.any(samples):
         return -math.inf
-    return float(pyln.Meter(rate).integrated_loudness(samples))
+    fast = native.integrated_lufs(samples, rate)
+    return float(pyln.Meter(rate).integrated_loudness(samples)) if fast is None else fast
 
 
 def loudness_range(samples: Samples, rate: int) -> float | None:

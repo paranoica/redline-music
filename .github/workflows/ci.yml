@@ -28,4 +28,5 @@ jobs:
       - run: black --check .
       - run: uv run pytest
       - run: uv run pyright apps/redline
+      - run: cargo test --release --manifest-path apps/redline-dsp/Cargo.toml
       - run: python plugins/bedrock/scripts/skillcheck.py --strict

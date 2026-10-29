@@ -7,6 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.signal import butter, sosfilt, sosfiltfilt
 
+from redline.core import native
 from redline.core.dsp import drive, hard_clip, oversampled
 from redline.core.loudness import integrated_lufs
 from redline.core.spectrum import low_band
@@ -56,6 +57,13 @@ def _clip_cheap(samples: Samples, gain_db: float) -> Samples:
 
 
 def _clip_clean(samples: Samples, rate: int, gain_db: float) -> tuple[Samples, float]:
+    out = native.oversampled_clip(
+        samples, rate, 10 ** (gain_db / 20), _ceiling(), OVERSAMPLING, BAND_LIMIT_HZ, CLIP_PASSES
+    )
+    return _clip_clean_numpy(samples, rate, gain_db) if out is None else _trimmed(out)
+
+
+def _clip_clean_numpy(samples: Samples, rate: int, gain_db: float) -> tuple[Samples, float]:
     gained = samples * np.float32(10 ** (gain_db / 20))
     band = butter(8, BAND_LIMIT_HZ, fs=rate * OVERSAMPLING, output="sos")
 
@@ -66,7 +74,10 @@ def _clip_clean(samples: Samples, rate: int, gain_db: float) -> tuple[Samples, f
             v = np.asarray(sosfiltfilt(band, hard_clip(v, _ceiling()), axis=0), dtype=np.float32)
         return hard_clip(v, _ceiling())
 
-    out = oversampled(stage, gained, OVERSAMPLING)
+    return _trimmed(oversampled(stage, gained, OVERSAMPLING))
+
+
+def _trimmed(out: Samples) -> tuple[Samples, float]:
     # what still rings past the ceiling is taken off the whole file, not clipped again,
     # which would bring the aliasing back
     peak = float(np.abs(out).max())

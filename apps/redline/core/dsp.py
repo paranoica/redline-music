@@ -8,13 +8,15 @@ import numpy as np
 import numpy.typing as npt
 from scipy.signal import resample_poly, sosfilt
 
+from redline.core import native
+from redline.core.native import OVERSAMPLING_WINDOW
+
 Samples = npt.NDArray[np.floating]
 Sos = npt.NDArray[np.float64]
 
 BLOCK_SECONDS = 0.001
 LEVEL_FLOOR = 1e-6
 EXPANDER_RANGE_DB = 40.0
-OVERSAMPLING_WINDOW = ("kaiser", 10.0)
 
 
 def _sos(b: list[float], a: list[float]) -> Sos:
@@ -66,7 +68,8 @@ def high_shelf(freq: float, gain_db: float, rate: int) -> Sos:
 
 def apply_sos(samples: Samples, sos: Sos) -> Samples:
     """Filter every channel."""
-    return np.asarray(sosfilt(sos, samples, axis=0), dtype=np.float32)
+    fast = native.sosfilt(samples, sos)
+    return np.asarray(sosfilt(sos, samples, axis=0), dtype=np.float32) if fast is None else fast
 
 
 def block_levels_db(samples: Samples, rate: int) -> npt.NDArray[np.float64]:
@@ -151,10 +154,14 @@ def oversampled(stage: Callable[[Samples], Samples], samples: Samples, factor: i
     result is the same as one channel after the other.
     """
 
+    def poly(x: Samples, up: int, down: int) -> Samples:
+        fast = native.resample_poly(x, up, down)
+        return resample_poly(x, up, down, window=OVERSAMPLING_WINDOW) if fast is None else fast
+
     def one(channel: int) -> Samples:
-        up = resample_poly(samples[:, channel], factor, 1, window=OVERSAMPLING_WINDOW)
+        up = poly(samples[:, channel], factor, 1)
         out = stage(up[:, None].astype(np.float32))[:, 0]
-        return resample_poly(out, 1, factor, window=OVERSAMPLING_WINDOW)
+        return poly(out, 1, factor)
 
     with ThreadPoolExecutor(max_workers=samples.shape[1]) as pool:
         channels = list(pool.map(one, range(samples.shape[1])))

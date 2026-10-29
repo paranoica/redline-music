@@ -52,8 +52,9 @@ are cached by content, so the second run on the same files starts at once.
 
 ## Quick start
 
-Linux, Python 3.12 and [uv](https://docs.astral.sh/uv/). A CUDA GPU speeds up separation; on
-a CPU it is slower but works.
+Linux, Python 3.12, [uv](https://docs.astral.sh/uv/) and a Rust toolchain (`cargo`): the master's
+inner loops are Rust, built by `uv sync`. A CUDA GPU speeds up separation; on a CPU it is
+slower but works.
 
 ```sh
 git clone https://github.com/paranoica/redline-music.git
@@ -87,7 +88,7 @@ uv run redline studio --track input/track.wav --ref input/refs
 
 It opens a page on `127.0.0.1`. The loudest stretch of the track is looped; drag the red
 brackets to move the loop. A change re-renders only the loop, in about two seconds; the
-whole track renders on a button, in about a minute for a three-minute song.
+whole track renders on a button, in about twenty seconds for a three-minute song.
 
 | Key | |
 |---|---|
@@ -175,6 +176,7 @@ apps/
     lyrics/         text parsing, style profiles, the writer, Suno cards, marks
     web/            what the local pages share: token, host check, headers
     cli/            the command line
+  redline-dsp/      the Rust inner loops: oversampled clip, resampling, filters, loudness
   studio-web/       the studio page
   lyrics-web/       the marks page
 tests/redline/      tests, on synthetic audio and invented texts
