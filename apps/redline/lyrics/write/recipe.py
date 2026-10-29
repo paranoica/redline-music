@@ -6,8 +6,9 @@ from typing import Any
 
 import numpy as np
 
+from redline.lyrics.text.verbs import is_verb
 from redline.lyrics.write.title import TitlePlan, draw_title
-from redline.lyrics.write.worn import stem
+from redline.lyrics.write.worn import PLAIN_WORDS, stem
 
 SCHEMES = ("AABB", "ABAB", "ABBA", "AAAA")
 BANDS = ("short", "middle", "long")
@@ -256,7 +257,12 @@ def make_recipe(
             )
             for i, p in enumerate(sections)
         ]
-    vocabulary = [(w["word"], w["per_1000"]) for w in profile["vocabulary"]["top"]]
+    # an image or a name to draw on, not a verb or a word of grammar
+    vocabulary = [
+        (w["word"], w["per_1000"])
+        for w in profile["vocabulary"]["top"]
+        if len(w["word"]) > 2 and w["word"] not in PLAIN_WORDS and not is_verb(w["word"])
+    ]
     # drawn by weight, the same top words came back in every text
     avoid = frozenset(stem(w) for w in worn)
     latin = [(w["word"], w["per_1000"]) for w in profile["latin"]["top"]]

@@ -312,3 +312,12 @@ def test_an_old_recipe_without_title_or_worn_reads_and_writes_as_before(profile)
     recipe = recipe_from_json(text)
     assert recipe.title is None and recipe.worn == ()
     assert recipe_json(recipe) == text
+
+
+def test_scene_words_are_images_not_verbs_or_grammar(profile):
+    plain = ["сделал", "хочешь", "сделать", "чтобы", "пусть", "знаю", "беру", "дай", "че"]
+    images = [f"образ{i}" for i in range(30)] + ["дым", "газ", "лицо"]
+    p = flat_profile(profile, [(w, 1.0) for w in plain + images])
+    drawn = set().union(*(make_recipe(p, seed).words for seed in range(80)))
+    assert not drawn & set(plain)
+    assert {"газ", "лицо"} <= drawn
