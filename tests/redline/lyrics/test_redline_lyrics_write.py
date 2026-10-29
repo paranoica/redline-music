@@ -629,3 +629,25 @@ def test_a_seed_from_before_deliveries_takes_one(base):
     del state["delivery"]
     path.write_text(json.dumps(state), encoding="utf-8")
     assert run(base, 71, "--bpm", "140", "--delivery", "hard") == 3
+
+
+def test_the_owners_marks_on_other_texts_reach_a_new_seed_and_an_edit(base):
+    from redline.lyrics.marks.store import set_mark
+
+    text = saved_seed(base, 70)
+    lines = list(dict.fromkeys(ln for ln in text.splitlines() if ln and not ln.startswith("[")))
+    set_mark(folder(base, 70), 1, lines[0], "cringe")
+    set_mark(folder(base, 70), 1, lines[1], "good")
+    run(base, 71)
+    request = (folder(base, 71) / "request-1.md").read_text(encoding="utf-8")
+    marks = request.split("## The owner's marks", 1)[1]
+    cringe, good = marks.split("liked", 1)
+    assert f"- {lines[0]}" in cringe and f"- {lines[1]}" in good
+    edit(base, 70, "убери кринж")
+    asked = (folder(base, 70) / "edit-2" / "request-1.md").read_text(encoding="utf-8")
+    assert "## The owner's marks" in asked
+
+
+def test_a_request_without_marks_has_no_marks_section(base):
+    run(base, 72)
+    assert "owner's marks" not in (folder(base, 72) / "request-1.md").read_text(encoding="utf-8")

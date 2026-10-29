@@ -142,6 +142,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="capitalise the stressed vowel of line-final words (needs the stress extra)",
     )
+    marks = lyrics_commands.add_parser(
+        "marks", help="a page on this machine to mark lines of saved texts cringe or good"
+    )
+    marks.add_argument("--seed", type=int, help="the text to open first (default: the newest)")
+    marks.add_argument("--lyrics", type=Path, default=LYRICS, help="the lyrics base folder")
+    marks.add_argument("--port", type=int, default=0, help="the port (default: a free one)")
+    marks.add_argument(
+        "--no-browser", action="store_true", help="print the address, do not open it"
+    )
     stats = lyrics_commands.add_parser(
         "stats", help="syllables per line and rhyme letters per section"
     )

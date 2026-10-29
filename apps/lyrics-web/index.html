@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redline — разметка</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Onest:wght@400;500;600&family=Unbounded:wght@700;800&display=swap">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/marks.css">
+  <script type="module" src="/js/marks.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand__mark">REDLINE</span>
+      <span class="brand__sub">разметка текстов</span>
+    </div>
+    <p class="hint">
+      <kbd>↑</kbd><kbd>↓</kbd> строка · <kbd>C</kbd> кринж · <kbd>N</kbd> норм · <kbd>0</kbd> снять.
+      Писатель увидит отметки в следующем тексте и правке.
+    </p>
+    <span class="status" id="status" role="status" aria-live="polite">загрузка</span>
+  </header>
+
+  <main class="layout">
+    <nav class="texts" aria-label="Тексты">
+      <label class="texts__pick">
+        <span class="visually-hidden">Текст</span>
+        <select id="pick"></select>
+      </label>
+      <ol class="texts__list" id="texts"></ol>
+    </nav>
+
+    <section class="sheet" aria-labelledby="title">
+      <div class="sheet__head">
+        <h1 class="sheet__title" id="title">—</h1>
+        <p class="sheet__tally num" id="tally"></p>
+      </div>
+      <ol class="lines" id="lines"></ol>
+      <p class="empty" id="empty" hidden>Сохранённых текстов пока нет: сначала <code>redline lyrics write</code>.</p>
+    </section>
+  </main>
+</body>
+</html>

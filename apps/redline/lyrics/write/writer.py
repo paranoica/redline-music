@@ -34,6 +34,9 @@ class WriterRequest:
     current: str = ""
     change: str = ""
     sent_back: str = ""
+    # the owner's marks on lines of earlier texts
+    cringe: tuple[str, ...] = ()
+    good: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,28 @@ def _change(request: WriterRequest) -> list[str]:
     ]
 
 
+def _marks(request: WriterRequest) -> list[str]:
+    if not (request.cringe or request.good):
+        return []
+    out = ["", "## The owner's marks on earlier texts", ""]
+    if request.cringe:
+        out += [
+            "Lines the owner called cringe. Write nothing like them: not these words and not "
+            "the move behind them.",
+            "",
+            *[f"- {line}" for line in request.cringe],
+            "",
+        ]
+    if request.good:
+        out += [
+            "Lines the owner liked: the level to hold. Manner only, never these lines.",
+            "",
+            *[f"- {line}" for line in request.good],
+            "",
+        ]
+    return out
+
+
 def render(request: WriterRequest, answer_to: Path | None = None) -> str:
     """The request as one Markdown page."""
     r = request.recipe
@@ -153,6 +178,7 @@ def render(request: WriterRequest, answer_to: Path | None = None) -> str:
         out += [f"  - {count} times: {DEVICES[name]}" for name, count in r.devices]
     if request.style.strip():
         out += ["", "## Notes on the scene's style", "", request.style.strip()]
+    out += _marks(request)
     if request.excerpts:
         out += ["", "## The owner's voice (manner only, never these lines)", ""]
         for excerpt in request.excerpts:

@@ -11,6 +11,7 @@ from typing import Any, TypeGuard
 import numpy as np
 
 from redline.lyrics.base.fingerprint import RUN, FingerprintIndex
+from redline.lyrics.marks.store import marked_lines
 from redline.lyrics.text.parse import LyricsError, Track, parse_text
 from redline.lyrics.write.form import Problem, check_draft
 from redline.lyrics.write.recipe import make_recipe, recipe_from_json, recipe_json
@@ -311,6 +312,7 @@ class Session:
                 delivery if bpm else before.get("delivery"),
             )
         recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
+        cringe, good = marked_lines(self.folder.parent)
         request = WriterRequest(
             prompt_text(),
             recipe,
@@ -318,6 +320,8 @@ class Session:
             tuple(state["reasons"]),
             state["round"],
             style_for(self.style, seed),
+            cringe=cringe,
+            good=good,
         )
         answer = self.writer.ask(request)
         if isinstance(answer, Waiting):
@@ -409,6 +413,7 @@ class Editor:
         current = have[pending["source"]].read_text(encoding="utf-8")
         target = self.folder / f"edit-{pending['version']}"
         target.mkdir(mode=0o700, exist_ok=True)
+        cringe, good = marked_lines(self.folder.parent)
         request = WriterRequest(
             prompt_text(),
             recipe,
@@ -419,6 +424,8 @@ class Editor:
             current,
             pending["change"],
             pending.get("draft", ""),
+            cringe=cringe,
+            good=good,
         )
         answer = HandoffWriter(target).ask(request)
         if isinstance(answer, Waiting):

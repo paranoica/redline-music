@@ -8,6 +8,7 @@ from redline.cli.lyrics import (
     _lyrics_check,
     _lyrics_edit,
     _lyrics_index,
+    _lyrics_marks,
     _lyrics_stats,
     _lyrics_suno,
     _lyrics_write,
@@ -39,6 +40,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         "write": _lyrics_write,
         "edit": _lyrics_edit,
         "suno": _lyrics_suno,
+        "marks": _lyrics_marks,
         "stats": _lyrics_stats,
     }
     if args.command in sound:

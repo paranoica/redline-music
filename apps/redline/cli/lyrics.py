@@ -259,6 +259,39 @@ def _lyrics_suno(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lyrics_marks(args: argparse.Namespace) -> int:
+    import secrets
+    import webbrowser
+
+    from redline.lyrics.marks import server as marks_server
+    from redline.web.local import browser_file
+
+    generated = args.lyrics / "generated"
+    if not generated.is_dir():
+        print(f"redline: no saved texts in {generated}", file=sys.stderr)
+        return 2
+    token = secrets.token_urlsafe(32)
+    try:
+        httpd = marks_server.make_server(generated, token, args.port)
+    except OSError as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/?t={token}"
+    if args.seed is not None:
+        url += f"#seed={args.seed}"
+    print(f"marks: {url}", flush=True)
+    print("Ctrl+C stops it", flush=True)
+    if not args.no_browser:
+        webbrowser.open(browser_file(url, generated).as_uri())
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+    return 0
+
+
 def _lyrics_stats(args: argparse.Namespace) -> int:
     from redline.lyrics.text import stress
     from redline.lyrics.text.parse import parse_text
