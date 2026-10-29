@@ -14,7 +14,7 @@ import numpy as np
 import numpy.typing as npt
 
 from redline.engine.render import CACHE_BYTES, Engine, Rendered
-from redline.engine.settings import Settings
+from redline.engine.settings import SPECS, Settings
 from redline.measure.metrics import METRICS, finite, vocal_metrics
 from redline.measure.run import FileResult
 from redline.measure.separate import Separator
@@ -28,6 +28,10 @@ FLOOR = {
     "vocal.short_term_spread_lu": 0.5,
     "vocal.kurtosis": 0.5,
 }
+# the spread of loudness over a few seconds is not the spread over a song, so it is left to
+# the measurements of whole tracks and not searched on
+SEARCHED = tuple(m for m in METRICS if m != "vocal.short_term_spread_lu")
+PAIR = "pair.vocal_minus_beat_lu"
 # what a metric the render lost costs: more than any realistic distance on the others
 MISSING = 100.0
 AXES: dict[str, tuple[float, ...]] = {
@@ -35,6 +39,7 @@ AXES: dict[str, tuple[float, ...]] = {
     "comp_threshold_db": (-56, -50, -44, -38, -32, -26, -20, -14),
     "drive_db": (0, 10, 20, 30, 40),
 }
+LEVEL_STEPS = 2
 # a block counts as sung when it is within this much of the vocal's loudest block
 ACTIVE_DB = 30.0
 # below this the mix is too close to zero for the master's change to be read off it
@@ -69,7 +74,7 @@ def reference_targets(refs: Sequence[FileResult]) -> dict[str, tuple[float, floa
         floored at FLOOR; metrics no reference has are left out.
     """
     targets = {}
-    for metric in METRICS:
+    for metric in SEARCHED:
         known = [v for r in refs if (v := finite(r.values.get(metric))) is not None]
         if not known:
             continue
@@ -197,7 +202,7 @@ def separation_bias(
     for rendered in windows:
         clean = measure_processed(*after_master(rendered), rate)
         separated = measure_processed(*separator(rendered.final, rate), rate)
-        for metric in METRICS:
+        for metric in SEARCHED:
             if (a := separated[metric]) is not None and (b := clean[metric]) is not None:
                 differences.setdefault(metric, []).append(a - b)
     return {metric: float(np.median(found)) for metric, found in differences.items()}
@@ -221,6 +226,32 @@ def _coordinate_search(
                     best, best_score, moved = candidate, score, True
         if not moved:
             break
+    return best, best_score
+
+
+def _level_to_target(
+    scores: Callable[[Sequence[Settings]], list[float]],
+    measured: Mapping[Settings, Mapping[str, float | None]],
+    targets: Mapping[str, tuple[float, float]],
+    best: Settings,
+    best_score: float,
+) -> tuple[Settings, float]:
+    # the vocal's level moves the pair by as many LU as dB, so it is set to the target
+    # directly instead of the nearest grid value; the master bends that a little, hence twice
+    spec = SPECS["vocal_db"]
+    for _ in range(LEVEL_STEPS):
+        pair = measured[best].get(PAIR)
+        if PAIR not in targets or pair is None:
+            break
+        wanted = best.vocal_db + targets[PAIR][0] - pair
+        level = float(np.clip(round(wanted / spec.step) * spec.step, spec.low, spec.high))
+        if level == best.vocal_db:
+            break
+        candidate = replace(best, vocal_db=level)
+        (score,) = scores([candidate])
+        if score >= best_score:
+            break
+        best, best_score = candidate, score
     return best, best_score
 
 
@@ -301,5 +332,9 @@ def auto_settings(
 
         (before,) = scores([base])
         best, best_distance = _coordinate_search(scores, base, before, passes)
-    at_edge = tuple(key for key, grid in AXES.items() if getattr(best, key) in (grid[0], grid[-1]))
+        if passes > 0:
+            best, best_distance = _level_to_target(scores, measured, targets, best, best_distance)
+    at_edge = tuple(
+        key for key, grid in AXES.items() if not grid[0] < getattr(best, key) < grid[-1]
+    )
     return AutoResult(best, before, best_distance, measured[best], targets, at_edge, bias)

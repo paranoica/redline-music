@@ -16,6 +16,7 @@ from redline.vocal.auto import (
     FLOOR,
     METRICS,
     MISSING,
+    SEARCHED,
     AutoResult,
     after_master,
     auto_settings,
@@ -37,12 +38,8 @@ def ref(name: str, values: dict[str, float | None]) -> FileResult:
 def test_one_reference_gives_its_values_and_the_floor_as_spread():
     spread = "vocal.short_term_spread_lu"
     targets = reference_targets([ref("a", {PAIR: 3.0, CREST: 9.0, spread: 4.0})])
-    assert targets == {
-        PAIR: (3.0, FLOOR[PAIR]),
-        CREST: (9.0, FLOOR[CREST]),
-        spread: (4.0, FLOOR[spread]),
-    }
-    assert FLOOR[spread] != FLOOR[PAIR]
+    # a few seconds' loudness spread is not a song's: measured, never searched on
+    assert targets == {PAIR: (3.0, FLOOR[PAIR]), CREST: (9.0, FLOOR[CREST])}
 
 
 def test_three_references_give_the_median_and_the_interquartile_range():
@@ -316,9 +313,13 @@ def test_settings_outside_the_axes_stay_as_in_the_base(result):
     assert chosen == base
 
 
-def test_chosen_values_come_from_the_grids(result):
+def test_chosen_values_come_from_the_grids_and_the_level_from_its_range(result):
     for key, grid in AXES.items():
-        assert getattr(result.settings, key) in grid
+        if key != "vocal_db":
+            assert getattr(result.settings, key) in grid
+    spec = SPECS["vocal_db"]
+    level = result.settings.vocal_db
+    assert spec.low <= level <= spec.high and (level / spec.step).is_integer()
 
 
 def test_the_search_gives_the_same_result_twice(track, result):
@@ -397,7 +398,7 @@ def test_edge_keys_are_the_ones_on_the_first_or_last_grid_value(track):
 
 def test_the_found_result_reports_its_edges(result):
     expected = tuple(
-        key for key, grid in AXES.items() if getattr(result.settings, key) in (grid[0], grid[-1])
+        key for key, grid in AXES.items() if not grid[0] < getattr(result.settings, key) < grid[-1]
     )
     assert result.at_edge == expected
 
@@ -447,7 +448,7 @@ def expected_bias(track, settings, count, seconds, split):
     for index, (_, vocal, beat) in enumerate(clean_windows(track, settings, count, seconds)):
         clean = measure_processed(vocal, beat, RATE)
         separated = measure_processed(*split(index, vocal, beat), RATE)
-        for metric in METRICS:
+        for metric in SEARCHED:
             if clean[metric] is not None and separated[metric] is not None:
                 diffs.setdefault(metric, []).append(separated[metric] - clean[metric])
     return {metric: float(np.median(values)) for metric, values in diffs.items()}
@@ -482,12 +483,12 @@ def test_the_bias_is_the_median_over_windows_of_separated_minus_clean(track):
         separator=separator,
     )
     bias = expected_bias(track, BASE, 3, 1.2, bleed)
-    assert set(bias) == set(METRICS)
+    assert set(bias) == set(SEARCHED)
     # the bleed is far from nothing on every metric, so a zero bias would not pass
     assert all(abs(value) > 0.05 for value in bias.values()), bias
     assert found.bias == pytest.approx(bias, rel=1e-9, abs=1e-12)
     refs = reference_targets(ALL_REFS)
-    for metric in METRICS:
+    for metric in SEARCHED:
         median, spread = refs[metric]
         assert found.targets[metric] == pytest.approx((median - bias[metric], spread))
     assert found.distance_before == pytest.approx(distance(found.values, found.targets))
@@ -547,7 +548,7 @@ def test_a_perfect_separator_finds_no_bias_and_changes_nothing(track, result):
         passes=2,
         separator=separator,
     )
-    assert set(found.bias) == set(METRICS)
+    assert set(found.bias) == set(SEARCHED)
     assert all(value == pytest.approx(0.0, abs=1e-9) for value in found.bias.values())
     assert found.settings == result.settings
     assert found.distance_after == pytest.approx(result.distance_after)
@@ -607,3 +608,24 @@ def test_by_default_three_windows_of_six_seconds_are_rendered(monkeypatch):
     monkeypatch.setattr(auto_module, "Engine", Counted)
     auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, passes=0)
     assert built == [at(6.0)] * 3
+
+
+def test_the_vocal_level_is_set_to_the_pair_target_between_grid_values(track, result):
+    # the grid alone stops at its nearest value; the level step lands on the target itself
+    assert result.settings.vocal_db not in AXES["vocal_db"]
+    assert result.values[PAIR] == pytest.approx(3.0, abs=0.6)
+
+
+def test_a_level_beyond_the_range_stops_at_its_end_and_is_reported(track):
+    vocal, beat, ctx = track
+    far = [ref("a", {PAIR: 40.0})]
+    found = auto_settings(Engine(vocal, beat, ctx), far, BASE, count=2, seconds=2.0, passes=1)
+    assert found.settings.vocal_db == SPECS["vocal_db"].high
+    assert "vocal_db" in found.at_edge
+
+
+def test_the_spread_of_a_few_seconds_is_never_searched_on(track):
+    vocal, beat, ctx = track
+    only_spread = [ref("a", {"vocal.short_term_spread_lu": -5.0})]
+    found = auto_settings(Engine(vocal, beat, ctx), only_spread, BASE, count=2, seconds=2.0)
+    assert found.targets == {} and found.settings == BASE
