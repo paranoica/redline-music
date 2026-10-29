@@ -5,7 +5,7 @@ and handed to Rust: the two paths share their coefficients and differ only in th
 function returns None where Rust does not apply, and the caller takes the numpy path.
 """
 
-from functools import cache
+from functools import cache, lru_cache
 from typing import Any, cast
 
 import numpy as np
@@ -37,6 +37,8 @@ def integrated_lufs(samples: Samples, rate: int) -> float | None:
     """Integrated loudness as pyloudnorm measures it, or None where pyloudnorm should."""
     if redline_dsp is None:
         return None
+    if not np.issubdtype(np.asarray(samples).dtype, np.floating):
+        return None
     x = np.asarray(samples, dtype=np.float32)
     x = x[:, None] if x.ndim == 1 else x
     if not 1 <= x.shape[1] <= MAX_CHANNELS or len(x) < BLOCK_SECONDS * rate:
@@ -46,7 +48,7 @@ def integrated_lufs(samples: Samples, rate: int) -> float | None:
     )
 
 
-@cache
+@lru_cache(maxsize=64)
 def _poly_plan(n_in: int, up: int, down: int) -> tuple[list[float], int, int, int, int]:
     # scipy.signal.resample_poly's own filter and alignment, for float32 input
     max_rate = max(up, down)
@@ -112,6 +114,8 @@ def sosfilt(samples: Samples, sos: npt.ArrayLike) -> Samples | None:
     if redline_dsp is None:
         return None
     x = np.ascontiguousarray(samples, dtype=np.float32)
-    if x.ndim != 2:
+    sections = np.asarray(sos, dtype=np.float64)
+    # Rust takes every a0 as one, as scipy's sosfilt requires
+    if x.ndim != 2 or x.shape[1] == 0 or not np.all(sections[:, 3] == 1.0):
         return None
-    return redline_dsp.sosfilt(x, np.asarray(sos, dtype=np.float64).tolist())
+    return redline_dsp.sosfilt(x, sections.tolist())

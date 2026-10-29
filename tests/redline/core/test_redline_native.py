@@ -82,3 +82,44 @@ def test_cascaded_sections_match_scipy():
     got = native.sosfilt(x, sos)
     assert got.dtype == np.float32
     assert np.abs(got - want).max() < 1e-6
+
+
+def test_without_rust_every_path_is_scipy_and_pyloudnorm_exactly(monkeypatch):
+    from redline.core import dsp, loudness
+    from scipy.signal import resample_poly, sosfilt
+
+    monkeypatch.setattr(native, "redline_dsp", None)
+    x = noise(2.0)
+    assert loudness.integrated_lufs(x, RATE) == pyln.Meter(RATE).integrated_loudness(x)
+    sos = np.vstack([dsp.peaking(1000, 6.0, 1.0, RATE)])
+    assert np.array_equal(dsp.apply_sos(x, sos), sosfilt(sos, x, axis=0).astype(np.float32))
+    out = dsp.oversampled(lambda v: v, x, 2)
+    want = [
+        resample_poly(
+            resample_poly(x[:, c], 2, 1, window=native.OVERSAMPLING_WINDOW).astype(np.float32),
+            1,
+            2,
+            window=native.OVERSAMPLING_WINDOW,
+        )
+        for c in range(2)
+    ]
+    assert np.array_equal(out, np.column_stack(want)[: len(x)].astype(np.float32))
+
+
+def test_inputs_scipy_would_treat_otherwise_are_left_to_it():
+    assert native.integrated_lufs((noise(1.0) * 1000).astype(np.int16), RATE) is None
+    assert native.integrated_lufs(np.zeros((RATE, 0), np.float32), RATE) is None
+    unnormalised = np.array([[1.0, 0.0, 0.0, 2.0, 0.0, 0.0]])
+    assert native.sosfilt(noise(0.5), unnormalised) is None
+    assert native.sosfilt(np.zeros((100, 0), np.float32), unnormalised[:, :] / 2) is None
+
+
+def test_a_rejected_plan_raises_and_leaves_the_threads_float_mode_alone():
+    import redline_dsp
+
+    with pytest.raises(ValueError):
+        redline_dsp.resample(noise(0.01, channels=1)[:, 0], ([], 1, 1, 0, 5))
+    with pytest.raises(ValueError):
+        redline_dsp.resample(noise(0.01, channels=1)[:, 0], ([1.0], 0, 1, 0, 5))
+    tiny = np.float32(1e-39)
+    assert tiny * np.float32(1.0) != 0

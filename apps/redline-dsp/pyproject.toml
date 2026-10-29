@@ -12,3 +12,12 @@ license = "MIT"
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "redline_dsp"
+
+# uv rebuilds the extension when any of these change, not only when this file does
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "src/**/*.rs" },
+]

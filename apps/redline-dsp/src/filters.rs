@@ -4,29 +4,43 @@
 ///
 /// A filter falling silent leaves its state decaying through subnormal numbers, which the
 /// processor handles many times slower; a vocal stem is half silence. What changes is below
-/// 1e-308, far under anything audible or measured.
+/// about 1e-38 in single precision and 1e-308 in double, far under anything audible. The
+/// thread's own mode comes back however f ends, a panic included.
 pub fn flushing_tiny<R>(f: impl FnOnce() -> R) -> R {
+    let _mode = FlushTiny::on();
+    f()
+}
+
+struct FlushTiny {
     #[cfg(target_arch = "x86_64")]
-    {
-        #[allow(deprecated)]
-        use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
-        // flush-to-zero (bit 15) and denormals-are-zero (bit 6)
-        #[allow(deprecated)]
-        let before = unsafe { _mm_getcsr() };
-        #[allow(deprecated)]
+    before: u32,
+}
+
+impl FlushTiny {
+    #[cfg(target_arch = "x86_64")]
+    fn on() -> Self {
+        let mut before: u32 = 0;
+        // flush-to-zero (bit 15) and denormals-are-zero (bit 6) in MXCSR
         unsafe {
-            _mm_setcsr(before | 0x8040)
-        };
-        let out = f();
-        #[allow(deprecated)]
-        unsafe {
-            _mm_setcsr(before)
-        };
-        out
+            std::arch::asm!("stmxcsr [{}]", in(reg) &mut before, options(nostack));
+            let flushed = before | 0x8040;
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &flushed, options(nostack));
+        }
+        FlushTiny { before }
     }
+
     #[cfg(not(target_arch = "x86_64"))]
-    {
-        f()
+    fn on() -> Self {
+        FlushTiny {}
+    }
+}
+
+impl Drop for FlushTiny {
+    fn drop(&mut self) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            std::arch::asm!("ldmxcsr [{}]", in(reg) &self.before, options(nostack));
+        }
     }
 }
 
@@ -181,11 +195,12 @@ pub fn sosfilt<const BACK: bool>(sos: &[[f64; 6]], x: &mut [f64], zi: &[[f64; 2]
 /// in double precision on single-precision samples.
 pub fn sosfiltfilt(sos: &[[f64; 6]], zi: &[[f64; 2]], x: &[f32], edge: usize) -> Vec<f32> {
     let n = x.len();
-    let (first, last) = (x[0] as f64, x[n - 1] as f64);
+    let (first, last) = (x[0], x[n - 1]);
+    // the extension is made in single precision, as scipy's odd_ext makes it for float32
     let mut ext = Vec::with_capacity(n + 2 * edge);
-    ext.extend((1..=edge).rev().map(|i| 2.0 * first - x[i] as f64));
+    ext.extend((1..=edge).rev().map(|i| (2.0 * first - x[i]) as f64));
     ext.extend(x.iter().map(|&v| v as f64));
-    ext.extend((1..=edge).map(|i| 2.0 * last - x[n - 1 - i] as f64));
+    ext.extend((1..=edge).map(|i| (2.0 * last - x[n - 1 - i]) as f64));
     let start = ext[0];
     sosfilt::<false>(sos, &mut ext, zi, start);
     let end = ext[ext.len() - 1];

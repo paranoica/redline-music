@@ -46,6 +46,15 @@ fn states(zi: Vec<Vec<f64>>) -> PyResult<Vec<[f64; 2]>> {
 /// A resampling plan: padded taps, the up and down factors, samples to skip, samples out.
 type Plan = (Vec<f32>, usize, usize, usize, usize);
 
+fn checked(plan: &Plan) -> PyResult<()> {
+    if plan.0.is_empty() || plan.1 == 0 || plan.2 == 0 {
+        return Err(PyValueError::new_err(
+            "a plan needs taps and factors of one or more",
+        ));
+    }
+    Ok(())
+}
+
 fn clip(x: &mut [f32], ceiling: f32) {
     for v in x.iter_mut() {
         *v = v.clamp(-ceiling, ceiling);
@@ -69,8 +78,10 @@ fn oversampled_clip<'py>(
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
     let sos = sections(sos)?;
     let zi = states(zi)?;
+    checked(&up)?;
+    checked(&down)?;
     let channels = columns(&samples);
-    if channels.iter().any(|c| c.len() * up.1 <= edge) {
+    if channels.is_empty() || channels.iter().any(|c| c.len() * up.1 <= edge) {
         return Err(PyValueError::new_err(
             "too short to filter at the raised rate",
         ));
@@ -113,12 +124,13 @@ fn resample<'py>(
     py: Python<'py>,
     samples: PyReadonlyArray1<'py, f32>,
     plan: Plan,
-) -> Bound<'py, PyArray1<f32>> {
+) -> PyResult<Bound<'py, PyArray1<f32>>> {
+    checked(&plan)?;
     let x = samples.as_array().to_vec();
     let out = py.detach(|| {
         filters::flushing_tiny(|| filters::upfirdn(&plan.0, &x, plan.1, plan.2, plan.3, plan.4))
     });
-    PyArray1::from_vec(py, out)
+    Ok(PyArray1::from_vec(py, out))
 }
 
 /// Every channel through cascaded sections from rest, in double precision, as `sosfilt`.
