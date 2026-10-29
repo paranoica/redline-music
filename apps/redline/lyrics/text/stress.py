@@ -10,7 +10,7 @@ Stresser = Callable[[str], str]
 def load_stresser() -> Stresser:
     """A function putting "+" before the stressed vowel of each word of a line."""
     try:
-        from ruaccent import RUAccent
+        from ruaccent import RUAccent  # pyright: ignore[reportAttributeAccessIssue]
     except ImportError as error:
         raise LyricsError("stress marks need the stress extra: uv sync --extra stress") from error
     model = RUAccent()

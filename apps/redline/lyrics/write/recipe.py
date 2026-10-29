@@ -169,7 +169,7 @@ def _flow(rng: np.random.Generator, kind: str, known: dict[str, Any] | None, bpm
     ]
     if not any(w > 0 for w in weights):
         weights = [1.0] * len(names)
-    return str(_draw(rng, names, weights))
+    return str(_draw(rng, names, [float(w) for w in weights]))
 
 
 def _anchors(rng: np.random.Generator) -> str:

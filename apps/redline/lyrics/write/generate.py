@@ -16,6 +16,7 @@ from redline.lyrics.write.form import Problem, check_draft
 from redline.lyrics.write.recipe import make_recipe, recipe_from_json, recipe_json
 from redline.lyrics.write.writer import (
     Draft,
+    HandoffWriter,
     Refusal,
     Waiting,
     Writer,
@@ -120,7 +121,7 @@ def style_for(notes: str, seed: int) -> str:
     for line in notes.splitlines():
         found = LISTED.match(line)
         items = _items(found.group(2).rstrip(".")) if found else []
-        if len(items) < MIN_LIST:
+        if found is None or len(items) < MIN_LIST:
             out.append(line)
             continue
         keep = max(MIN_KEPT, len(items) // 2)
@@ -214,7 +215,7 @@ class Session:
         return state
 
     def _saved_texts(self) -> list[tuple[str, Track]]:
-        made = self.folder.parent.glob("*/text.txt")
+        made = self.folder.parent.glob("*/text*.txt")
         return [
             (MADE, parse_text(p.read_text(encoding="utf-8")))
             for p in made
@@ -345,3 +346,107 @@ class Session:
         state.update(round=state["round"] + 1, reasons=reasons)
         self._save_state(state)
         return self.run(state["seed"])
+
+
+def versions(folder: Path) -> dict[int, Path]:
+    """A seed's saved texts by version: text.txt is 1, each edit adds text-<n>.txt."""
+    found = {1: folder / "text.txt"} if (folder / "text.txt").exists() else {}
+    for path in folder.glob("text-*.txt"):
+        number = path.stem.removeprefix("text-")
+        if number.isdigit() and int(number) > 1:
+            found[int(number)] = path
+    return dict(sorted(found.items()))
+
+
+class Editor:
+    """Changes a saved text by an instruction: the writer rewrites, the checks stay the same."""
+
+    def __init__(self, session: Session) -> None:
+        """Edit the seed the session holds."""
+        self.session = session
+        self.folder = session.folder
+
+    def _state(self) -> dict[str, Any]:
+        path = self.folder / "edits.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"done": []}
+
+    def run(self, seed: int, change: str | None, force: bool = False) -> Saved | Pending | Failed:
+        """Take the edit one step on: ask, wait, check, ask again or save the next version."""
+        have = versions(self.folder)
+        state = self.session._state()
+        if not have or not state or state.get("status") != "saved":
+            raise LyricsError(f"seed {seed} has no saved text to edit")
+        edits = self._state()
+        pending = edits.get("pending")
+        change = (change or "").strip() or None
+        if pending and change and change != pending["change"] and not force:
+            raise LyricsError(
+                f"seed {seed} has an edit waiting: {pending['change']!r}; --force to replace it"
+            )
+        if pending is None or (force and change):
+            if not change:
+                raise LyricsError("say what to change, e.g. 'усиль хук'")
+            source = max(have)
+            pending = {
+                "version": source + 1,
+                "source": source,
+                "change": change,
+                "round": 1,
+                "reasons": [],
+            }
+            target = self.folder / f"edit-{pending['version']}"
+            if target.exists():
+                for old in target.glob("*"):
+                    old.unlink()
+        recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
+        current = have[pending["source"]].read_text(encoding="utf-8")
+        target = self.folder / f"edit-{pending['version']}"
+        target.mkdir(mode=0o700, exist_ok=True)
+        request = WriterRequest(
+            prompt_text(),
+            recipe,
+            (),
+            tuple(pending["reasons"]),
+            pending["round"],
+            style_for(self.session.style, seed),
+            current,
+            pending["change"],
+        )
+        answer = HandoffWriter(target).ask(request)
+        if isinstance(answer, Waiting):
+            edits["pending"] = pending
+            self._save(edits)
+            return Pending(answer.request, answer.draft)
+        if isinstance(answer, Refusal):
+            edits.pop("pending", None)
+            self._save(edits)
+            return Failed("refused", (answer.reason,))
+        return self._judge(seed, edits, pending, recipe, answer)
+
+    def _judge(
+        self, seed: int, edits: dict[str, Any], pending: dict[str, Any], recipe: Any, draft: Draft
+    ) -> Saved | Pending | Failed:
+        problems, _ = check_draft(draft.text, recipe, self.session.mark)
+        # an edit may change the form on purpose: only what makes a text unusable sends it back
+        problems = [p for p in problems if p.kind in ("not lyrics", "length", "places")]
+        if not any(p.kind == "not lyrics" for p in problems):
+            problems += self.session._copies(parse_text(draft.text))
+        reasons = [f"{p.kind}, {p.where}: {p.detail}" for p in problems]
+        if not problems:
+            path = self.folder / f"text-{pending['version']}.txt"
+            _write(path, draft.text)
+            edits.pop("pending", None)
+            edits["done"].append({k: pending[k] for k in ("version", "source", "change")})
+            self._save(edits)
+            return Saved(path, draft.text)
+        if pending["round"] >= ROUNDS:
+            edits.pop("pending", None)
+            self._save(edits)
+            return Failed("failed", tuple(reasons))
+        pending.update(round=pending["round"] + 1, reasons=reasons)
+        edits["pending"] = pending
+        self._save(edits)
+        return self.run(seed, None)
+
+    def _save(self, edits: dict[str, Any]) -> None:
+        _write(self.folder / "edits.json", json.dumps(edits, ensure_ascii=False, indent=1))

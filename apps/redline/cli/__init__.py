@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from redline.cli.lyrics import (
     _lyrics_check,
+    _lyrics_edit,
     _lyrics_index,
     _lyrics_stats,
     _lyrics_suno,
@@ -36,6 +37,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         "check": _lyrics_check,
         "index": _lyrics_index,
         "write": _lyrics_write,
+        "edit": _lyrics_edit,
         "suno": _lyrics_suno,
         "stats": _lyrics_stats,
     }

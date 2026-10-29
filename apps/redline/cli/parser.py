@@ -116,10 +116,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("hard", "calm"),
         help="how hard the beat hits (default: measured from --beat)",
     )
+    edit = lyrics_commands.add_parser(
+        "edit",
+        help="change a saved text by an instruction: run again after the writer answers",
+    )
+    edit.add_argument("change", nargs="?", help="what to change, e.g. 'усиль хук'")
+    edit.add_argument("--seed", type=int, required=True, help="the saved text's seed")
+    edit.add_argument("--profile", help="the profile the seed was written from")
+    edit.add_argument("--lyrics", type=Path, default=LYRICS, help="the lyrics base folder")
+    edit.add_argument("--build", type=Path, default=LYRICS_BUILD, help="the index folder")
+    edit.add_argument(
+        "--min-words", type=int, default=8, help="shortest stretch counted as a copy (5 or more)"
+    )
+    edit.add_argument("--force", action="store_true", help="replace a waiting edit")
     suno = lyrics_commands.add_parser(
         "suno", help="a saved text as a Suno card: title, style, settings, tagged lyrics"
     )
     suno.add_argument("--seed", type=int, required=True, help="the saved text's seed")
+    suno.add_argument("--version", type=int, help="which version (default: the newest edit)")
     suno.add_argument("--lyrics", type=Path, default=LYRICS, help="the lyrics base folder")
     suno.add_argument(
         "--stress",

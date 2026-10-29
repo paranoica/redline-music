@@ -502,3 +502,73 @@ def test_a_delivery_reaches_the_recipe_and_the_writer(base):
     assert run(base, 54, "--delivery", "hard") == 2
     assert run(base, 55, "--bpm", "140") == 3
     assert recipe_of(base, 55).delivery is None
+
+
+def edit(base, seed, *extra):
+    root, build = base
+    args = ["lyrics", "edit", "--seed", str(seed), "--lyrics", str(root), "--build", str(build)]
+    return main([*args, *extra])
+
+
+def saved_seed(base, seed):
+    run(base, seed)
+    draft(base, seed, good_draft(recipe_of(base, seed)))
+    assert run(base, seed) == 0
+    return (folder(base, seed) / "text.txt").read_text(encoding="utf-8")
+
+
+def test_an_edit_needs_a_saved_seed_and_a_change(base):
+    run(base, 60)
+    assert edit(base, 60, "усиль хук") == 2
+    saved_seed(base, 61)
+    assert edit(base, 61) == 2
+    assert edit(base, 61, "   ") == 2
+
+
+def test_an_edit_asks_the_writer_with_the_text_and_the_change(base):
+    text = saved_seed(base, 62)
+    assert edit(base, 62, "усиль хук") == 3
+    request = (folder(base, 62) / "edit-2" / "request-1.md").read_text(encoding="utf-8")
+    assert "усиль хук" in request and text.splitlines()[1] in request
+    assert SENTINEL not in request
+
+
+def test_a_good_edit_is_the_next_version_and_suno_takes_the_newest(base, capsys):
+    text = saved_seed(base, 63)
+    edit(base, 63, "поменяй первую строку")
+    changed = text.replace(text.splitlines()[1], "та та та та та та та новая строчка тут", 1)
+    (folder(base, 63) / "edit-2" / "draft-1.txt").write_text(changed, encoding="utf-8")
+    assert edit(base, 63) == 0
+    assert (folder(base, 63) / "text-2.txt").read_text(encoding="utf-8") == changed
+    assert (folder(base, 63) / "text.txt").read_text(encoding="utf-8") == text
+    capsys.readouterr()
+    lyrics = ["lyrics", "suno", "--seed", "63", "--lyrics", str(base[0])]
+    assert main(lyrics) == 0
+    assert "новая строчка тут" in capsys.readouterr().out
+    assert main([*lyrics, "--version", "1"]) == 0
+    assert "новая строчка тут" not in capsys.readouterr().out
+    assert main([*lyrics, "--version", "7"]) == 2
+
+
+def test_an_edit_that_copies_the_base_goes_back(base):
+    text = saved_seed(base, 64)
+    edit(base, 64, "добавь строку")
+    copied = text.replace(text.splitlines()[1], f"{SENTINEL} 0", 1)
+    (folder(base, 64) / "edit-2" / "draft-1.txt").write_text(copied, encoding="utf-8")
+    assert edit(base, 64) == 3
+    assert (folder(base, 64) / "edit-2" / "request-2.md").exists()
+    assert not (folder(base, 64) / "text-2.txt").exists()
+
+
+def test_a_second_edit_starts_from_the_newest_version_and_a_pending_one_is_kept(base):
+    text = saved_seed(base, 65)
+    edit(base, 65, "раз")
+    second = text.replace(text.splitlines()[1], "вторая версия этой строки целиком тут", 1)
+    (folder(base, 65) / "edit-2" / "draft-1.txt").write_text(second, encoding="utf-8")
+    assert edit(base, 65) == 0
+    assert edit(base, 65, "два") == 3
+    assert edit(base, 65, "три") == 2
+    request = (folder(base, 65) / "edit-3" / "request-1.md").read_text(encoding="utf-8")
+    assert "вторая версия этой строки" in request
+    assert edit(base, 65, "три", "--force") == 3
+    assert "три" in (folder(base, 65) / "edit-3" / "request-1.md").read_text(encoding="utf-8")

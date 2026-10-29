@@ -152,51 +152,52 @@ def _asked_beat(args: argparse.Namespace) -> tuple[float | None, int | None, str
     return half_time((args.bpm,)), None, args.delivery
 
 
-def _lyrics_write(args: argparse.Namespace) -> int:
+def _session(args: argparse.Namespace) -> Any:
+    """The seed's session, with its profile, index, the owner's texts and the style notes."""
     import re
 
     from redline.lyrics.base.fingerprint import DEFAULT_MIN_WORDS, RUN, FingerprintIndex
     from redline.lyrics.base.profile import load_profile
     from redline.lyrics.text import stress
     from redline.lyrics.text.parse import LyricsError, read_track
-    from redline.lyrics.write.generate import Failed, Pending, Session
+    from redline.lyrics.write.generate import Session
     from redline.lyrics.write.writer import HandoffWriter
 
-    try:
-        if args.seed < 0:
-            raise LyricsError("a seed is a whole number from 0")
-        if not RUN <= args.min_words <= DEFAULT_MIN_WORDS:
-            # a looser check would let a saved text hold a longer copy than the owner allows
-            raise LyricsError(f"--min-words takes {RUN} to {DEFAULT_MIN_WORDS}")
-        name = args.profile or (
-            "target" if (args.build / "profiles" / "target.json").exists() else "working"
-        )
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-            raise LyricsError(f"no such profile: {name}")
-        folder = args.lyrics / "generated" / str(args.seed)
-        if _git_would_track(folder):
-            raise LyricsError(f"{folder} is not ignored by git; keep the lyrics base in private/")
-        profile = load_profile(args.build / "profiles" / f"{name}.json")
-        index = FingerprintIndex.load(args.build)
-        mine = [read_track(p, mine=True) for p in sorted((args.lyrics / "mine").glob("*.txt"))]
-        if "stress" not in profile["meta"]:
-            raise LyricsError(f"profile {name} is from an older index; run lyrics index again")
-        mark = _lazy_stresser(stress) if profile["meta"]["stress"] else str
-        notes = args.lyrics / "style.md"
-        style = notes.read_text(encoding="utf-8") if notes.exists() else ""
-        session = Session(
-            folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words, style
-        )
-        result = session.run(args.seed, args.topic, args.force, *_asked_beat(args))
-    except (LyricsError, OSError, ValueError) as error:
-        print(f"redline: {error}", file=sys.stderr)
-        return 2
+    if args.seed < 0:
+        raise LyricsError("a seed is a whole number from 0")
+    if not RUN <= args.min_words <= DEFAULT_MIN_WORDS:
+        # a looser check would let a saved text hold a longer copy than the owner allows
+        raise LyricsError(f"--min-words takes {RUN} to {DEFAULT_MIN_WORDS}")
+    name = args.profile or (
+        "target" if (args.build / "profiles" / "target.json").exists() else "working"
+    )
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        raise LyricsError(f"no such profile: {name}")
+    folder = args.lyrics / "generated" / str(args.seed)
+    if _git_would_track(folder):
+        raise LyricsError(f"{folder} is not ignored by git; keep the lyrics base in private/")
+    profile = load_profile(args.build / "profiles" / f"{name}.json")
+    index = FingerprintIndex.load(args.build)
+    mine = [read_track(p, mine=True) for p in sorted((args.lyrics / "mine").glob("*.txt"))]
+    if "stress" not in profile["meta"]:
+        raise LyricsError(f"profile {name} is from an older index; run lyrics index again")
+    mark = _lazy_stresser(stress) if profile["meta"]["stress"] else str
+    notes = args.lyrics / "style.md"
+    style = notes.read_text(encoding="utf-8") if notes.exists() else ""
+    return Session(
+        folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words, style
+    )
+
+
+def _report(seed: int, result: Any) -> int:
+    from redline.lyrics.write.generate import Failed, Pending
+
     if isinstance(result, Pending):
         print(f"waiting for the writer: {result.request}")
         print(f"the draft goes to: {result.draft}")
         return 3
     if isinstance(result, Failed):
-        print(f"seed {args.seed} {result.status}:")
+        print(f"seed {seed} {result.status}:")
         for reason in result.reasons:
             print(f"  {reason}")
         return 1
@@ -204,17 +205,46 @@ def _lyrics_write(args: argparse.Namespace) -> int:
     return 0
 
 
+def _lyrics_edit(args: argparse.Namespace) -> int:
+    from redline.lyrics.text.parse import LyricsError
+    from redline.lyrics.write.generate import Editor
+
+    try:
+        result = Editor(_session(args)).run(args.seed, args.change, args.force)
+    except (LyricsError, OSError, ValueError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    return _report(args.seed, result)
+
+
+def _lyrics_write(args: argparse.Namespace) -> int:
+    from redline.lyrics.text.parse import LyricsError
+
+    try:
+        session = _session(args)
+        result = session.run(args.seed, args.topic, args.force, *_asked_beat(args))
+    except (LyricsError, OSError, ValueError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    return _report(args.seed, result)
+
+
 def _lyrics_suno(args: argparse.Namespace) -> int:
     from redline.lyrics.suno import card
     from redline.lyrics.text import stress
     from redline.lyrics.text.parse import LyricsError, parse_text
+    from redline.lyrics.write.generate import versions
     from redline.lyrics.write.recipe import recipe_from_json
 
     folder = args.lyrics / "generated" / str(args.seed)
     try:
-        if not (folder / "text.txt").exists():
+        have = versions(folder)
+        if not have:
             raise LyricsError(f"seed {args.seed} has no saved text")
-        track = parse_text((folder / "text.txt").read_text(encoding="utf-8"))
+        version = args.version or max(have)
+        if version not in have:
+            raise LyricsError(f"seed {args.seed} has versions {', '.join(map(str, have))}")
+        track = parse_text(have[version].read_text(encoding="utf-8"))
         recipe = recipe_from_json((folder / "recipe.json").read_text(encoding="utf-8"))
         mark = _lazy_stresser(stress) if args.stress else None
         own = args.lyrics / "suno-style.txt"

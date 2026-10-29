@@ -188,7 +188,7 @@ def merge(parts: Sequence[Counts], weights: Sequence[float] | None = None) -> Co
     out: Counts = {}
     for i, part in enumerate(parts):
         for field, counter in part.items():
-            target = out.setdefault(field, Counter())
+            target: Counter[Any] = out.setdefault(field, Counter())
             if weights is None or field in RAW:
                 target.update(counter)
                 continue
@@ -196,7 +196,9 @@ def merge(parts: Sequence[Counts], weights: Sequence[float] | None = None) -> Co
             total = sum(base.values())
             if total:
                 for key, value in counter.items():
-                    target[key] += weights[i] * value / total
+                    # weighted shares are fractions: the counter holds floats from here on
+                    share = weights[i] * value / total
+                    target[key] = target[key] + share  # pyright: ignore[reportArgumentType]
     return out
 
 
@@ -227,7 +229,9 @@ def _yes_share(counter: Counter) -> float | None:
 
 
 def _top(counter: Counter, n: int | None) -> list[tuple[str, float]]:
-    return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+    return [
+        (str(k), float(v)) for k, v in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
+    ]
 
 
 def _words(

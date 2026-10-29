@@ -46,6 +46,10 @@ recipe below; it was drawn from the statistics of the scene and of the owner's o
 - Confidence over effort: a line that tries too hard to be clever is worse than a plain one.
   When in doubt, cut it.
 - Surprise: the best line of the text is one the listener did not see coming.
+- Flex is the world of the text, not a joke about poverty. An ordinary place (a stop, a minibus,
+  a clinic) set against the flex is a device: use it only when the recipe asks for it, as
+  many times as it asks, never one in every verse.
+- No "X, как Y" comparison in line after line; one strong image beats three similes.
 
 ## Rules
 

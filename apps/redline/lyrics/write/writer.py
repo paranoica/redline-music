@@ -30,6 +30,9 @@ class WriterRequest:
     reasons: tuple[str, ...]
     round: int
     style: str = ""
+    # set for an edit: the text to change and what to change in it
+    current: str = ""
+    change: str = ""
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,27 @@ def prompt_hash() -> str:
     return hashlib.sha256(prompt_text().encode()).hexdigest()[:12]
 
 
+def _change(request: WriterRequest) -> list[str]:
+    if not request.change:
+        return []
+    return [
+        "",
+        "## The text to change",
+        "",
+        "```",
+        request.current.rstrip(),
+        "```",
+        "",
+        "## The change",
+        "",
+        request.change.strip(),
+        "",
+        "Change only what this asks. Keep every other line word for word and keep the "
+        "sections, unless the change asks otherwise. Answer with the whole new text.",
+        "",
+    ]
+
+
 def render(request: WriterRequest, answer_to: Path | None = None) -> str:
     """The request as one Markdown page."""
     r = request.recipe
@@ -120,6 +144,7 @@ def render(request: WriterRequest, answer_to: Path | None = None) -> str:
         out += ["", "## The owner's voice (manner only, never these lines)", ""]
         for excerpt in request.excerpts:
             out += ["```", excerpt.rstrip(), "```", ""]
+    out += _change(request)
     if request.reasons:
         out += ["", f"## Round {request.round}: the last draft was sent back", ""]
         out += [f"- {reason}" for reason in request.reasons]

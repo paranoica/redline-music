@@ -213,3 +213,24 @@ def test_a_beat_holds_three_lines_in_four_to_their_range():
     assert not [p for p in check_draft(three, beat)[0] if p.kind == "syllables"]
     assert [p for p in check_draft(two, beat)[0] if p.kind == "syllables"]
     assert not [p for p in check_draft(two, recipe(plan))[0] if p.kind == "syllables"]
+
+
+def test_ordinary_places_are_held_to_what_the_recipe_asks():
+    from dataclasses import replace
+
+    plan = SectionPlan("verse", 4, (5, 9), "AABB")
+    many = (
+        "[Куплет]\nя стою на остановке дом\nпотом сижу в маршрутке лом\n"
+        "и в поликлинике мой сыр\nпотом в подъезде целый мир\n"
+    )
+    found, _ = check_draft(many, recipe(plan))
+    assert [p for p in found if p.kind == "places"]
+    asked = replace(recipe(plan), devices=(("place", 2),))
+    found, _ = check_draft(many, asked)
+    assert [p for p in found if p.kind == "places"]
+    two = many.replace("потом сижу в маршрутке лом", "потом сижу я с ним вдвоём").replace(
+        "потом в подъезде целый мир", "и вокруг огромный мир"
+    )
+    assert not [p for p in check_draft(two, asked)[0] if p.kind == "places"]
+    one = two.replace("и в поликлинике мой сыр", "и на столе лежит мой сыр")
+    assert not [p for p in check_draft(one, recipe(plan))[0] if p.kind == "places"]

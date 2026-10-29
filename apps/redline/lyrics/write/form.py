@@ -92,6 +92,42 @@ def _longest_run(ends: list[str]) -> int:
     return longest
 
 
+# ordinary places set against the flex, by word stem: the scene uses the trick, but a text
+# that puts one in every line reads as a parody of it
+PLACE_STEMS = (
+    "маршрутк",
+    "остановк",
+    "подъезд",
+    "общаг",
+    "пвз",
+    "вокзал",
+    "ларек",
+    "ларьк",
+    "шиномонтаж",
+    "автомойк",
+    "поликлиник",
+    "больничк",
+    "больниц",
+    "военкомат",
+    "электричк",
+    "рынк",
+    "рынок",
+    "гараж",
+    "промзон",
+    "хрущевк",
+    "пятерочк",
+    "авито",
+    "заправк",
+    "вахт",
+)
+
+
+def places(text: str) -> int:
+    """Ordinary places named in the distinct lines of a text."""
+    seen = {line.plain for s in parse_text(text).sections for line in s.lines if line.plain}
+    return sum(1 for line in seen for w in words(line) if w.startswith(PLACE_STEMS))
+
+
 def _distinct(lines: list[Any]) -> list[Any]:
     # a chanted line said again is a repeat, not another rhyme
     seen: list[list[str]] = []
@@ -188,6 +224,11 @@ def check_draft(
                 "rhymes", "the draft", f"{rhymed:.0%} of rhyme pairs rhyme, need {rhyme_share:.0%}"
             )
         )
+    allowed = max(1, dict(recipe.devices).get("place", 0))
+    named = places(text)
+    if named > allowed:
+        detail = f"{named} ordinary places (stop, minibus, clinic…); keep to {allowed}"
+        problems.append(Problem("places", "the draft", detail))
     verbs = sum(is_verb(a) and is_verb(b) for a, b in pairs)
     stats = {
         "syllables_in_range": round(share, 4),
