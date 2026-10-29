@@ -37,7 +37,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/redline"]
+packages = ["apps/redline"]
 
 # torch 2.14 cu126 is the last build with Pascal kernels (GTX 1060).
 [[tool.uv.index]]
@@ -81,6 +81,8 @@ max-complexity = 10
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# shared signal helpers for the redline tests, which sit in one folder per area
+pythonpath = ["tests/redline"]
 addopts = "-q"
 # /tmp is in memory here and the audio tests write large files: keep only failed tests' dirs
 tmp_path_retention_policy = "failed"

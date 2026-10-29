@@ -39,7 +39,7 @@
       "run": "uv run pytest -p no:cacheprovider -q -o addopts= {args}"
     },
     "typecheck": {
-      "run": "uv run pyright src/redline"
+      "run": "uv run pyright apps/redline"
     },
     "lint": {
       "run": "uvx ruff check ."

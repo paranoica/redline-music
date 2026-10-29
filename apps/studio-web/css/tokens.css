@@ -1,0 +1,92 @@
+/* One light source: from above. Graphite surfaces, warm text, one red. */
+:root {
+  color-scheme: dark;
+
+  --bg: #0e0f11;
+  --panel: #15171a;
+  --panel-raised: #1b1e22;
+  --well: #0b0c0e;
+  --line: #2a2e34;
+  --line-strong: #3a3f46;
+
+  --text: #ece6dc;
+  --text-dim: #a8a39b;
+  --muted: #8a867f;
+
+  --red: #ff4b3a;
+  --red-dim: #ff4b3a33;
+  --red-line: #ff4b3a99;
+  --amber: #e8b04a;
+  --green: #74c48f;
+
+  --font-ui: "Onest", "Segoe UI", system-ui, sans-serif;
+  --font-num: "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
+  --font-brand: "Unbounded", "Onest", sans-serif;
+
+  --step--1: 0.78rem;
+  --step-0: 0.9rem;
+  --step-1: 1.05rem;
+  --step-2: 1.35rem;
+  --step-3: 1.9rem;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius-s: 4px;
+  --radius-m: 8px;
+
+  --edge-top: inset 0 1px 0 #ffffff0a;
+  --drop: 0 1px 0 #00000080, 0 10px 24px -14px #000000cc;
+
+  --fast: 120ms;
+  --slow: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 var(--step-0) / 1.45 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-width: 320px;
+}
+
+.num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

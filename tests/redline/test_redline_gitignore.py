@@ -42,12 +42,13 @@ def test_private_material_is_ignored(path):
 @pytest.mark.parametrize(
     "path",
     [
-        "src/redline/models/__init__.py",
-        "src/redline/stems/__init__.py",
-        "src/redline/lyrics/__init__.py",
-        "src/redline/profiles/__init__.py",
+        "apps/redline/models/__init__.py",
+        "apps/redline/stems/__init__.py",
+        "apps/redline/lyrics/__init__.py",
+        "apps/redline/profiles/__init__.py",
         ".env.example",
-        "tests/redline/test_redline_audio.py",
+        "tests/redline/core/test_redline_audio.py",
+        "apps/studio-web/index.html",
     ],
 )
 def test_code_is_not_ignored(path):
