@@ -9,9 +9,10 @@ from redline.cli import main
 from redline.core.loudness import integrated_lufs
 from redline.engine.render import Engine
 from redline.engine.settings import Settings, from_dict
+from redline.engine.track import reference_target
 from redline.measure.run import FileResult
 from redline.vocal.chain import ALL_LEVELS, process_vocal
-from redline.vocal.rounds import blind_round, level_settings, reference_target, vocal_run
+from redline.vocal.rounds import blind_round, level_settings, vocal_run
 from redline_signals import RATE, engine_context, engine_stems, make_rng, tone, write
 
 MARKER_HZ = 7300

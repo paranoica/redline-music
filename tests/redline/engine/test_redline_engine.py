@@ -218,3 +218,37 @@ def test_a_bitcrush_on_a_silent_vocal_stays_silent(setup):
     silent = np.zeros_like(vocal)
     out = Engine(vocal, beat, ctx)._layers(silent, from_dict({"bitcrush_on": True}))
     assert np.all(np.isfinite(out)) and not np.any(out)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda v, b: (v[:, 0], b), "vocal .*\\(n, 2\\)"),
+        (lambda v, b: (v, b[:, :1]), "beat .*\\(n, 2\\)"),
+        (lambda v, b: (v, np.column_stack([b, b[:, :1]])), "beat .*\\(n, 2\\)"),
+        (lambda v, b: (v.astype(np.float64), b), "vocal .*float32"),
+        (lambda v, b: (v, b.astype(np.float64)), "beat .*float32"),
+        (lambda v, b: (v[:-1], b), "length"),
+        (lambda v, b: (v, b[:-1]), "length"),
+    ],
+    ids=[
+        "mono vocal",
+        "one-channel beat",
+        "three-channel beat",
+        "float64 vocal",
+        "float64 beat",
+        "shorter vocal",
+        "shorter beat",
+    ],
+)
+def test_the_engine_refuses_stems_off_the_stereo_float32_contract(setup, change, message):
+    vocal, beat, ctx = setup
+    with pytest.raises(ValueError, match=message):
+        Engine(*change(vocal, beat), ctx)
+
+
+def test_the_engine_takes_stereo_float32_stems_of_equal_length_however_short(setup):
+    vocal, beat, ctx = setup
+    assert Engine(vocal, beat, ctx).vocal is vocal
+    empty = np.zeros((0, 2), np.float32)
+    assert len(Engine(empty, empty, ctx).beat) == 0

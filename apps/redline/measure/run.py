@@ -23,12 +23,13 @@ from redline.core.audio import (
     hot_master,
     to_analysis,
 )
-from redline.core.dynamics import low_end_kurtosis, tail_decay, waveform_kurtosis
-from redline.core.loudness import integrated_lufs, measure_loudness
+from redline.core.dynamics import low_end_kurtosis, tail_decay
+from redline.core.loudness import measure_loudness
 from redline.core.pitch import estimate_key, measure_pitch, tempo_candidates
 from redline.core.spectrum import low_end, stereo_width, tonal_curve
 from redline.measure.compare import disagreement, row_verdicts
 from redline.measure.fingerprint import fingerprint, library_versions, module_sources
+from redline.measure.metrics import finite, vocal_metrics
 from redline.measure.report import write_report
 from redline.measure.separate import Separator, Stems, cache_key, separate
 
@@ -39,6 +40,7 @@ MEASURING_MODULES = (
     "core.spectrum",
     "core.pitch",
     "core.dynamics",
+    "measure.metrics",
     "measure.run",
 )
 MEASURING_LIBRARIES = ("numpy", "scipy", "librosa", "pyloudnorm", "soundfile", "soxr")
@@ -56,10 +58,6 @@ class FileResult:
     cpu_fallback: bool = False
     values: dict[str, float | None] = field(default_factory=dict)
     info: dict[str, Any] = field(default_factory=dict)
-
-
-def _finite(value: float | None) -> float | None:
-    return value if value is not None and math.isfinite(value) else None
 
 
 def reliable_tails(rate: float | None, count: int) -> float | None:
@@ -109,6 +107,7 @@ def _measure(decoded: Decoded, audio: Audio, stems: Stems, upper: float, side_up
     pitch = measure_pitch(stems.vocal, rate)
     tails_rate, tails = tail_decay(stems.vocal, rate)
     low = low_end(stems.beat, rate)
+    shared = vocal_metrics(stems.vocal, stems.beat, rate)
     lufs = mix["values"]["mix.lufs"]
     values = {**mix["values"], **vocal["values"], **beat["values"]}
     values.update(
@@ -117,14 +116,14 @@ def _measure(decoded: Decoded, audio: Audio, stems: Stems, upper: float, side_up
             "mix.hot_share": None if hot.lossy else hot.hot_share,
             "mix.duration_s": len(audio.samples) / rate,
             "mix.band_limit_hz": audio.band_limit_hz,
-            "vocal.short_term_spread_lu": vocal["info"]["vocal.short_term_spread_lu"],
-            "vocal.kurtosis": waveform_kurtosis(stems.vocal, rate),
+            "vocal.crest_db": shared["vocal.crest_db"],
+            "vocal.short_term_spread_lu": shared["vocal.short_term_spread_lu"],
+            "vocal.kurtosis": shared["vocal.kurtosis"],
             "vocal.share_within_10_cents": pitch.share_within_10_cents,
             "vocal.median_deviation_cents": pitch.median_deviation_cents,
             "vocal.stable_share": pitch.stable_share,
             "vocal.tail_decay_db_per_s": reliable_tails(tails_rate, tails),
-            "pair.vocal_minus_beat_lu": integrated_lufs(stems.vocal, rate)
-            - integrated_lufs(stems.beat, rate),
+            "pair.vocal_minus_beat_lu": shared["pair.vocal_minus_beat_lu"],
             "beat.low_share_db": low.share_db,
             "beat.low_crest_db": low.crest_db,
             "beat.low_kurtosis": low_end_kurtosis(stems.beat, rate),
@@ -145,8 +144,8 @@ def _measure(decoded: Decoded, audio: Audio, stems: Stems, upper: float, side_up
         "vocal.tail_decay_all_db_per_s": tails_rate,
     }
     return {
-        "values": {k: _finite(v) for k, v in values.items()},
-        "info": {k: _finite(v) if isinstance(v, float) else v for k, v in info.items()},
+        "values": {k: finite(v) for k, v in values.items()},
+        "info": {k: finite(v) if isinstance(v, float) else v for k, v in info.items()},
     }
 
 

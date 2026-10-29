@@ -119,7 +119,21 @@ class Engine:
             beat: The beat stem, whole.
             context: Rate, EQ target, tuning and loudness target of the track.
             cache_bytes: Most bytes of stage results to keep; 0 keeps only the last one.
+
+        Raises:
+            ValueError: A stem is not stereo float32 of shape (n, 2), or the two differ in
+                length.
         """
+        for name, stem in (("vocal", vocal), ("beat", beat)):
+            if stem.ndim != 2 or stem.shape[1] != 2 or stem.dtype != np.float32:
+                raise ValueError(
+                    f"the {name} stem must be stereo float32 of shape (n, 2), "
+                    f"not {stem.dtype} of shape {stem.shape}"
+                )
+        if len(vocal) != len(beat):
+            raise ValueError(
+                f"the vocal and the beat differ in length: {len(vocal)} and {len(beat)} samples"
+            )
         self.vocal = vocal
         self.beat = beat
         self.context = context

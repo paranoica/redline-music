@@ -6,7 +6,6 @@ and with a separator the medians are moved by what separation itself adds to the
 Closer to the references is all the numbers say; whether it sounds better is for the ear.
 """
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -14,21 +13,14 @@ from dataclasses import dataclass, replace
 import numpy as np
 import numpy.typing as npt
 
-from redline.core.dynamics import waveform_kurtosis
-from redline.core.loudness import gated_crest_db, integrated_lufs, short_term_spread
 from redline.engine.render import CACHE_BYTES, Engine, Rendered
 from redline.engine.settings import Settings
+from redline.measure.metrics import METRICS, finite, vocal_metrics
 from redline.measure.run import FileResult
 from redline.measure.separate import Separator
 
 Samples = npt.NDArray[np.floating]
 
-METRICS = (
-    "pair.vocal_minus_beat_lu",
-    "vocal.crest_db",
-    "vocal.short_term_spread_lu",
-    "vocal.kurtosis",
-)
 # the smallest spread a metric is scaled by; differences below it are measuring noise
 FLOOR = {
     "pair.vocal_minus_beat_lu": 1.0,
@@ -66,10 +58,6 @@ class AutoResult:
     bias: dict[str, float]
 
 
-def _finite(value: float | None) -> float | None:
-    return value if value is not None and math.isfinite(value) else None
-
-
 def reference_targets(refs: Sequence[FileResult]) -> dict[str, tuple[float, float]]:
     """Median and spread of every metric over the references that have it.
 
@@ -82,7 +70,7 @@ def reference_targets(refs: Sequence[FileResult]) -> dict[str, tuple[float, floa
     """
     targets = {}
     for metric in METRICS:
-        known = [v for r in refs if (v := _finite(r.values.get(metric))) is not None]
+        known = [v for r in refs if (v := finite(r.values.get(metric))) is not None]
         if not known:
             continue
         low, high = np.percentile(known, [25, 75])
@@ -101,13 +89,7 @@ def measure_processed(vocal: Samples, beat: Samples, rate: int) -> dict[str, flo
     Returns:
         Each metric, None where the signal gives nothing to measure.
     """
-    values = {
-        "pair.vocal_minus_beat_lu": integrated_lufs(vocal, rate) - integrated_lufs(beat, rate),
-        "vocal.crest_db": gated_crest_db(vocal, rate),
-        "vocal.short_term_spread_lu": short_term_spread(vocal, rate),
-        "vocal.kurtosis": waveform_kurtosis(vocal, rate),
-    }
-    return {key: _finite(value) for key, value in values.items()}
+    return vocal_metrics(vocal, beat, rate)
 
 
 def distance(

@@ -6,9 +6,8 @@ Stage 2's vocal rounds (dirt, balance) live here; the stage 3 rounds use the sam
 import json
 import logging
 import secrets
-import statistics
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -16,17 +15,17 @@ import numpy as np
 import numpy.typing as npt
 
 from redline.core.listen import write_listen_set
-from redline.core.loudness import integrated_lufs
-from redline.engine.render import Context, Engine, Rendered
+from redline.engine.render import Engine, Rendered
 from redline.engine.settings import Settings
-from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
+from redline.engine.track import track_engine
+from redline.measure.run import keep_out_of_git, measure_inputs, new_run_dir
 from redline.measure.separate import Separator
-from redline.vocal.chain import ALL_LEVELS, DIRT_LEVELS, EXTRA, DirtLevel, Target, check_vocal
+from redline.output import ORIGINAL, VocalRun, check_folders
+from redline.vocal.chain import ALL_LEVELS, DIRT_LEVELS, EXTRA, DirtLevel
 from redline.vocal.report import write_vocal_report
 
 Samples = npt.NDArray[np.floating]
 
-ORIGINAL = "original"
 AXES = ("dirt", "balance")
 BALANCE_DB = (0, 3, 6, 9)
 DEFAULT_LEVELS = tuple(level.name for level in DIRT_LEVELS)
@@ -35,65 +34,6 @@ PLAIN = replace(
     Settings(), octave_down_on=False, doubles_on=False, bass_drive_db=0.0, master_on=False
 )
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class VocalRun:
-    """Where a round put its files."""
-
-    run_dir: Path
-    listen_dir: Path
-
-
-def reference_target(refs: list[FileResult]) -> Target:
-    """Per-band median of the references' vocal tonal curves."""
-    for ref in refs:
-        vocal, mix = ref.values.get("vocal.lufs"), ref.values.get("mix.lufs")
-        if not ref.info["vocal.tonal_curve"]["db"] or vocal is None or mix is None:
-            raise ValueError(f"{ref.name}: no vocal in the reference: the vocal stem is silent")
-        try:
-            check_vocal(vocal, mix, "the reference")
-        except ValueError as error:
-            raise ValueError(f"{ref.name}: {error}") from error
-    curves = [r.info["vocal.tonal_curve"] for r in refs]
-    centers = tuple(curves[0]["centers_hz"])
-    if any(tuple(c["centers_hz"]) != centers for c in curves):
-        raise ValueError("the references' vocal curves use different bands")
-    median = np.median(np.array([c["db"] for c in curves], dtype=float), axis=0)
-    return Target(centers, tuple(float(v) for v in median))
-
-
-def reference_loudness(refs: list[FileResult]) -> list[float]:
-    """The references' integrated loudness; a reference without one is refused."""
-    levels = [r.values.get("mix.lufs") for r in refs]
-    if any(level is None for level in levels):
-        raise ValueError("a reference has no measured loudness")
-    return [float(level) for level in levels if level is not None]
-
-
-def track_engine(inputs: Inputs) -> Engine:
-    """The engine of a measured track: its stems, EQ target, tuning and loudness target."""
-    stems = inputs.track_stems
-    rate = stems.rate
-    original = stems.vocal + stems.beat
-    check_vocal(integrated_lufs(stems.vocal, rate), integrated_lufs(original, rate))
-    context = Context(
-        rate,
-        reference_target(inputs.refs),
-        inputs.upper,
-        float(inputs.track.info.get("vocal.tuning_cents") or 0.0),
-        round(statistics.median(reference_loudness(inputs.refs)), 1),
-    )
-    return Engine(stems.vocal, stems.beat, context)
-
-
-def check_folders(work_dir: Path, out_dir: Path) -> None:
-    """Refuse an output folder inside the work folder or the reverse: the key lives in work."""
-    work, out = work_dir.resolve(), out_dir.resolve()
-    if work.is_relative_to(out) or out.is_relative_to(work):
-        raise ValueError(
-            f"keep --out and --work separate: the key in {work_dir} would sit with the files"
-        )
 
 
 def _check_levels(levels: tuple[str, ...]) -> None:

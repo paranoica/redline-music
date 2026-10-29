@@ -162,11 +162,12 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
 def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
     from dataclasses import asdict
 
-    from redline.master.run import track_engine, write_result
+    from redline.engine.track import track_engine
+    from redline.master.run import write_result
     from redline.measure.run import measure_own
     from redline.measure.separate import RoformerSeparator
+    from redline.output import check_folders
     from redline.vocal.auto import auto_settings
-    from redline.vocal.rounds import check_folders
 
     refs = _references(args)
     if refs is None:
@@ -205,7 +206,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
 
     from redline.core.audio import decode
     from redline.engine import settings as chain_settings
-    from redline.master.run import track_engine
+    from redline.engine.track import track_engine
     from redline.measure.run import measure_inputs, measure_own
     from redline.measure.separate import RoformerSeparator
     from redline.studio import server as studio_server
