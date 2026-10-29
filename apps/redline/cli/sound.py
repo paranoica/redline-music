@@ -147,8 +147,8 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     url = f"http://127.0.0.1:{httpd.server_address[1]}/?t={token}"
-    print(f"studio: {url}")
-    print("Ctrl+C stops it")
+    print(f"studio: {url}", flush=True)
+    print("Ctrl+C stops it", flush=True)
     if not args.no_browser:
         webbrowser.open(studio_server.browser_file(url, args.work / "studio").as_uri())
     try:
