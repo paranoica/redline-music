@@ -234,3 +234,16 @@ def test_ordinary_places_are_held_to_what_the_recipe_asks():
     assert not [p for p in check_draft(two, asked)[0] if p.kind == "places"]
     one = two.replace("и в поликлинике мой сыр", "и на столе лежит мой сыр")
     assert not [p for p in check_draft(one, recipe(plan))[0] if p.kind == "places"]
+
+
+def test_places_are_whole_words_counted_by_line():
+    from redline.lyrics.write.form import places
+
+    idioms = (
+        "[Куплет]\nкачаю без остановки до утра\nна рынке крипты я опять в плюсе\n"
+        "под вахтанговским светом стою\n"
+    )
+    assert places(idioms) == 0
+    assert places("[Куплет]\nжду тебя на остановке ночью\n") == 1
+    assert places("[Куплет]\nиз подъезда сразу в электричку\n") == 1
+    assert places("[Куплет]\nиз подъезда в электричку\nпотом у ларька стою\n") == 2

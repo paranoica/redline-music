@@ -1,5 +1,6 @@
 """Checks of a draft against its recipe: lyrics only, sections, lines, syllables, rhymes."""
 
+import itertools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -92,40 +93,52 @@ def _longest_run(ends: list[str]) -> int:
     return longest
 
 
-# ordinary places set against the flex, by word stem: the scene uses the trick, but a text
-# that puts one in every line reads as a parody of it
-PLACE_STEMS = (
-    "маршрутк",
-    "остановк",
-    "подъезд",
-    "общаг",
-    "пвз",
-    "вокзал",
-    "ларек",
-    "ларьк",
-    "шиномонтаж",
-    "автомойк",
-    "поликлиник",
-    "больничк",
-    "больниц",
-    "военкомат",
-    "электричк",
-    "рынк",
-    "рынок",
-    "гараж",
-    "промзон",
-    "хрущевк",
-    "пятерочк",
-    "авито",
-    "заправк",
-    "вахт",
+# ordinary places set against the flex, as whole words with their endings: the scene uses
+# the trick, but a text that puts one in every line reads as a parody of it
+_CASE = "(а|е|и|у|ой|ою|ы|ам|ах|ами)?"
+_HARD = "(а|е|у|ом|ы|ов|ам|ах|ами)?"
+PLACES = re.compile(
+    "|".join(
+        [
+            f"маршрутк{_CASE}",
+            f"остановк{_CASE}",
+            f"подъезд{_HARD}",
+            f"общаг{_CASE}",
+            "пвз",
+            f"вокзал{_HARD}",
+            "ларек|ларьк(а|е|у|ом|и|ов|ам|ах)",
+            f"шиномонтаж{_HARD}",
+            f"автомойк{_CASE}",
+            f"поликлиник{_CASE}",
+            f"больничк{_CASE}",
+            f"больниц{_CASE}",
+            f"военкомат{_HARD}",
+            f"электричк{_CASE}",
+            f"гараж(и|ей|{_HARD[1:-2]})?",
+            f"промзон{_CASE}",
+            f"хрущевк{_CASE}",
+            f"пятерочк{_CASE}",
+            "авито",
+            f"заправк{_CASE}",
+            f"вахт{_CASE}",
+        ]
+    )
 )
+# "без остановки" is "non-stop", not a bus stop
+IDIOMS = (("без", "остановки"),)
 
 
 def places(text: str) -> int:
-    """Ordinary places named in the distinct lines of a text."""
+    """Distinct lines of a text that name an ordinary place."""
     seen = {line.plain for s in parse_text(text).sections for line in s.lines if line.plain}
-    return sum(1 for line in seen for w in words(line) if w.startswith(PLACE_STEMS))
+    count = 0
+    for line in seen:
+        said = words(line)
+        pairs = set(itertools.pairwise(said))
+        hits = [w for w in said if PLACES.fullmatch(w)]
+        if any(not any(pair[1] == w and pair in pairs for pair in IDIOMS) for w in hits):
+            count += 1
+    return count
 
 
 def _distinct(lines: list[Any]) -> list[Any]:

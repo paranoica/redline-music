@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import numpy as np
 
@@ -143,7 +143,8 @@ def _other_ask(
     started = state.get("bpm")
     if bpm is not None and (started is None or abs(bpm - started) > BPM_SLACK):
         return f"for a beat at {started:g} BPM" if started else "without a beat"
-    if delivery is not None and delivery != state.get("delivery"):
+    # seeds started before deliveries were kept have no say
+    if delivery is not None and "delivery" in state and delivery != state["delivery"]:
         return f"with a {state.get('delivery') or 'plain'} delivery"
     return None
 
@@ -227,7 +228,9 @@ class Session:
         ]
 
     def _copies(self, track: Track) -> list[Problem]:
-        matches = self.index.check(track, self.min_words)
+        # generated texts in the index include this seed's own; other seeds are read from
+        # their folders below, versions and all
+        matches = self.index.check(track, self.min_words, ignore=(MADE,))
         saved = self._saved_texts()
         if saved:
             matches += FingerprintIndex.build(saved, self.index.key).check(track, self.min_words)
@@ -368,6 +371,18 @@ def versions(folder: Path) -> dict[int, Path]:
     return dict(sorted(found.items()))
 
 
+def _sound(pending: Any, have: dict[int, Path]) -> TypeGuard[dict[str, Any]]:
+    return (
+        isinstance(pending, dict)
+        and isinstance(pending.get("round"), int)
+        and 1 <= pending["round"] <= ROUNDS
+        and pending.get("source") in have
+        and isinstance(pending.get("version"), int)
+        and isinstance(pending.get("change"), str)
+        and isinstance(pending.get("reasons"), list)
+    )
+
+
 class Editor:
     """Changes a saved text by an instruction: the writer rewrites, the checks stay the same."""
 
@@ -386,28 +401,10 @@ class Editor:
         state = self.session._state()
         if not have or not state or state.get("status") != "saved":
             raise LyricsError(f"seed {seed} has no saved text to edit")
+        if state.get("profile") != self.session.profile_name:
+            raise LyricsError(f"seed {seed} is written from profile {state.get('profile')!r}")
         edits = self._state()
-        pending = edits.get("pending")
-        change = (change or "").strip() or None
-        if pending and change and change != pending["change"] and not force:
-            raise LyricsError(
-                f"seed {seed} has an edit waiting: {pending['change']!r}; --force to replace it"
-            )
-        if pending is None or (force and change):
-            if not change:
-                raise LyricsError("say what to change, e.g. 'усиль хук'")
-            source = max(have)
-            pending = {
-                "version": source + 1,
-                "source": source,
-                "change": change,
-                "round": 1,
-                "reasons": [],
-            }
-            target = self.folder / f"edit-{pending['version']}"
-            if target.exists():
-                for old in target.glob("*"):
-                    old.unlink()
+        pending = self._pending(seed, edits.get("pending"), have, change, force)
         recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
         current = have[pending["source"]].read_text(encoding="utf-8")
         target = self.folder / f"edit-{pending['version']}"
@@ -421,6 +418,7 @@ class Editor:
             style_for(self.session.style, seed),
             current,
             pending["change"],
+            pending.get("draft", ""),
         )
         answer = HandoffWriter(target).ask(request)
         if isinstance(answer, Waiting):
@@ -432,6 +430,40 @@ class Editor:
             self._save(edits)
             return Failed("refused", (answer.reason,))
         return self._judge(seed, edits, pending, recipe, answer)
+
+    def _pending(
+        self,
+        seed: int,
+        pending: Any,
+        have: dict[int, Path],
+        change: str | None,
+        force: bool,
+    ) -> dict[str, Any]:
+        """The edit to work on: the waiting one, or a new one from the newest version."""
+        change = (change or "").strip() or None
+        sound = _sound(pending, have)
+        if pending is not None and not sound and not (force and change):
+            raise LyricsError(f"seed {seed}: its edits file is damaged; --force with a change")
+        if sound and change and change != pending["change"] and not force:
+            raise LyricsError(
+                f"seed {seed} has an edit waiting: {pending['change']!r}; --force to replace it"
+            )
+        if sound and not (force and change):
+            return pending
+        if not change:
+            raise LyricsError("say what to change, e.g. 'усиль хук'")
+        source = max(have)
+        target = self.folder / f"edit-{source + 1}"
+        if target.exists():
+            for old in target.glob("*"):
+                old.unlink()
+        return {
+            "version": source + 1,
+            "source": source,
+            "change": change,
+            "round": 1,
+            "reasons": [],
+        }
 
     def _judge(
         self, seed: int, edits: dict[str, Any], pending: dict[str, Any], recipe: Any, draft: Draft
@@ -453,7 +485,7 @@ class Editor:
             edits.pop("pending", None)
             self._save(edits)
             return Failed("failed", tuple(reasons))
-        pending.update(round=pending["round"] + 1, reasons=reasons)
+        pending.update(round=pending["round"] + 1, reasons=reasons, draft=draft.text)
         edits["pending"] = pending
         self._save(edits)
         return self.run(seed, None)

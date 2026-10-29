@@ -241,7 +241,7 @@ def _lyrics_suno(args: argparse.Namespace) -> int:
         have = versions(folder)
         if not have:
             raise LyricsError(f"seed {args.seed} has no saved text")
-        version = args.version or max(have)
+        version = max(have) if args.version is None else args.version
         if version not in have:
             raise LyricsError(f"seed {args.seed} has versions {', '.join(map(str, have))}")
         track = parse_text(have[version].read_text(encoding="utf-8"))

@@ -579,3 +579,53 @@ def test_another_delivery_for_a_started_seed_is_refused(base):
     assert run(base, 66, "--bpm", "140", "--delivery", "hard") == 2
     assert run(base, 66, "--bpm", "140", "--delivery", "calm") == 3
     assert run(base, 66) == 3
+
+
+def test_an_edit_is_not_a_copy_of_its_own_seed_after_the_index_is_rebuilt(base):
+    saved_seed(base, 67)
+    # words that do not collapse, so a kept line is a real eight-word run
+    text = (
+        "[Куплет]\nпервая строка где восемь разных слов стоят подряд тут\n"
+        "вторая строчка тоже держит восемь слов совсем других здесь\n"
+    )
+    (folder(base, 67) / "text.txt").write_text(text, encoding="utf-8")
+    root, build = base
+    assert main(["lyrics", "index", "--lyrics", str(root), "--build", str(build), "--force"]) == 0
+    edit(base, 67, "поменяй одну строку")
+    changed = text.replace(text.splitlines()[1], "новая первая строка совсем другая", 1)
+    (folder(base, 67) / "edit-2" / "draft-1.txt").write_text(changed, encoding="utf-8")
+    assert edit(base, 67) == 0
+
+
+def test_an_edit_refuses_another_profile_and_a_damaged_state(base):
+    saved_seed(base, 68)
+    assert edit(base, 68, "раз", "--profile", "working") in (2,)
+    edit(base, 68, "раз")
+    (folder(base, 68) / "edits.json").write_text(
+        '{"done": [], "pending": {"round": "x"}}', encoding="utf-8"
+    )
+    assert edit(base, 68) == 2
+
+
+def test_a_second_round_of_an_edit_shows_the_draft_sent_back(base):
+    text = saved_seed(base, 69)
+    edit(base, 69, "добавь строку")
+    copied = text.replace(text.splitlines()[1], f"{SENTINEL} 0", 1)
+    (folder(base, 69) / "edit-2" / "draft-1.txt").write_text(copied, encoding="utf-8")
+    assert edit(base, 69) == 3
+    request = (folder(base, 69) / "edit-2" / "request-2.md").read_text(encoding="utf-8")
+    assert "draft that was sent back" in request.lower()
+
+
+def test_suno_version_zero_is_refused(base):
+    saved_seed(base, 70)
+    assert main(["lyrics", "suno", "--seed", "70", "--lyrics", str(base[0]), "--version", "0"]) == 2
+
+
+def test_a_seed_from_before_deliveries_takes_one(base):
+    assert run(base, 71, "--bpm", "140") == 3
+    path = folder(base, 71) / "state.json"
+    state = json.loads(path.read_text(encoding="utf-8"))
+    del state["delivery"]
+    path.write_text(json.dumps(state), encoding="utf-8")
+    assert run(base, 71, "--bpm", "140", "--delivery", "hard") == 3

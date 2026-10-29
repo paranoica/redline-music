@@ -33,6 +33,7 @@ class WriterRequest:
     # set for an edit: the text to change and what to change in it
     current: str = ""
     change: str = ""
+    sent_back: str = ""
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,18 @@ def _change(request: WriterRequest) -> list[str]:
         "Change only what this asks. Keep every other line word for word and keep the "
         "sections, unless the change asks otherwise. Answer with the whole new text.",
         "",
+        *(
+            [
+                "## Your draft that was sent back (the reasons below point at its lines)",
+                "",
+                "```",
+                request.sent_back.rstrip(),
+                "```",
+                "",
+            ]
+            if request.sent_back
+            else []
+        ),
     ]
 
 
