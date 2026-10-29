@@ -3,7 +3,7 @@ name = "redline-dsp"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "The heavy inner loops of redline's master: oversampled clipping and BS.1770 loudness"
+description = "The heavy inner loops of redline's DSP: clipping, resampling, filters and BS.1770 loudness"
 publish = false
 
 [lib]

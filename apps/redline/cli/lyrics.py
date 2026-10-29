@@ -6,10 +6,7 @@ import math
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 
 def _lyrics_check(args: argparse.Namespace) -> int:

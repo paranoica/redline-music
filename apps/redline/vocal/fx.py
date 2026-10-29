@@ -67,11 +67,6 @@ def phrases(samples: Samples, rate: int) -> list[tuple[int, int]]:
     return exact
 
 
-def phrase_ends(samples: Samples, rate: int) -> list[int]:
-    """The sample where each phrase stops."""
-    return [end for _, end in phrases(samples, rate)]
-
-
 def _lowpass(x: Samples, rate: int, hz: float) -> Samples:
     if hz >= rate / 2 * 0.95:
         return x

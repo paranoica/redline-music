@@ -53,7 +53,6 @@ VOICE_EFFECTS = (
     "nightcore",
 )
 EFFECTS = TIMBRE_EFFECTS + VOICE_EFFECTS
-TIMBRES = TIMBRE_EFFECTS
 TIMBRE = "octave down + doubles"
 # each new voice on top of the timbre already picked, pushed far enough to be heard under
 # the drive and the beat. Voice changes go first: the doubles sit half in the side, which
@@ -204,7 +203,7 @@ def timbre_round(
     out_dir: Path,
     separator: Separator,
     seed: int | None = None,
-    timbres: tuple[str, ...] = TIMBRES,
+    timbres: tuple[str, ...] = TIMBRE_EFFECTS,
     axis: str = "timbre",
 ) -> VocalRun:
     """Blind round on the vocal's timbre: the original, the chosen sound, one file per effect.

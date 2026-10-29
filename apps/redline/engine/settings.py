@@ -7,7 +7,7 @@ the stage rounds chose.
 import json
 import math
 import re
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,7 @@ class Spec:
     unit: str = ""
     choices: tuple[float, ...] = ()
     basic: bool = False
+    stage: str = field(kw_only=True)
 
 
 GROUPS = {
@@ -103,8 +104,8 @@ class Settings:
         return tuple(getattr(self, f"eq_{hz}") for hz in EQ_BANDS_HZ)
 
 
-def _onoff(group: str, label: str, help: str) -> Spec:
-    return Spec(group, label, help, 0, 1, 1, "", (0, 1))
+def _onoff(group: str, label: str, help: str, stage: str) -> Spec:
+    return Spec(group, label, help, 0, 1, 1, "", (0, 1), stage=stage)
 
 
 SPECS: dict[str, Spec] = {
@@ -112,6 +113,7 @@ SPECS: dict[str, Spec] = {
         "chain",
         "Цепочка",
         "Сжатие, перегруз и клип голоса. Выключи, чтобы услышать голос до обработки",
+        stage="chain",
     ),
     "comp_threshold_db": Spec(
         "chain",
@@ -121,6 +123,7 @@ SPECS: dict[str, Spec] = {
         0,
         1,
         "дБ",
+        stage="chain",
     ),
     "comp_ratio": Spec(
         "chain",
@@ -130,6 +133,7 @@ SPECS: dict[str, Spec] = {
         40,
         0.5,
         ":1",
+        stage="chain",
     ),
     "comp_attack_ms": Spec(
         "chain",
@@ -139,6 +143,7 @@ SPECS: dict[str, Spec] = {
         50,
         0.1,
         "мс",
+        stage="chain",
     ),
     "comp_release_ms": Spec(
         "chain",
@@ -148,6 +153,7 @@ SPECS: dict[str, Spec] = {
         500,
         5,
         "мс",
+        stage="chain",
     ),
     "drive_db": Spec(
         "chain",
@@ -157,8 +163,9 @@ SPECS: dict[str, Spec] = {
         40,
         1,
         "дБ",
+        stage="chain",
     ),
-    "clip_on": _onoff("chain", "Клип", "Жёстко срезает пики после перегруза"),
+    "clip_on": _onoff("chain", "Клип", "Жёстко срезает пики после перегруза", stage="chain"),
     "clip_below_peak_db": Spec(
         "chain",
         "Глубина клипа",
@@ -167,6 +174,7 @@ SPECS: dict[str, Spec] = {
         24,
         0.5,
         "дБ",
+        stage="chain",
     ),
     "vocal_db": Spec(
         "chain",
@@ -176,11 +184,13 @@ SPECS: dict[str, Spec] = {
         6,
         0.5,
         "дБ",
+        stage="voice",
     ),
     "eq_fit": _onoff(
         "eq",
         "Подгонка под референсы",
         "Эквалайзер сам подгоняет окраску голоса под голос референсов",
+        stage="chain",
     ),
     **{
         f"eq_{hz}": Spec(
@@ -191,6 +201,7 @@ SPECS: dict[str, Spec] = {
             12,
             0.5,
             "дБ",
+            stage="chain",
         )
         for hz, help in zip(
             EQ_BANDS_HZ,
@@ -213,6 +224,7 @@ SPECS: dict[str, Spec] = {
         100,
         5,
         "%",
+        stage="voice",
     ),
     "formant": Spec(
         "voice",
@@ -222,6 +234,7 @@ SPECS: dict[str, Spec] = {
         1.8,
         0.01,
         "\u00d7",
+        stage="voice",
     ),
     "voice_octave": Spec(
         "voice",
@@ -232,15 +245,30 @@ SPECS: dict[str, Spec] = {
         1,
         "окт",
         (-1, 0, 1),
+        stage="voice",
     ),
     "nightcore": _onoff(
-        "voice", "Найткор", "Голос на октаву выше вместе с тембром, как ускоренная запись"
+        "voice",
+        "Найткор",
+        "Голос на октаву выше вместе с тембром, как ускоренная запись",
+        stage="voice",
     ),
-    "octave_down_on": _onoff("layers", "Октава вниз", "Слой голоса на октаву ниже под основным"),
+    "octave_down_on": _onoff(
+        "layers", "Октава вниз", "Слой голоса на октаву ниже под основным", stage="layers"
+    ),
     "octave_down_db": Spec(
-        "layers", "Громкость октавы вниз", "Насколько слой тише основного голоса", -30, 0, 0.5, "дБ"
+        "layers",
+        "Громкость октавы вниз",
+        "Насколько слой тише основного голоса",
+        -30,
+        0,
+        0.5,
+        "дБ",
+        stage="layers",
     ),
-    "octave_up_on": _onoff("layers", "Октава вверх", "Слой голоса на октаву выше под основным"),
+    "octave_up_on": _onoff(
+        "layers", "Октава вверх", "Слой голоса на октаву выше под основным", stage="layers"
+    ),
     "octave_up_db": Spec(
         "layers",
         "Громкость октавы вверх",
@@ -249,10 +277,20 @@ SPECS: dict[str, Spec] = {
         0,
         0.5,
         "дБ",
+        stage="layers",
     ),
-    "doubles_on": _onoff("layers", "Даблы", "Две копии голоса по сторонам, как второй дубль"),
+    "doubles_on": _onoff(
+        "layers", "Даблы", "Две копии голоса по сторонам, как второй дубль", stage="layers"
+    ),
     "doubles_db": Spec(
-        "layers", "Громкость даблов", "Насколько даблы тише основного голоса", -24, 0, 0.5, "дБ"
+        "layers",
+        "Громкость даблов",
+        "Насколько даблы тише основного голоса",
+        -24,
+        0,
+        0.5,
+        "дБ",
+        stage="layers",
     ),
     "doubles_left_ms": Spec(
         "layers",
@@ -262,9 +300,17 @@ SPECS: dict[str, Spec] = {
         60,
         1,
         "мс",
+        stage="layers",
     ),
     "doubles_right_ms": Spec(
-        "layers", "Задержка правого", "Насколько правый дабл отстаёт", 5, 60, 1, "мс"
+        "layers",
+        "Задержка правого",
+        "Насколько правый дабл отстаёт",
+        5,
+        60,
+        1,
+        "мс",
+        stage="layers",
     ),
     "doubles_wander_ms": Spec(
         "layers",
@@ -274,9 +320,14 @@ SPECS: dict[str, Spec] = {
         6,
         0.1,
         "мс",
+        stage="layers",
     ),
-    "bitcrush_on": _onoff("layers", "Биткраш", "Цифровая грязь: голос как из старой игры"),
-    "bitcrush_bits": Spec("layers", "Биты", "Меньше бит — грубее ступеньки", 3, 16, 1, "бит"),
+    "bitcrush_on": _onoff(
+        "layers", "Биткраш", "Цифровая грязь: голос как из старой игры", stage="layers"
+    ),
+    "bitcrush_bits": Spec(
+        "layers", "Биты", "Меньше бит — грубее ступеньки", 3, 16, 1, "бит", stage="layers"
+    ),
     "bitcrush_hold": Spec(
         "layers",
         "Удержание",
@@ -285,9 +336,13 @@ SPECS: dict[str, Spec] = {
         8,
         1,
         "\u00d7",
+        stage="layers",
     ),
     "stutter_on": _onoff(
-        "fx", "Статтер", "В паузе после фразы повторяет её последний кусочек, как заевшая пластинка"
+        "fx",
+        "Статтер",
+        "В паузе после фразы повторяет её последний кусочек, как заевшая пластинка",
+        stage="fx",
     ),
     "stutter_ms": Spec(
         "fx",
@@ -297,14 +352,27 @@ SPECS: dict[str, Spec] = {
         250,
         5,
         "мс",
+        stage="fx",
     ),
     "stutter_repeats": Spec(
-        "fx", "Повторы", "Сколько раз кусочек повторяется, если влезает в паузу", 1, 8, 1, "\u00d7"
+        "fx",
+        "Повторы",
+        "Сколько раз кусочек повторяется, если влезает в паузу",
+        1,
+        8,
+        1,
+        "\u00d7",
+        stage="fx",
     ),
     "throw_on": _onoff(
-        "fx", "Дилей на концах фраз", "Последние слова фразы улетают эхом то влево, то вправо"
+        "fx",
+        "Дилей на концах фраз",
+        "Последние слова фразы улетают эхом то влево, то вправо",
+        stage="fx",
     ),
-    "throw_db": Spec("fx", "Громкость эха", "Насколько первое эхо тише голоса", -24, 0, 0.5, "дБ"),
+    "throw_db": Spec(
+        "fx", "Громкость эха", "Насколько первое эхо тише голоса", -24, 0, 0.5, "дБ", stage="fx"
+    ),
     "throw_ms": Spec(
         "fx",
         "Шаг эха",
@@ -313,6 +381,7 @@ SPECS: dict[str, Spec] = {
         1000,
         5,
         "мс",
+        stage="fx",
     ),
     "throw_feedback": Spec(
         "fx",
@@ -322,11 +391,12 @@ SPECS: dict[str, Spec] = {
         0.85,
         0.05,
         "\u00d7",
+        stage="fx",
     ),
     "throw_tone_hz": Spec(
-        "fx", "Тембр эха", "Ниже — эхо темнее и уходит назад", 1000, 12000, 100, "Гц"
+        "fx", "Тембр эха", "Ниже — эхо темнее и уходит назад", 1000, 12000, 100, "Гц", stage="fx"
     ),
-    "reverb_on": _onoff("fx", "Ревер", "Голос в комнате или зале"),
+    "reverb_on": _onoff("fx", "Ревер", "Голос в комнате или зале", stage="fx"),
     "reverb_mix_db": Spec(
         "fx",
         "Громкость ревера",
@@ -335,6 +405,7 @@ SPECS: dict[str, Spec] = {
         0,
         0.5,
         "дБ",
+        stage="fx",
     ),
     "reverb_decay_s": Spec(
         "fx",
@@ -344,18 +415,47 @@ SPECS: dict[str, Spec] = {
         6,
         0.1,
         "с",
+        stage="fx",
     ),
     "reverb_predelay_ms": Spec(
-        "fx", "Предзадержка", "Пауза перед хвостом: голос остаётся чётким впереди", 0, 150, 1, "мс"
+        "fx",
+        "Предзадержка",
+        "Пауза перед хвостом: голос остаётся чётким впереди",
+        0,
+        150,
+        1,
+        "мс",
+        stage="fx",
     ),
     "reverb_tone_hz": Spec(
-        "fx", "Тембр ревера", "Ниже — хвост темнее и не мешает голосу", 1000, 12000, 100, "Гц"
+        "fx",
+        "Тембр ревера",
+        "Ниже — хвост темнее и не мешает голосу",
+        1000,
+        12000,
+        100,
+        "Гц",
+        stage="fx",
     ),
     "beat_db": Spec(
-        "beat", "Громкость бита", "Весь бит громче или тише, до мастера", -12, 6, 0.5, "дБ"
+        "beat",
+        "Громкость бита",
+        "Весь бит громче или тише, до мастера",
+        -12,
+        6,
+        0.5,
+        "дБ",
+        stage="beat",
     ),
     "bass_freq_hz": Spec(
-        "beat", "Граница 808", "Что считать 808: всё ниже этой частоты", 60, 250, 5, "Гц"
+        "beat",
+        "Граница 808",
+        "Что считать 808: всё ниже этой частоты",
+        60,
+        250,
+        5,
+        "Гц",
+        stage="beat",
     ),
     "bass_drive_db": Spec(
         "beat",
@@ -365,10 +465,11 @@ SPECS: dict[str, Spec] = {
         30,
         1,
         "дБ",
+        stage="beat",
     ),
-    "master_on": _onoff("master", "Мастер", "Поднимает громкость трека клиппингом"),
+    "master_on": _onoff("master", "Мастер", "Поднимает громкость трека клиппингом", stage="master"),
     "master_auto": _onoff(
-        "master", "Громкость как у референсов", "Цель громкости: медиана референсов"
+        "master", "Громкость как у референсов", "Цель громкости: медиана референсов", stage="master"
     ),
     "master_lufs": Spec(
         "master",
@@ -378,6 +479,7 @@ SPECS: dict[str, Spec] = {
         -5,
         0.1,
         "LUFS",
+        stage="master",
     ),
 }
 

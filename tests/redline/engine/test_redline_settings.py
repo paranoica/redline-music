@@ -86,3 +86,85 @@ def test_about_ten_main_settings_are_marked_basic():
     assert {"master_auto", "octave_down_on", "doubles_on"} <= set(basic)
     assert {"vocal_db", "drive_db", "formant", "bass_drive_db"} <= set(basic)
     assert all(row["basic"] is (row["key"] in basic) for row in schema()["settings"])
+
+
+# the engine's stages and their keys as render.py listed them by hand before they were derived
+ENGINE_STAGE_KEYS = {
+    "chain": (
+        "chain_on",
+        "comp_threshold_db",
+        "comp_ratio",
+        "comp_attack_ms",
+        "comp_release_ms",
+        "drive_db",
+        "clip_on",
+        "clip_below_peak_db",
+        "eq_fit",
+        "eq_200",
+        "eq_400",
+        "eq_1000",
+        "eq_2500",
+        "eq_5000",
+        "eq_8000",
+    ),
+    "voice": ("vocal_db", "hard_tune", "formant", "voice_octave", "nightcore"),
+    "layers": (
+        "octave_down_on",
+        "octave_down_db",
+        "octave_up_on",
+        "octave_up_db",
+        "doubles_on",
+        "doubles_db",
+        "doubles_left_ms",
+        "doubles_right_ms",
+        "doubles_wander_ms",
+        "bitcrush_on",
+        "bitcrush_bits",
+        "bitcrush_hold",
+    ),
+    "fx": (
+        "stutter_on",
+        "stutter_ms",
+        "stutter_repeats",
+        "throw_on",
+        "throw_db",
+        "throw_ms",
+        "throw_feedback",
+        "throw_tone_hz",
+        "reverb_on",
+        "reverb_mix_db",
+        "reverb_decay_s",
+        "reverb_predelay_ms",
+        "reverb_tone_hz",
+    ),
+    "beat": ("beat_db", "bass_freq_hz", "bass_drive_db"),
+    "master": ("master_on", "master_auto", "master_lufs"),
+}
+
+
+def _engine_keys():
+    from redline.engine import render
+
+    return {
+        "chain": render.CHAIN_KEYS,
+        "voice": render.VOICE_KEYS,
+        "layers": render.LAYER_KEYS,
+        "fx": render.FX_KEYS,
+        "beat": render.BEAT_KEYS,
+        "master": render.MASTER_KEYS,
+    }
+
+
+def test_every_setting_sits_in_exactly_one_engine_stage():
+    names = [f.name for f in fields(Settings)]
+    assert sorted(SPECS) == sorted(names)
+    assert all(SPECS[name].stage in ENGINE_STAGE_KEYS for name in names)
+    read = [key for keys in _engine_keys().values() for key in keys]
+    assert sorted(read) == sorted(names) and len(read) == len(set(read))
+    # the studio's group is not the stage: the EQ runs inside the chain, the level after it
+    assert SPECS["vocal_db"].group == "chain" and SPECS["vocal_db"].stage == "voice"
+    assert SPECS["eq_200"].group == "eq" and SPECS["eq_200"].stage == "chain"
+
+
+def test_the_engine_s_stage_keys_are_the_ones_it_listed_by_hand():
+    assert _engine_keys() == ENGINE_STAGE_KEYS

@@ -3,10 +3,6 @@
 import argparse
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".aif", ".aiff"}
 LYRICS = Path("private/lyrics")

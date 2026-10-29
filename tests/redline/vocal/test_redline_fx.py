@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from redline.vocal.fx import phrase_ends, reverb, stutter, throws
+from redline.vocal.fx import phrases, reverb, stutter, throws
 from redline_signals import tone
 
 RATE = 44100
@@ -18,24 +18,24 @@ def rms_db(x):
     return 10 * np.log10(np.mean(np.square(x, dtype=np.float64)) + 1e-20)
 
 
-def test_phrase_ends_sit_where_the_voice_stops():
+def test_phrases_end_where_the_voice_stops():
     x = bursts(1.0, 0.6, 3)
-    ends = phrase_ends(x, RATE)
+    ends = [end for _, end in phrases(x, RATE)]
     expected = [int(1.0 * RATE), int(2.6 * RATE), int(4.2 * RATE)]
     assert len(ends) == 3
     for got, want in zip(ends, expected, strict=True):
         assert abs(got - want) <= 0.03 * RATE
 
 
-def test_a_breath_is_not_a_phrase_end():
+def test_a_breath_does_not_end_a_phrase():
     x = bursts(1.0, 0.1, 3)
-    assert phrase_ends(x, RATE) == [
+    assert [end for _, end in phrases(x, RATE)] == [
         pytest.approx(int(3.3 * RATE) - int(0.1 * RATE), abs=0.03 * RATE)
     ]
 
 
-def test_silence_has_no_phrase_ends():
-    assert phrase_ends(np.zeros((RATE * 2, 2), dtype=np.float32), RATE) == []
+def test_silence_has_no_phrases():
+    assert phrases(np.zeros((RATE * 2, 2), dtype=np.float32), RATE) == []
 
 
 def test_a_throw_echoes_the_phrase_end_at_the_delay_time():
@@ -99,15 +99,11 @@ def test_a_stutter_never_spills_into_the_next_phrase():
 
 
 def test_a_pause_of_200_ms_splits_phrases_and_170_ms_does_not():
-    from redline.vocal.fx import phrases
-
     assert len(phrases(bursts(1.0, 0.2, 2)[: -int(0.2 * RATE)], RATE)) == 2
     assert len(phrases(bursts(1.0, 0.17, 2)[: -int(0.17 * RATE)], RATE)) == 1
 
 
 def test_stutter_and_throws_share_one_reading_of_the_phrases():
-    from redline.vocal.fx import phrases
-
     x = bursts(1.0, 0.4, 2)
     found = phrases(x, RATE)
     stuttered = stutter(x, RATE, slice_ms=90.0, repeats=3, found=found)

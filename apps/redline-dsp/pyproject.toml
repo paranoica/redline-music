@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "redline-dsp"
 version = "0.1.0"
-description = "The heavy inner loops of redline's master, in Rust"
+description = "The heavy inner loops of redline's DSP, in Rust"
 requires-python = ">=3.12"
 license = "MIT"
 

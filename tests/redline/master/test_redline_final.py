@@ -10,7 +10,7 @@ from redline.master.clip import CEILING_DB
 from redline.master.run import (
     BASS_DRIVES_DB,
     TIMBRE,
-    TIMBRES,
+    TIMBRE_EFFECTS,
     VOICES,
     bass_round,
     master_round,
@@ -394,8 +394,8 @@ def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_p
     )
     key = json.loads((result.run_dir / "key.json").read_text())
     assert key["axis"] == "timbre"
-    assert sorted(key["key"].values()) == sorted(["original", "base", *TIMBRES])
-    assert len(list(result.listen_dir.iterdir())) == 2 + len(TIMBRES)
+    assert sorted(key["key"].values()) == sorted(["original", "base", *TIMBRE_EFFECTS])
+    assert len(list(result.listen_dir.iterdir())) == 2 + len(TIMBRE_EFFECTS)
 
 
 def test_timbre_round_plays_the_chosen_timbre_as_the_final(inputs, tmp_path):

@@ -7,13 +7,13 @@ import math
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import astuple, dataclass
+from dataclasses import astuple, dataclass, fields
 
 import numpy as np
 import numpy.typing as npt
 
 from redline.core.loudness import integrated_lufs
-from redline.engine.settings import Settings
+from redline.engine.settings import SPECS, Settings
 from redline.master.clip import MasterResult, clip_at, master_clip, saturate_low
 from redline.vocal.chain import (
     ALL_LEVELS,
@@ -41,55 +41,18 @@ CACHE_BYTES = 1_500_000_000
 # envelopes have settled by the time the loop starts
 PREVIEW_PAD_S = 3.0
 MAX_PREVIEW_PAD_S = 10.0
-CHAIN_KEYS = (
-    "chain_on",
-    "comp_threshold_db",
-    "comp_ratio",
-    "comp_attack_ms",
-    "comp_release_ms",
-    "drive_db",
-    "clip_on",
-    "clip_below_peak_db",
-    "eq_fit",
-    "eq_200",
-    "eq_400",
-    "eq_1000",
-    "eq_2500",
-    "eq_5000",
-    "eq_8000",
-)
-VOICE_KEYS = ("vocal_db", "hard_tune", "formant", "voice_octave", "nightcore")
-LAYER_KEYS = (
-    "octave_down_on",
-    "octave_down_db",
-    "octave_up_on",
-    "octave_up_db",
-    "doubles_on",
-    "doubles_db",
-    "doubles_left_ms",
-    "doubles_right_ms",
-    "doubles_wander_ms",
-    "bitcrush_on",
-    "bitcrush_bits",
-    "bitcrush_hold",
-)
-FX_KEYS = (
-    "stutter_on",
-    "stutter_ms",
-    "stutter_repeats",
-    "throw_on",
-    "throw_db",
-    "throw_ms",
-    "throw_feedback",
-    "throw_tone_hz",
-    "reverb_on",
-    "reverb_mix_db",
-    "reverb_decay_s",
-    "reverb_predelay_ms",
-    "reverb_tone_hz",
-)
-BEAT_KEYS = ("beat_db", "bass_freq_hz", "bass_drive_db")
-MASTER_KEYS = ("master_on", "master_auto", "master_lufs")
+
+
+def _stage_keys(stage: str) -> tuple[str, ...]:
+    return tuple(f.name for f in fields(Settings) if SPECS[f.name].stage == stage)
+
+
+CHAIN_KEYS = _stage_keys("chain")
+VOICE_KEYS = _stage_keys("voice")
+LAYER_KEYS = _stage_keys("layers")
+FX_KEYS = _stage_keys("fx")
+BEAT_KEYS = _stage_keys("beat")
+MASTER_KEYS = _stage_keys("master")
 
 
 class Cancelled(Exception):
@@ -163,8 +126,8 @@ class Engine:
         self.cache_bytes = cache_bytes
         self._cache: OrderedDict[tuple, tuple] = OrderedDict()
         self._lock = threading.Lock()
-        # the master of the last whole render; a preview reuses its gain instead of searching
-        # the last whole render's master and mix, kept as one pair: a preview reads both
+        # the last whole render's master and mix, kept as one pair: a preview reuses the
+        # master's gain instead of searching, and reads the mix's loudness over its loop
         self.last: tuple[MasterResult | None, Samples] | None = None
         # set on a preview's piece: the whole render's master and how much louder the piece's
         # loop must read than the whole mix did there before the master's gain is reused
