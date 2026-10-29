@@ -1,95 +1,202 @@
-# bedrock
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="A waveform pushed against a red clip line" width="100%">
+</p>
 
-A working system for [Claude Code](https://code.claude.com), packaged as a plugin and a
-marketplace. It turns a coding session into a loop with guard rails: a plan before code, a test
-that fails before the fix, two kinds of review before a pull request, a knowledge base that
-stays in step with the code, agents that run under a budget, and hooks that refuse what should
-not happen without the owner's word.
+<h1 align="center">Redline</h1>
 
-It is built for one developer who works across several client projects, and it is opinionated
-about that: the owner decides, Claude does the work, and nothing leaves the machine unasked.
+<p align="center">
+  Takes a rap track made in Suno and moves its sound toward the SoundCloud tracks you pick as references.<br>
+  Writes new lyrics in the style of the scene, fitted to your beat.
+</p>
 
-## Install
+<p align="center">
+  <b>English</b> · <a href="README.ru.md">Русский</a>
+</p>
+
+---
+
+Suno gets the song right and the sound wrong: the vocal sits clean and polite, the 808 is
+soft, the master is quiet. The scene it imitates is loud, dirty, tuned hard and clipped. Redline
+measures that gap on your own references and closes it, while you listen. Numbers only say how
+close the track got to the references, and every change is compared at equal loudness. Whether
+it sounds better is for you to decide by ear.
+
+## What it does
+
+| | |
+|---|---|
+| **Measure** | Splits the track and each reference into vocal and beat, measures loudness, dynamics, spectral tilt, stereo width, the low end, vocal tuning and reverb tails, and writes a report on where the track stands against the references. |
+| **Process** | Runs the vocal through a chain built from those measurements: EQ toward the references, compression, saturation, hard tune, formant shift, octave layers, doubles. Then delay throws, reverb and stutter at phrase ends, drive on the 808, and a clip master to the references' loudness. |
+| **Studio** | A local page that plays the track and re-renders a loop as you move a setting. A/B against the original and a reference at equal loudness, undo, presets. |
+| **Batch** | Runs a saved studio preset over a whole folder of Suno takes in one command. |
+| **Lyrics** | Writes a new text from a style profile of the scene, measures your beat for tempo, bars and hardness so the lines fit it, checks every draft for copied lines, and prints a card ready to paste into Suno. You mark lines as cringe or good, and the next text takes those marks into account. |
+
+## How a track goes through
+
+```mermaid
+flowchart LR
+    T[Suno take] --> S[Separate<br>vocal / beat]
+    R[References] --> S
+    S --> M[Measure<br>vs references]
+    M --> V[Vocal chain<br>EQ · comp · drive<br>tune · formants · layers]
+    V --> F[Effects<br>throws · reverb · stutter]
+    S --> B[Beat<br>808 drive]
+    F --> X[Mix]
+    B --> X
+    X --> C[Clip master<br>to reference loudness]
+    C --> O[output/]
+```
+
+Separation uses a MelBand Roformer model through `audio-separator`; stems and measurements
+are cached by content, so the second run on the same files starts at once.
+
+## Quick start
+
+Linux, Python 3.12 and [uv](https://docs.astral.sh/uv/). A CUDA GPU speeds up separation; on
+a CPU it is slower but works.
+
+```sh
+git clone https://github.com/paranoica/redline-music.git
+cd redline-music
+uv sync --extra separation        # add --extra stress for stress-aware rhymes
+```
+
+Put your files in place. These folders are ignored by git:
 
 ```
-/plugin marketplace add paranoica/bedrock
-/plugin install bedrock@bedrock
+input/track.wav        the take from Suno
+input/refs/*.mp3       3-10 reference tracks of the sound you want
 ```
 
-or, from a local checkout, `claude --plugin-dir ./plugins/bedrock`. Then run `bedrock doctor`
-(the plugin puts `bedrock` on the PATH of the session) to see what the machine has and lacks.
+Then:
 
-Requirements: Claude Code, git, Python 3.12+. Optional: uv (`uvx`), Node 20+, gitleaks, age,
-libnotify, folio, faster-whisper. `bedrock doctor` says what each one is for.
+```sh
+uv run redline measure --track input/track.wav --ref input/refs   # where the track stands
+uv run redline studio  --track input/track.wav --ref input/refs   # tune it live
+uv run redline run     --track input/track.wav --ref input/refs   # render with the picks
+```
 
-## What is in it
+`run` writes `output/<time>-<take>/` with `final.wav`, the stems, an `original.wav` brought to
+the same loudness, a `compare/` pair at equal loudness and a `report.md`.
 
-| Part | Where | What it does |
-|---|---|---|
-| Skills | `plugins/bedrock/skills/` | the working loop (`day`), root-cause debugging (`debug`), the review gate (`review`, `code-review`), the knowledge base (`kb`, `handoff`, `ask`), people and texts (`call`, `doc`, `humanize`), the week (`retro`, `arch`, `triage`), autonomy (`night`), project start (`start`), testing (`hunt`, `e2e`), design (`design-creator`), the navigator (`next`), grants (`allow`, `unleash`, `revoke`), writing skills (`writing`) |
-| Agents | `plugins/bedrock/agents/` | twelve roles with a model, an effort and a turn cap: inventory, researcher, analyst, critic, verifier, reviewer, security reviewer, implementer, implementer without tests (prose and config), architect, escalation, bug hunter |
-| Hooks | `plugins/bedrock/hooks/` | guards that refuse (git, outward actions, secrets, installs, heavy runs, agents writing outside their files, the bench answer key) and helpers that inform (grants, drift, auto-continue, notifications) |
-| CLI | `plugins/bedrock/bin/bedrock` | day log and minutes, backlog, test and command wrappers with a machine lock, leak and code checks, knowledge base, call archive, retro numbers, night watchdog, doctor |
-| Packs | `plugins/bedrock/packs/` | domain rule sets switched on per project: python, typescript, db, api-security, frontend, jobs, medical |
-| Bench | `bench/` | a small app with seeded defects that measures the system; its answer key lives outside the repository |
+## The studio
 
-## How a task goes
+```sh
+uv run redline studio --track input/track.wav --ref input/refs
+```
 
-1. **Intake.** The request gets a risk level (R1 no logic, R2 ordinary code, R3 risky or new)
-   and a priority (P0 to P3). P0 goes to an urgent path.
-2. **Plan.** R2 and R3 get a plan with a checkable done-when, assumptions, files, named tests and
-   tasks. A critic agent that did not see it being written reviews it.
-3. **The owner's go.** One «го» covers the whole plan.
-4. **Tasks.** One task is one commit with its own test, red before the change.
-5. **Review.** Deterministic checks first, then a code review and a plan-compliance review;
-   every real finding is fixed, imaginary ones are rejected with evidence; rounds until clean.
-6. **Deliver.** Branch, PR, merge and deploy each need the owner's grant. A user-visible change
-   is checked live before it is called done.
-7. **Close.** Minutes from the day log, the knowledge base updated, a plain report.
+It opens a page on `127.0.0.1`. The loudest stretch of the track is looped; drag the red
+brackets to move the loop. A change re-renders only the loop, in about two seconds; the
+whole track renders on a button, in about a minute for a three-minute song.
 
-## Guards and grants
+| Key | |
+|---|---|
+| `Space` | play / pause |
+| `L` | loop on / off |
+| `B` | original / result |
+| `R` | reference |
+| `Ctrl+Z`, `Ctrl+Shift+Z` | undo, redo |
 
-The hooks refuse, they do not ask: push, merge, deploy, sending messages, installing packages,
-reading `.env` values, writing into `~/.claude`, and a long list of destructive git forms. A
-grant comes only from the owner's own typed words in the session (quoted or pasted text never
-counts, nor does a negation or a question), from `/bedrock:allow`, or from the all-out mode
-`/bedrock:unleash`. Every grant is checked against the session transcript, so the model cannot
-grant itself anything. `BEDROCK_HOOKS=off` turns the hooks off.
+Save a preset in the studio, then process every take of a song with it:
 
-Static inspection of shell commands cannot see what an interpreter runs (`python -c`, a script):
-for that, enable Claude Code's own Bash sandbox in your settings.
+```sh
+uv run redline run --preset "my preset" --track input/takes/ --ref input/refs
+```
 
-## Folders
+A take that fails is reported and the rest still run.
+
+## Lyrics
+
+The lyrics module works from a private base of texts you collect yourself. It is never part
+of this repository, and the writer never sees another artist's lines, only numbers and single
+words drawn from them.
+
+```sh
+uv run redline lyrics index                                      # profiles + copy-check digests
+uv run redline lyrics write --seed 53 --beat input/beats/beat.mp3   # a new text for this beat
+uv run redline lyrics edit  --seed 53 "make the hook harder"     # the next version
+uv run redline lyrics suno  --seed 53                            # the card to paste into Suno
+uv run redline lyrics marks                                      # mark lines cringe or good
+```
+
+`write` and `edit` hand a request file to a writer agent and exit with code 3 until the draft
+is back; run the same command again to check it. A draft goes back with reasons when it
+copies eight or more words in a row from any text in the base or breaks the line form. Your
+newest marks go into every request: the cringe lines as what to stay away from, the good ones
+as the level to hold.
+
+In Suno, upload the beat, choose **Edit vocals**, and paste the card's style, exclusions and
+lyrics.
+
+## Privacy
+
+The repository is public. Audio, texts, references, measurements and results live only in
+ignored folders:
 
 | Folder | What lives there |
 |---|---|
-| `~/projects-memory-bank/<project>/` | the knowledge base: decisions, architecture, failures, runbooks, handoffs, FAQ; a local git repository |
-| `~/projects-days/<project>/` | day logs, block folders with plans and agent reports, the question log, the call archive |
-| `~/.local/state/bedrock/` | session state, grants, review records, code maps, the agent ledger |
-| `~/.config/bedrock/` | the owner's settings (`config.json`), the private leak-term list, the voice profile |
+| `input/` | your takes, beats and references |
+| `private/` | the lyrics base, generated texts, the spec |
+| `work/` | caches, studio settings and presets |
+| `output/` | results |
 
-A project's own settings live in `<workspace>/.claude/bedrock.json` (commands, critical zones,
-packs); `bedrock project check` validates them.
+Every folder the tool writes into also ignores itself. Tests use only audio generated by code.
 
-## Documentation
+## Commands
 
-- `plugins/bedrock/docs/ru-guide.md`: the owner's guide, in Russian: what to say, grants, the
-  night mode, folders, what to do when something is off.
-- `plugins/bedrock/docs/cheatsheet.md`: one page; `folio cheatsheet.md` renders it as a PDF.
+| Command | What it does |
+|---|---|
+| `redline measure` | measure a track against references, write a report |
+| `redline vocal` | blind listening round on the vocal chain |
+| `redline master` | blind round on the master, timbre, voice or 808 |
+| `redline studio` | the live page |
+| `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
+| `redline lyrics index` | build style profiles and copy-check digests from the base |
+| `redline lyrics write` | write a new text by seed, optionally for a beat |
+| `redline lyrics edit` | change a saved text by an instruction |
+| `redline lyrics suno` | print the Suno card of a saved text |
+| `redline lyrics marks` | the page to mark lines cringe or good |
+| `redline lyrics check` | exit 1 if a text copies the base |
+| `redline lyrics stats` | syllables and rhyme letters per line |
+
+`redline <command> --help` lists every option.
+
+## Layout
+
+```
+apps/
+  redline/          the Python package
+    core/           audio I/O, DSP, loudness, spectrum, pitch
+    measure/        separation, measurements, comparison, report
+    vocal/          the vocal chain, timbre, effects, blind rounds
+    master/         clip master, the final run
+    engine/         settings and the staged render with its cache
+    studio/         the studio's server
+    lyrics/         text parsing, style profiles, the writer, Suno cards, marks
+    web/            what the local pages share: token, host check, headers
+    cli/            the command line
+  studio-web/       the studio page
+  lyrics-web/       the marks page
+tests/redline/      tests, on synthetic audio and invented texts
+docs/               the sound and lyrics guides
+```
+
+More detail: [docs/sound.md](docs/sound.md), [docs/lyrics.md](docs/lyrics.md),
+[docs/lyrics-profile.md](docs/lyrics-profile.md).
 
 ## Development
 
-```
-uvx pytest -p no:cacheprovider -q           # the suite
-uvx ruff check . && uvx black --check .     # lint and format
-python3 plugins/bedrock/scripts/skillcheck.py --root plugins/bedrock --strict
+```sh
+uv run pytest tests/redline -q        # tests
+uvx ruff check . && uvx black --check .
+uv run pyright apps/redline
 ```
 
-Python is standard library only. Every hook and script has tests for both what it refuses and
-what it lets through. Skill texts follow the rules in the `writing` skill and are checked by
-`skillcheck.py`.
+`plugins/` and `bench/` hold [bedrock](https://github.com/paranoica/bedrock), the development
+workflow this project is built with. They are not part of the program.
 
 ## Licence
 
-MIT, see `LICENSE`. Parts adapted from other MIT projects are listed in
-`plugins/bedrock/NOTICE`.
+MIT, see [LICENSE](LICENSE). Voice effects use [Praat](https://www.fon.hum.uva.nl/praat/)
+through `praat-parselmouth` (GPL-3.0), and separation uses `audio-separator` (MIT) with
+models under their own licences.

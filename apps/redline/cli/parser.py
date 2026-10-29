@@ -12,7 +12,11 @@ from redline.cli.common import LYRICS, LYRICS_BUILD, _inputs
 
 def build_parser() -> argparse.ArgumentParser:
     """Return the top-level parser with its subcommands."""
-    parser = argparse.ArgumentParser(prog="redline", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="redline",
+        description="Move a Suno rap track toward the sound of reference tracks, and write "
+        "lyrics in the scene's style.",
+    )
     parser.add_argument("--version", action="version", version=f"redline {__version__}")
     commands = parser.add_subparsers(dest="command", metavar="command")
     measure = commands.add_parser(
@@ -63,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-browser", action="store_true", help="print the address, do not open it"
     )
     run = commands.add_parser(
-        "run", help="process a track with the chosen settings and write the result folder"
+        "run", help="process takes with the chosen settings and write a result folder for each"
     )
     _inputs(run, "result folder", many=True)
     chosen = run.add_mutually_exclusive_group()
@@ -71,7 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--settings", type=Path, help="settings saved from the studio (default: the picks)"
     )
     chosen.add_argument("--preset", help="a preset saved in the studio, by its name")
-    lyrics = commands.add_parser("lyrics", help="lyrics: copy check and line form")
+    lyrics = commands.add_parser(
+        "lyrics", help="lyrics: write, edit, Suno cards, marks, copy check"
+    )
     lyrics_commands = lyrics.add_subparsers(dest="lyrics_command", metavar="command")
     check = lyrics_commands.add_parser(
         "check", help="exit 1 if the text copies 8 or more words in a row from the base"

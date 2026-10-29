@@ -1,7 +1,7 @@
 [project]
 name = "redline"
 version = "0.1.0"
-description = "Measure and process the sound of a track against reference tracks"
+description = "Move a Suno rap track toward the sound of reference tracks, and write lyrics in the scene's style"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy>=2.0",
