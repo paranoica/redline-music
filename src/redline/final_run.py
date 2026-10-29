@@ -20,7 +20,7 @@ from redline.master import master_clip, saturate_low
 from redline.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
 from redline.spectrum import low_end
-from redline.timbre import bitcrush, double, octave_layer
+from redline.timbre import bitcrush, double, formant_shift, hard_tune, octave_layer
 from redline.vocal_run import ORIGINAL, VocalRun, check_folders, reference_target
 
 Samples = npt.NDArray[np.floating]
@@ -30,9 +30,15 @@ VOCAL_DB = -6.0
 QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
 BASE = "base"
-EFFECTS = ("doubles", "octave down", "bitcrush")
-TIMBRES = EFFECTS
+TIMBRE_EFFECTS = ("doubles", "octave down", "bitcrush")
+VOICE_EFFECTS = ("formant up", "formant down", "hard tune", "octave up")
+EFFECTS = TIMBRE_EFFECTS + VOICE_EFFECTS
+TIMBRES = TIMBRE_EFFECTS
 TIMBRE = "octave down + doubles"
+# each new voice on top of the timbre already picked; formant down only when asked for
+VOICES = (f"{TIMBRE} + formant up", f"hard tune + {TIMBRE}", f"{TIMBRE} + octave up")
+FORMANT_UP = 1.2
+FORMANT_DOWN = 0.85
 BASS_FREQ_HZ = 120.0
 BASS_DRIVES_DB = (0.0, 6.0, 12.0, 18.0, 24.0)
 BASS_DRIVE_DB = 12.0
@@ -116,14 +122,25 @@ def _effects(name: str) -> list[str]:
     return [part.strip() for part in name.split("+")]
 
 
-def _with_timbre(name: str, vocal: Samples, rate: int) -> Samples:
-    """Apply one effect, or several joined by " + ", in order."""
+def _with_timbre(name: str, vocal: Samples, rate: int, tuning_cents: float = 0.0) -> Samples:
+    """Apply one effect, or several joined by " + ", in order.
+
+    Args:
+        name: The effects, joined by " + ".
+        vocal: The processed vocal.
+        rate: Its sample rate.
+        tuning_cents: The track's own tuning against A440, the grid hard tune snaps to.
+    """
     out = vocal
     for effect in _effects(name):
         if effect == "doubles":
             out = double(out, rate)
-        elif effect == "octave down":
-            out = octave_layer(out, rate, -1, OCTAVE_LEVEL_DB)
+        elif effect in ("octave down", "octave up"):
+            out = octave_layer(out, rate, -1 if effect == "octave down" else 1, OCTAVE_LEVEL_DB)
+        elif effect in ("formant up", "formant down"):
+            out = formant_shift(out, rate, FORMANT_UP if effect == "formant up" else FORMANT_DOWN)
+        elif effect == "hard tune":
+            out = hard_tune(out, rate, tuning_cents)
         elif effect == "bitcrush":
             # the crush works on the vocal's own scale, not on its level under the beat
             peak = float(np.abs(out).max())
@@ -141,8 +158,13 @@ def timbre_round(
     separator: Separator,
     seed: int | None = None,
     timbres: tuple[str, ...] = TIMBRES,
+    axis: str = "timbre",
 ) -> VocalRun:
-    """Blind round on the vocal's timbre: the original, the chosen sound, one file per effect."""
+    """Blind round on the vocal's timbre: the original, the chosen sound, one file per effect.
+
+    On the voice axis the base carries the chosen timbre, as the final does, and each variant
+    names the chosen timbre with one new effect.
+    """
     unknown = [e for name in timbres for e in _effects(name) if e not in EFFECTS]
     if unknown:
         raise ValueError(
@@ -153,11 +175,15 @@ def timbre_round(
     rate = inputs.track_stems.rate
     beat = saturate_low(inputs.track_stems.beat, rate, BASS_FREQ_HZ, BASS_DRIVE_DB)
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
-    variants = {ORIGINAL: original, BASE: master_clip(vocal + beat, rate, target)[0]}
+    tuning = float(inputs.track.values.get("vocal.tuning_cents") or 0.0)
+    base = _with_timbre(TIMBRE, vocal, rate) if axis == "voice" else vocal
+    variants = {ORIGINAL: original, BASE: master_clip(base + beat, rate, target)[0]}
     for name in timbres:
-        log.info("timbre: %s", name)
-        variants[name] = master_clip(_with_timbre(name, vocal, rate) + beat, rate, target)[0]
-    return _write_round(work_dir, out_dir, "timbre", variants, rate, seed, {"timbres": timbres})
+        log.info("%s: %s", axis, name)
+        sound = _with_timbre(name, vocal, rate, tuning)
+        variants[name] = master_clip(sound + beat, rate, target)[0]
+    record = {"timbres": timbres, "tuning_cents": tuning}
+    return _write_round(work_dir, out_dir, axis, variants, rate, seed, record)
 
 
 def _write_round(

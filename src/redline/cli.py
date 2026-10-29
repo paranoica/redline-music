@@ -65,9 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     master.add_argument("--seed", type=int, help="seed of the letter shuffle")
     master.add_argument(
         "--axis",
-        choices=("master", "timbre", "808"),
+        choices=("master", "timbre", "voice", "808"),
         default="master",
-        help="what the variants change: the master's loudness, the vocal's timbre, the 808",
+        help="what the variants change: the master's loudness, the vocal's timbre, the voice "
+        "itself (formants, hard tune, octave up), the 808",
     )
     master.add_argument(
         "--timbres",
@@ -195,13 +196,13 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
 
 
 def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
-    from redline.final_run import bass_round, master_round, timbre_round
+    from redline.final_run import VOICES, bass_round, master_round, timbre_round
     from redline.separate import RoformerSeparator, SeparationError
 
     chosen = None
     if args.timbres is not None:
-        if args.axis != "timbre":
-            print("redline: --timbres works only with --axis timbre", file=sys.stderr)
+        if args.axis not in ("timbre", "voice"):
+            print("redline: --timbres works only with --axis timbre or voice", file=sys.stderr)
             return 2
         chosen = tuple(t.strip() for t in args.timbres.split(",") if t.strip())
         if not chosen:
@@ -220,7 +221,9 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
             separator or RoformerSeparator(),
             args.seed,
         )
-        if chosen:
+        if args.axis == "voice":
+            result = timbre_round(*common, chosen or VOICES, "voice")
+        elif chosen:
             result = timbre_round(*common, chosen)
         elif args.axis == "timbre":
             result = timbre_round(*common)

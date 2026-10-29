@@ -1,8 +1,10 @@
-"""Vocal timbre effects: doubles, octave layers, bitcrush."""
+"""Vocal timbre effects: doubles, octave layers, bitcrush, formant shift, hard tune."""
 
 import librosa
 import numpy as np
 import numpy.typing as npt
+import parselmouth
+from parselmouth.praat import call
 
 Samples = npt.NDArray[np.floating]
 
@@ -10,6 +12,9 @@ DOUBLE_DELAY_MS = (18.0, 27.0)
 DOUBLE_DEPTH_MS = 2.0
 DOUBLE_LFO_HZ = (0.31, 0.43)
 DOUBLE_LEVEL_DB = -4.0
+PITCH_FLOOR_HZ = 75.0
+PITCH_CEILING_HZ = 600.0
+PITCH_STEP_S = 0.01
 
 
 def bitcrush(samples: Samples, rate: int, bits: int, hold: int) -> Samples:
@@ -62,3 +67,43 @@ def double(samples: Samples, rate: int) -> Samples:
     left = _modulated_delay(mono, rate, DOUBLE_DELAY_MS[0], DOUBLE_LFO_HZ[0])
     right = _modulated_delay(mono, rate, DOUBLE_DELAY_MS[1], DOUBLE_LFO_HZ[1])
     return (samples + level * np.column_stack([left, right])).astype(np.float32)
+
+
+def _on_mid(samples: Samples, rate: int, change) -> Samples:
+    # the side holds the stem's width and room; only the voice in the middle is changed
+    mid = samples.mean(axis=1).astype(np.float64)
+    side = (samples[:, 0] - samples[:, 1]) / 2
+    if not mid.any():
+        return samples.copy()
+    sound = change(parselmouth.Sound(mid, sampling_frequency=rate))
+    out = np.zeros(len(mid))
+    values = sound.values[0][: len(mid)]
+    out[: len(values)] = values
+    return np.column_stack([out + side, out - side]).astype(np.float32)
+
+
+def formant_shift(samples: Samples, rate: int, ratio: float) -> Samples:
+    """Move the voice's formants by ratio and keep its notes: above 1 younger, below 1 bigger."""
+    return _on_mid(
+        samples,
+        rate,
+        lambda sound: call(
+            sound, "Change gender", PITCH_FLOOR_HZ, PITCH_CEILING_HZ, ratio, 0.0, 1.0, 1.0
+        ),
+    )
+
+
+def hard_tune(samples: Samples, rate: int, tuning_cents: float) -> Samples:
+    """Snap every pitch point to the nearest semitone of the voice's own tuning, no glide."""
+    reference = 440.0 * 2 ** (tuning_cents / 1200)
+
+    def change(sound: parselmouth.Sound) -> parselmouth.Sound:
+        manipulation = call(
+            sound, "To Manipulation", PITCH_STEP_S, PITCH_FLOOR_HZ, PITCH_CEILING_HZ
+        )
+        tier = call(manipulation, "Extract pitch tier")
+        call(tier, "Formula", f"{reference} * 2 ^ (round(12 * log2(self / {reference})) / 12)")
+        call([tier, manipulation], "Replace pitch tier")
+        return call(manipulation, "Get resynthesis (overlap-add)")
+
+    return _on_mid(samples, rate, change)

@@ -11,6 +11,7 @@ from redline.cli import main
 from redline.final_run import (
     BASS_DRIVES_DB,
     TIMBRES,
+    VOICES,
     bass_round,
     master_round,
     master_targets,
@@ -421,7 +422,9 @@ def test_timbre_round_takes_chosen_combinations(inputs, tmp_path):
     assert sorted(key["key"].values()) == sorted(["original", "base", *chosen])
 
 
-@pytest.mark.parametrize("timbre", ["nightcore", "octave up", "pitched up", "doubles + octave up"])
+@pytest.mark.parametrize(
+    "timbre", ["nightcore", "octave sideways", "pitched up", "doubles + octave sideways"]
+)
 def test_an_unknown_timbre_is_refused(inputs, tmp_path, timbre):
     track, refs = inputs
     with pytest.raises(ValueError, match="unknown timbre"):
@@ -452,3 +455,43 @@ def test_bass_round_holds_the_loudness_and_steps_the_808_drive(inputs, tmp_path)
     assert max(finals) - min(finals) <= 0.5
     for name in names:
         assert "low_crest_db" in masters[name]
+
+
+def keys_of(result):
+    return json.loads((result.run_dir / "key.json").read_text())
+
+
+def test_cli_voice_round_writes_the_chosen_timbre_with_each_new_voice(inputs, tmp_path):
+    track, refs = inputs
+    args = ["master", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    args += ["--out", str(tmp_path / "o"), "--seed", "4", "--axis", "voice"]
+    assert main(args, separator=HalfSeparator()) == 0
+    run_dir = next((tmp_path / "w" / "runs").iterdir())
+    key = json.loads((run_dir / "key.json").read_text())
+    assert key["axis"] == "voice"
+    assert sorted(key["key"].values()) == sorted(["original", "base", *VOICES])
+    assert len(VOICES) == 3
+    assert all("octave down + doubles" in v for v in VOICES)
+
+
+def test_cli_voice_round_takes_named_voices_and_refuses_unknown_ones(inputs, tmp_path):
+    track, refs = inputs
+    args = ["master", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    args += ["--axis", "voice", "--timbres"]
+    out = ["--out", str(tmp_path / "o")]
+    assert main([*args, "doubles + formant down", *out], separator=HalfSeparator()) == 0
+    run_dir = next((tmp_path / "w" / "runs").iterdir())
+    assert json.loads((run_dir / "key.json").read_text())["axis"] == "voice"
+    bad = ["--out", str(tmp_path / "o2")]
+    assert main([*args, "formant sideways", *bad], separator=HalfSeparator()) == 2
+    assert not (tmp_path / "o2").exists()
+
+
+def test_hard_tune_in_a_round_snaps_to_the_tracks_own_tuning(monkeypatch):
+    from redline import final_run
+
+    seen = []
+    monkeypatch.setattr(final_run, "hard_tune", lambda x, rate, cents: seen.append(cents) or x)
+    vocal = np.zeros((100, 2), dtype=np.float32)
+    final_run._with_timbre("hard tune", vocal, 44100, tuning_cents=-17.0)
+    assert seen == [-17.0]
