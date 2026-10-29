@@ -89,14 +89,19 @@ measured as a take would be. Only the references go through the separator. The v
 be dry, recorded over the beat and exported from the same session, or the two will not line
 up.
 
-Unless `--settings`, `--preset` or `--no-auto` is given, the settings are searched for. The
-loudest 30 seconds are rendered while the vocal level, the compressor threshold and the drive
-step through a grid, one at a time, twice over. Each render's vocal is measured for its level
-against the beat, crest, short-term spread and kurtosis, and the distance to the references is
-the sum of squared differences from their medians, each in units of the references' spread on
-it. The lowest distance wins. That is closest to the references by measurement; whether it
-sounds better is yours to judge. The chosen values and the distance before and after are
-printed and kept under `auto` in `chain.json`.
+Unless `--settings`, `--preset` or `--no-auto` is given, the settings are searched for. Up to
+four 8-second windows, spread evenly from the first to the last second the vocal is within
+30 dB of its loudest, are rendered while the vocal level, the compressor threshold and the
+drive step through a grid, one at a time, twice over. The references were separated from
+mastered songs, so each window goes through the master and the master's change of every
+sample is put onto the vocal and the beat before they are measured, pooled over the windows,
+for the vocal's level against the beat, crest, short-term spread and kurtosis. The distance to
+the references is the sum of squared differences from their medians, each in units of the
+references' spread on it; a metric the render lost costs more than any realistic distance. The
+lowest distance wins. That is closest to the references by measurement; whether it sounds
+better is yours to judge. The chosen values, the distance before and after and the values that
+ended at the first or last step of their grid are printed and kept under `auto` in
+`chain.json`.
 
 `redline studio --vocal ... --beat ...` opens on the same pair. The search runs only when the
 pair has no `settings.json` yet and writes its result there, so the studio starts from it and

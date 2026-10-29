@@ -15,6 +15,7 @@ import numpy as np
 
 from redline.core.audio import (
     ANALYSIS_RATE,
+    LOSSY_CODECS,
     Audio,
     Decoded,
     Samples,
@@ -296,7 +297,8 @@ def measure_own(
     """Measure an own vocal and beat given apart; only the references are separated.
 
     Args:
-        vocal: The recorded vocal; the track is named after it and takes its codec and rate.
+        vocal: The recorded vocal; the track is named after it and takes its rate, and its
+            codec unless the beat's is lossy.
         beat: The beat the vocal goes over.
         refs: The reference tracks, separated and measured as in measure_inputs.
         work_dir: Folder holding the caches and the runs.
@@ -319,16 +321,16 @@ def measure_own(
         )
     except ValueError as error:
         raise ValueError(f"{vocal.name}: {error}") from error
-    mix_dec = Decoded(vocal, voice + music, ANALYSIS_RATE, vocal_dec.codec)
+    # a lossy beat makes the mix lossy too, whatever the vocal was
+    codec = beat_dec.codec if beat_dec.codec in LOSSY_CODECS else vocal_dec.codec
+    mix_dec = Decoded(vocal, voice + music, ANALYSIS_RATE, codec)
     mix = to_analysis(mix_dec)
     limits = upper, side_upper = _band_limits([mix, vocal_audio, beat_audio, *ref_analysed])
     cache_dir = _cache_dir(work_dir)
     code = code_fingerprint()
     stems = Stems(voice, music, ANALYSIS_RATE, False)
     log.info("measuring %s", vocal.name)
-    key = metrics_key(
-        _own_key(mix, voice), upper, side_upper, vocal_dec.codec, vocal_dec.rate, code
-    )
+    key = metrics_key(_own_key(mix, voice), upper, side_upper, codec, vocal_dec.rate, code)
     try:
         measured, from_cache = _metrics_cached(
             cache_dir, key, lambda: _measure(mix_dec, mix, stems, upper, side_upper)
@@ -337,7 +339,7 @@ def measure_own(
         raise ValueError(f"{vocal.name}: {error}") from error
     track = FileResult(
         vocal.name,
-        vocal_dec.codec,
+        codec,
         vocal_dec.rate,
         from_cache,
         False,

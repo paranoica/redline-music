@@ -1,10 +1,13 @@
 """The argument parser of every command."""
 
 import argparse
+import math
 from pathlib import Path
 
 from redline import __version__
 from redline.cli.common import LYRICS, LYRICS_BUILD, _inputs
+
+MAX_OFFSET_S = 3600
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -197,9 +200,22 @@ def build_parser() -> argparse.ArgumentParser:
 def _own_offset(command: argparse.ArgumentParser) -> None:
     command.add_argument(
         "--offset",
-        type=float,
+        type=offset_seconds,
         help="seconds to delay the vocal by against the beat; negative drops its start",
     )
+
+
+def offset_seconds(text: str) -> float:
+    """The --offset value: a finite number of seconds, less than an hour either way."""
+    try:
+        value = float(text)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or abs(value) >= MAX_OFFSET_S:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not a number of seconds between -{MAX_OFFSET_S} and {MAX_OFFSET_S}"
+        )
+    return value
 
 
 def check_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

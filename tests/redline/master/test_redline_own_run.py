@@ -29,6 +29,7 @@ PICKED = AutoResult(
     3.25,
     {"vocal.crest_db": 11.0, "vocal.kurtosis": None},
     {"vocal.crest_db": (10.0, 1.0)},
+    (),
 )
 
 
@@ -140,6 +141,7 @@ def test_voice_runs_the_auto_search_by_default_and_records_it(own, tmp_path, aut
         "distance_after": 3.25,
         "values": {"vocal.crest_db": 11.0, "vocal.kurtosis": None},
         "targets": {"vocal.crest_db": [10.0, 1.0]},
+        "at_edge": [],
     }
     lines = capsys.readouterr().out.splitlines()
     assert lines == [
@@ -148,6 +150,24 @@ def test_voice_runs_the_auto_search_by_default_and_records_it(own, tmp_path, aut
         "comp_threshold_db: -44.0",
         "drive_db: 20.0",
         "distance: 12.50 → 3.25",
+    ]
+
+
+def test_voice_names_the_keys_left_at_the_edge_of_their_range(own, tmp_path, monkeypatch, capsys):
+    from redline.vocal import auto as auto_module
+
+    edged = replace(PICKED, at_edge=("vocal_db", "drive_db"))
+    monkeypatch.setattr(auto_module, "auto_settings", lambda *args, **kwargs: edged)
+    assert main(voice_args(own, tmp_path), separator=CountingSeparator()) == 0
+    folder, record = only_result(tmp_path)
+    assert record["auto"]["at_edge"] == ["vocal_db", "drive_db"]
+    assert capsys.readouterr().out.splitlines() == [
+        str(folder),
+        "vocal_db: -9.0",
+        "comp_threshold_db: -44.0",
+        "drive_db: 20.0",
+        "distance: 12.50 → 3.25",
+        "at the edge of its range: vocal_db, drive_db",
     ]
 
 
@@ -349,3 +369,45 @@ def test_studio_refuses_a_wrong_mix_of_inputs(tmp_path, capsys, given, said):
         main(args, separator=CountingSeparator())
     assert raised.value.code == 2
     assert said in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command", ["voice", "studio"])
+@pytest.mark.parametrize("offset", ["inf", "-inf", "nan", "1e7", "3600", "-3600", "abc"])
+def test_an_offset_that_is_not_a_plausible_number_of_seconds_exits_2(
+    own, tmp_path, capsys, command, offset
+):
+    made = voice_args if command == "voice" else studio_args
+    with pytest.raises(SystemExit) as raised:
+        # with "=": argparse takes a bare -inf for an option
+        main(made(own, tmp_path, f"--offset={offset}"), separator=CountingSeparator())
+    assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "argument --offset: " in err
+    assert "Traceback" not in err
+    assert "seconds" in err.splitlines()[-1]
+    assert not (tmp_path / "o").exists()
+
+
+@pytest.mark.parametrize("command", ["voice", "studio"])
+@pytest.mark.parametrize(("offset", "seconds"), [("3599.5", 3599.5), ("-3599.5", -3599.5)])
+def test_an_offset_just_under_an_hour_is_taken(command, offset, seconds):
+    from redline.cli.parser import build_parser
+
+    args = ["--vocal", "v.wav", "--beat", "b.wav", "--ref", "r", "--offset", offset]
+    assert build_parser().parse_args([command, *args]).offset == seconds
+
+
+def test_studio_names_the_keys_left_at_the_edge_of_their_range(
+    own, tmp_path, served, monkeypatch, capsys
+):
+    from redline.vocal import auto as auto_module
+
+    edged = replace(PICKED, at_edge=("comp_threshold_db",))
+    monkeypatch.setattr(auto_module, "auto_settings", lambda *args, **kwargs: edged)
+    assert main(studio_args(own, tmp_path), separator=CountingSeparator()) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "at the edge of its range: comp_threshold_db" in out
+    assert (
+        out.index("at the edge of its range: comp_threshold_db")
+        == out.index("distance: 12.50 → 3.25") + 1
+    )

@@ -120,11 +120,13 @@ The vocal should be dry, recorded over this beat and exported from the same sess
 two files start together. If they do not, `--offset 0.25` delays the vocal by a quarter of a
 second; a negative offset drops the vocal's start.
 
-Without `--settings` or `--preset`, `voice` searches for the settings itself: it renders the
-loudest 30 seconds at several vocal levels, compressor thresholds and drives, and keeps the
-ones whose vocal measures closest to the references. It prints what it chose and the distance
-to the references before and after. That is closest to the references by measurement; whether
-it sounds better is yours to judge. `--no-auto` renders the picks instead.
+Without `--settings` or `--preset`, `voice` searches for the settings itself: it renders a few
+8-second windows spread over the sung part of the track at several vocal levels, compressor
+thresholds and drives, and keeps the ones whose vocal, measured after the master, comes closest
+to the references' medians. It prints what it chose, the distance to the references before
+and after, and which values ended at the edge of their range, where a better one may lie
+beyond. That is closest to the references by measurement; whether it sounds better is yours to
+judge. `--no-auto` renders the picks instead.
 
 The result is the same folder `run` writes, named after the vocal; `chain.json` also holds the
 search's result. To tune it by ear, open the studio on the pair:

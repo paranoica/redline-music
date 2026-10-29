@@ -1,3 +1,4 @@
+import itertools
 import math
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -5,20 +6,23 @@ from pathlib import Path
 import numpy as np
 import pytest
 from redline.core.audio import Audio, Decoded
-from redline.engine.render import Engine
+from redline.engine.render import Engine, Rendered
 from redline.engine.settings import SPECS, Settings
+from redline.master.clip import MasterResult
 from redline.measure.run import FileResult, _measure
 from redline.measure.separate import Stems
 from redline.vocal.auto import (
     AXES,
     FLOOR,
     METRICS,
+    MISSING,
     AutoResult,
+    after_master,
     auto_settings,
     distance,
-    loudest_excerpt,
     measure_processed,
     reference_targets,
+    spread_windows,
 )
 from redline_signals import RATE, engine_context, engine_stems, make_rng
 
@@ -80,44 +84,166 @@ def test_distance_is_zero_at_the_medians_and_grows_away_from_them():
     assert distance({PAIR: 1.0, CREST: 11.0}, targets) == pytest.approx(5.0)
 
 
-def test_a_metric_the_render_lost_costs_three_spreads_and_one_no_reference_has_nothing():
-    from redline.vocal.auto import MISSING
-
-    targets = {PAIR: (0.0, 1.0)}
-    assert MISSING == 9.0
-    # a setting that makes a metric unmeasurable must not win by dropping it
+def test_a_lost_metric_costs_more_than_one_far_off_and_one_no_reference_has_nothing():
+    targets = {PAIR: (0.0, 1.0), CREST: (9.0, 1.0)}
+    # nine spreads off on one metric is already further than the references ever sit
+    far = distance({PAIR: 9.0, CREST: 9.0}, targets)
+    assert far == pytest.approx(81.0)
     assert distance({PAIR: None, CREST: 9.0}, targets) == MISSING
-    assert distance({PAIR: 0.0, CREST: 9.0}, targets) == 0.0
+    assert far < MISSING
+    assert distance({PAIR: 0.0, CREST: 9.0, "other.metric": None}, targets) == 0.0
 
 
-def test_an_empty_excerpt_is_refused():
+def test_the_grids_are_the_planned_ones_and_inside_their_settings_ranges():
+    assert AXES == {
+        "vocal_db": (-12, -9, -6, -3, 0, 3, 6),
+        "comp_threshold_db": (-56, -50, -44, -38, -32, -26, -20, -14),
+        "drive_db": (0, 10, 20, 30, 40),
+    }
+    for key, grid in AXES.items():
+        assert list(grid) == sorted(grid), key
+        assert SPECS[key].low <= grid[0] and grid[-1] <= SPECS[key].high, key
+    defaults = Settings()
+    assert all(getattr(defaults, key) in grid for key, grid in AXES.items())
+
+
+def level_at(seconds: float, loud: list[tuple[float, float, float]]) -> np.ndarray:
+    """Noise at -80 dB, raised to the given amplitude over each (from, to, amplitude)."""
+    noise = make_rng().standard_normal((int(seconds * RATE), 2))
+    scale = np.full(len(noise), 1e-4)
+    for start, end, amp in loud:
+        scale[int(start * RATE) : int(end * RATE)] = amp
+    return (noise * scale[:, None]).astype(np.float32)
+
+
+def at(seconds: float) -> int:
+    return round(seconds * RATE)
+
+
+def test_windows_spread_evenly_from_the_first_to_the_last_active_second():
+    vocal = level_at(60.0, [(0.0, 60.0, 0.3)])
+    # 4 windows of 8 s over 60 s: starts 52/3 s apart, the last ending at the end
+    assert spread_windows(vocal, RATE, 4, 8.0) == [
+        (0, at(8.0)),
+        (at(52 / 3), at(52 / 3) + at(8.0)),
+        (at(104 / 3), at(104 / 3) + at(8.0)),
+        (at(52.0), at(60.0)),
+    ]
+
+
+def test_windows_skip_a_quiet_head_and_tail_but_keep_a_quieter_middle():
+    # 40 dB down is out, 20 dB down is still singing
+    vocal = level_at(60.0, [(0.0, 5.0, 0.003), (5.0, 20.0, 0.3), (20.0, 30.0, 0.03)])
+    vocal[at(30.0) : at(45.0)] = 0.3 * make_rng().standard_normal((at(15.0), 2))
+    windows = spread_windows(vocal, RATE, 4, 8.0)
+    assert len(windows) == 4
+    assert windows[0] == (at(5.0), at(13.0))
+    assert windows[-1] == (at(37.0), at(45.0))
+    gaps = [b[0] - a[0] for a, b in itertools.pairwise(windows)]
+    assert max(gaps) - min(gaps) <= 1
+
+
+def test_a_short_track_gets_fewer_windows_and_a_very_short_one_a_single_window():
+    twenty = level_at(20.0, [(0.0, 20.0, 0.3)])
+    assert spread_windows(twenty, RATE, 4, 8.0) == [(0, at(8.0)), (at(12.0), at(20.0))]
+    six = level_at(6.0, [(0.0, 6.0, 0.3)])
+    assert spread_windows(six, RATE, 4, 8.0) == [(0, len(six))]
+    exact = level_at(8.0, [(0.0, 8.0, 0.3)])
+    assert spread_windows(exact, RATE, 4, 8.0) == [(0, len(exact))]
+
+
+def test_a_short_active_stretch_gets_one_full_window_around_it():
+    vocal = level_at(10.0, [(4.0, 7.0, 0.3)])
+    ((start, end),) = spread_windows(vocal, RATE, 4, 8.0)
+    assert end - start == at(8.0)
+    assert start <= at(4.0) and end >= at(7.0)
+    assert start >= 0 and end <= len(vocal)
+
+
+def test_a_silent_vocal_spreads_over_the_whole_track():
+    silent = np.zeros((at(20.0), 2), np.float32)
+    assert spread_windows(silent, RATE, 2, 8.0) == [(0, at(8.0)), (at(12.0), at(20.0))]
+
+
+def test_a_single_window_sits_in_the_middle_of_the_active_part():
+    vocal = level_at(30.0, [(0.0, 30.0, 0.3)])
+    assert spread_windows(vocal, RATE, 1, 8.0) == [(at(11.0), at(19.0))]
+
+
+@pytest.mark.parametrize(("count", "seconds"), [(0, 8.0), (4, 0.0), (4, -1.0)])
+def test_no_windows_or_empty_ones_are_refused(count, seconds):
     with pytest.raises(ValueError):
-        loudest_excerpt(np.zeros((RATE, 2), np.float32), RATE, 0.0)
+        spread_windows(level_at(10.0, [(0.0, 10.0, 0.3)]), RATE, count, seconds)
 
 
-def test_the_vocal_level_grid_reaches_above_unity():
-    from redline.vocal.auto import AXES
-
-    assert max(AXES["vocal_db"]) >= 3
+def rms(x):
+    return float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
 
 
-def quiet_with_loud(seconds: float, loud_from: float, loud_to: float) -> np.ndarray:
-    noise = 0.01 * make_rng().standard_normal((int(seconds * RATE), 2))
-    noise[int(loud_from * RATE) : int(loud_to * RATE)] *= 50
-    return noise.astype(np.float32)
+def rendered_with(vocal, beat, final, master):
+    return Rendered(vocal, beat, final, None, master)
 
 
-@pytest.mark.parametrize(("start", "end"), [(4.0, 6.0), (0.0, 2.0), (8.0, 10.0)])
-def test_loudest_excerpt_finds_the_loud_stretch(start, end):
-    vocal = quiet_with_loud(10.0, start, end)
-    assert loudest_excerpt(vocal, RATE, 2.0) == (int(start * RATE), int(end * RATE))
+def master_of(gain_db):
+    return MasterResult(-9.0, gain_db, True, 0.1, 0.0)
 
 
-def test_loudest_excerpt_of_a_short_signal_is_the_whole_signal():
-    vocal = quiet_with_loud(1.5, 0.5, 1.0)
-    assert loudest_excerpt(vocal, RATE, 2.0) == (0, len(vocal))
-    exact = quiet_with_loud(2.0, 0.5, 1.0)
-    assert loudest_excerpt(exact, RATE, 2.0) == (0, len(exact))
+def test_the_masters_change_of_each_sample_goes_onto_both_stems():
+    vocal, beat = engine_stems(2.0)
+    vocal[: RATE // 4] = 0.0
+    beat[: RATE // 4] = 0.0
+    gain = 10 ** (12 / 20)
+    final = np.clip((vocal + beat) * np.float32(gain), -0.9, 0.9)
+    vocal_m, beat_m = after_master(rendered_with(vocal, beat, final, master_of(12.0)))
+    sounding = np.abs(vocal + beat) > 1e-6
+    np.testing.assert_allclose((vocal_m + beat_m)[sounding], final[sounding], atol=1e-5)
+    # the clipper flattens the loud samples, so the vocal is not just made louder
+    assert not np.allclose(vocal_m, vocal * gain, atol=1e-3)
+    assert np.all(np.abs(vocal_m) <= np.abs(vocal) * gain + 1e-6)
+    # where the mix is silent the stems take the master's plain gain
+    np.testing.assert_array_equal(vocal_m[: RATE // 4], vocal[: RATE // 4] * np.float32(gain))
+
+
+def test_where_the_stems_cancel_the_plain_gain_is_used():
+    vocal = np.full((4, 2), 0.25, np.float32)
+    beat = np.array([[-0.25, -0.25], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], np.float32)
+    final = np.array([[0.0, 0.0], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5]], np.float32)
+    vocal_m, beat_m = after_master(rendered_with(vocal, beat, final, master_of(20 * math.log10(2))))
+    np.testing.assert_allclose(vocal_m[0], [0.5, 0.5], rtol=1e-6)
+    np.testing.assert_allclose(beat_m[0], [-0.5, -0.5], rtol=1e-6)
+    np.testing.assert_allclose(vocal_m[1:], 0.5, rtol=1e-6)
+
+
+def test_a_change_no_clipper_makes_is_held_to_the_masters_gain():
+    # a band-limited final near a zero crossing of the mix: the ratio would flip and blow up
+    vocal = np.array([[0.4, 0.4], [0.4, 0.4], [0.4, 0.4]], np.float32)
+    beat = np.array([[-0.39999, -0.39999], [-0.399, -0.399], [0.0, 0.0]], np.float32)
+    final = np.array([[-0.002, -0.002], [0.05, 0.05], [0.8, 0.8]], np.float32)
+    vocal_m, _ = after_master(rendered_with(vocal, beat, final, master_of(20 * math.log10(2))))
+    np.testing.assert_allclose(vocal_m[0], 0.0, atol=1e-7)
+    np.testing.assert_allclose(vocal_m[1], 0.8, rtol=1e-6)
+    np.testing.assert_allclose(vocal_m[2], 0.8, rtol=1e-6)
+
+
+def test_without_the_master_the_stems_are_measured_as_rendered():
+    vocal, beat = engine_stems(1.0)
+    vocal_m, beat_m = after_master(rendered_with(vocal, beat, vocal + beat, None))
+    np.testing.assert_array_equal(vocal_m, vocal)
+    np.testing.assert_array_equal(beat_m, beat)
+
+
+def test_a_real_master_never_raises_a_stem_past_its_gain(track):
+    vocal, beat, ctx = track
+    rendered = Engine(vocal, beat, ctx).render(Settings())
+    assert rendered.master is not None and rendered.master.clipped_share > 0
+    gain = 10 ** (rendered.master.gain_db / 20)
+    vocal_m, beat_m = after_master(rendered)
+    assert np.abs(vocal_m).max() <= np.abs(rendered.vocal).max() * gain * (1 + 1e-6)
+    assert np.abs(beat_m).max() <= np.abs(rendered.beat).max() * gain * (1 + 1e-6)
+    plain = measure_processed(rendered.vocal * gain, rendered.beat * gain, RATE)
+    after = measure_processed(vocal_m, beat_m, RATE)
+    assert after[CREST] <= plain[CREST] + 0.1
+    assert after[PAIR] == pytest.approx(plain[PAIR], abs=1.0)
 
 
 def test_processed_metrics_are_the_ones_the_references_were_measured_with():
@@ -144,13 +270,6 @@ def test_a_silent_vocal_measures_as_missing_not_infinite():
     assert all(v is None or math.isfinite(v) for v in values.values())
 
 
-def test_every_grid_value_is_inside_its_settings_range():
-    assert list(AXES) == ["vocal_db", "comp_threshold_db", "drive_db"]
-    for key, grid in AXES.items():
-        spec = SPECS[key]
-        assert all(spec.low <= value <= spec.high for value in grid), key
-
-
 @pytest.fixture(scope="module")
 def track():
     vocal, beat = engine_stems(4.0)
@@ -169,7 +288,9 @@ LOUDER_REFS = [
 @pytest.fixture(scope="module")
 def result(track):
     vocal, beat, ctx = track
-    return auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, seconds=2.0, passes=2)
+    return auto_settings(
+        Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=2.0, passes=2
+    )
 
 
 def test_the_base_starts_with_the_vocal_under_the_references(track):
@@ -202,16 +323,80 @@ def test_chosen_values_come_from_the_grids(result):
 
 def test_the_search_gives_the_same_result_twice(track, result):
     vocal, beat, ctx = track
-    again = auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, seconds=2.0, passes=2)
+    again = auto_settings(
+        Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=2.0, passes=2
+    )
     assert again == result
 
 
 def test_no_passes_or_no_targets_keep_the_base(track):
     vocal, beat, ctx = track
     engine = Engine(vocal, beat, ctx)
-    still = auto_settings(engine, LOUDER_REFS, BASE, seconds=2.0, passes=0)
+    still = auto_settings(engine, LOUDER_REFS, BASE, count=2, seconds=2.0, passes=0)
     assert still.settings == BASE
     assert still.distance_after == still.distance_before
-    blind = auto_settings(engine, [], replace(BASE, vocal_db=-9.0), seconds=2.0, passes=1)
+    blind = auto_settings(engine, [], replace(BASE, vocal_db=-9.0), count=2, seconds=2.0, passes=1)
     assert blind.settings == replace(BASE, vocal_db=-9.0)
     assert blind.targets == {} and blind.distance_after == 0.0
+
+
+def test_the_score_is_taken_after_the_master_on_the_pooled_windows(track, monkeypatch):
+    from redline.vocal import auto as auto_module
+
+    vocal, beat, ctx = track
+    seen = []
+    measure = auto_module.measure_processed
+
+    def recorded(v, b, rate):
+        seen.append((v, b))
+        return measure(v, b, rate)
+
+    monkeypatch.setattr(auto_module, "measure_processed", recorded)
+    auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=1.5, passes=0)
+    ((vocal_m, beat_m),) = seen
+    windows = spread_windows(vocal, RATE, 2, 1.5)
+    assert len(windows) == 2
+    renders = [Engine(vocal[a:b], beat[a:b], ctx).render(BASE) for a, b in windows]
+    assert all(r.master is not None and r.master.clipped_share > 0 for r in renders)
+    stems = [after_master(r) for r in renders]
+    np.testing.assert_array_equal(vocal_m, np.concatenate([v for v, _ in stems]))
+    np.testing.assert_array_equal(beat_m, np.concatenate([b for _, b in stems]))
+    # what is measured is the mastered sound, not the mix the master was given
+    final = np.concatenate([r.final for r in renders])
+    mix = np.concatenate([r.vocal + r.beat for r in renders])
+    assert rms(vocal_m + beat_m - final) < 0.01 * rms(final)
+    assert rms(mix - final) > 0.2 * rms(final)
+
+
+def test_one_engine_per_window_serves_every_candidate(track, monkeypatch):
+    from redline.vocal import auto as auto_module
+
+    vocal, beat, ctx = track
+    built = []
+
+    class Counted(Engine):
+        def __init__(self, *args, **kwargs):
+            built.append(len(args[0]))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(auto_module, "Engine", Counted)
+    auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=1.5, passes=1)
+    assert built == [b - a for a, b in spread_windows(vocal, RATE, 2, 1.5)]
+
+
+def test_edge_keys_are_the_ones_on_the_first_or_last_grid_value(track):
+    vocal, beat, ctx = track
+    engine = Engine(vocal, beat, ctx)
+    edges = replace(BASE, vocal_db=-12.0, comp_threshold_db=-38.0, drive_db=40.0)
+    kept = auto_settings(engine, LOUDER_REFS, edges, count=1, seconds=2.0, passes=0)
+    assert kept.at_edge == ("vocal_db", "drive_db")
+    inside = replace(BASE, vocal_db=-7.0, comp_threshold_db=-14.0, drive_db=10.0)
+    kept = auto_settings(engine, LOUDER_REFS, inside, count=1, seconds=2.0, passes=0)
+    assert kept.at_edge == ("comp_threshold_db",)
+
+
+def test_the_found_result_reports_its_edges(result):
+    expected = tuple(
+        key for key, grid in AXES.items() if getattr(result.settings, key) in (grid[0], grid[-1])
+    )
+    assert result.at_edge == expected

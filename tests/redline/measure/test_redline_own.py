@@ -88,6 +88,52 @@ def test_track_is_named_after_the_vocal_with_its_codec_and_rate(tmp_path, refs):
     assert [r.name for r in inputs.refs] == ["a.wav", "b.wav"]
 
 
+def hot(seconds):
+    # a beat mastered into the ceiling: a share of its samples sits above -1 dBFS
+    return np.clip(kick(seconds, amp=1.5), -0.99, 0.99)
+
+
+def test_a_lossy_beat_keeps_its_hot_share_out_of_the_own_mix(tmp_path, refs):
+    folder = tmp_path / "own"
+    folder.mkdir()
+    vocal = write(folder, "vocal.wav", voice(4), RATE, subtype="FLOAT")
+    beat = write(folder, "beat.mp3", hot(4), RATE)
+    inputs = measure_own(vocal, beat, refs, tmp_path / "work", CountingSeparator())
+    assert inputs.track.values["mix.hot_share"] is None
+    assert inputs.track.codec == "mp3"
+    assert inputs.track.native_rate == RATE
+    assert inputs.track.values["mix.lufs"] is not None
+
+
+def test_a_lossless_beat_and_vocal_report_the_hot_share(tmp_path, refs):
+    vocal, beat = own(tmp_path, voice(4), hot(4))
+    inputs = measure_own(vocal, beat, refs, tmp_path / "work", CountingSeparator())
+    assert inputs.track.values["mix.hot_share"] > 0
+    assert inputs.track.codec == "wav"
+
+
+def test_a_lossy_vocal_over_a_lossless_beat_still_leaves_the_hot_share_out(tmp_path, refs):
+    folder = tmp_path / "own"
+    folder.mkdir()
+    vocal = write(folder, "vocal.ogg", voice(4), RATE)
+    beat = write(folder, "beat.wav", hot(4), RATE, subtype="FLOAT")
+    inputs = measure_own(vocal, beat, refs, tmp_path / "work", CountingSeparator())
+    assert inputs.track.values["mix.hot_share"] is None
+    assert inputs.track.codec == "ogg"
+
+
+def test_the_same_pair_with_the_beat_now_lossy_is_measured_again(tmp_path, refs):
+    folder = tmp_path / "own"
+    folder.mkdir()
+    vocal = write(folder, "vocal.wav", voice(4), RATE, subtype="FLOAT")
+    wav = write(folder, "beat.wav", hot(4), RATE, subtype="FLOAT")
+    first = measure_own(vocal, wav, refs, tmp_path / "work", CountingSeparator())
+    assert first.track.values["mix.hot_share"] is not None
+    lossy = write(folder, "beat.mp3", hot(4), RATE)
+    second = measure_own(vocal, lossy, refs, tmp_path / "work", CountingSeparator())
+    assert second.track.values["mix.hot_share"] is None
+
+
 def test_positive_offset_delays_the_vocal(tmp_path, refs):
     given = voice(2)
     vocal, beat = own(tmp_path, given, kick(3))

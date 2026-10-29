@@ -112,6 +112,8 @@ def _print_auto(found: "AutoResult") -> None:
     for key in ("vocal_db", "comp_threshold_db", "drive_db"):
         print(f"{key}: {getattr(found.settings, key)}")
     print(f"distance: {found.distance_before:.2f} → {found.distance_after:.2f}", flush=True)
+    if found.at_edge:
+        print(f"at the edge of its range: {', '.join(found.at_edge)}", flush=True)
 
 
 def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
