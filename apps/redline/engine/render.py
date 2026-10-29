@@ -23,7 +23,7 @@ from redline.vocal.chain import (
     Target,
     process_vocal,
 )
-from redline.vocal.fx import reverb, stutter, throws
+from redline.vocal.fx import MAX_ECHOES, phrases, reverb, stutter, throws
 from redline.vocal.timbre import (
     bitcrush,
     double,
@@ -40,6 +40,7 @@ CACHE_BYTES = 1_500_000_000
 # the preview runs the chain on the loop plus this much on each side, so filters and
 # envelopes have settled by the time the loop starts
 PREVIEW_PAD_S = 3.0
+MAX_PREVIEW_PAD_S = 10.0
 CHAIN_KEYS = (
     "chain_on",
     "comp_threshold_db",
@@ -233,7 +234,13 @@ class Engine:
 
     def preview(self, settings: Settings, start: int, end: int) -> Samples:
         """The final of one loop, rendered on the loop and some padding: close, not exact."""
-        pad = int(PREVIEW_PAD_S * self.context.rate)
+        # echoes and tails of phrases before the loop reach into it
+        tails = [PREVIEW_PAD_S]
+        if settings.throw_on:
+            tails.append(MAX_ECHOES * settings.throw_ms / 1000)
+        if settings.reverb_on:
+            tails.append(settings.reverb_decay_s * 1.2)
+        pad = int(min(max(tails), MAX_PREVIEW_PAD_S) * self.context.rate)
         low, high = max(0, start - pad), min(len(self.vocal), end + pad)
         piece = Engine(self.vocal[low:high], self.beat[low:high], self.context, 0)
         last = self.last
@@ -280,8 +287,10 @@ class Engine:
 
     def _fx(self, layered: Samples, settings: Settings) -> Samples:
         out, rate = layered, self.context.rate
+        # read once: a stutter fills the pauses the throws would look for
+        found = phrases(out, rate) if settings.stutter_on or settings.throw_on else None
         if settings.stutter_on:
-            out = stutter(out, rate, settings.stutter_ms, settings.stutter_repeats)
+            out = stutter(out, rate, settings.stutter_ms, settings.stutter_repeats, found)
         if settings.throw_on:
             out = throws(
                 out,
@@ -290,6 +299,7 @@ class Engine:
                 settings.throw_ms,
                 settings.throw_feedback,
                 settings.throw_tone_hz,
+                found,
             )
         if settings.reverb_on:
             out = reverb(

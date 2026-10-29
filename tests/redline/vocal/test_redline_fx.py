@@ -96,3 +96,24 @@ def test_a_stutter_never_spills_into_the_next_phrase():
     assert np.array_equal(y[second:second_end], x[second:second_end])
     # two slices fit the 250 ms pause, the third would reach the next phrase
     assert np.abs(y[int(1.0 * RATE) : int(1.2 * RATE)]).max() > 0.1
+
+
+def test_a_pause_of_200_ms_splits_phrases_and_170_ms_does_not():
+    from redline.vocal.fx import phrases
+
+    assert len(phrases(bursts(1.0, 0.2, 2)[: -int(0.2 * RATE)], RATE)) == 2
+    assert len(phrases(bursts(1.0, 0.17, 2)[: -int(0.17 * RATE)], RATE)) == 1
+
+
+def test_stutter_and_throws_share_one_reading_of_the_phrases():
+    from redline.vocal.fx import phrases
+
+    x = bursts(1.0, 0.4, 2)
+    found = phrases(x, RATE)
+    stuttered = stutter(x, RATE, slice_ms=90.0, repeats=3, found=found)
+    y = throws(
+        stuttered, RATE, level_db=0.0, time_ms=300.0, feedback=0.0, tone_hz=12000.0, found=found
+    )
+    end = int(1.0 * RATE)
+    echo = (y - stuttered)[end + int(0.05 * RATE) : end + int(0.3 * RATE)]
+    assert rms_db(echo[:, 0]) > -40

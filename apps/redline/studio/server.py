@@ -10,6 +10,7 @@ import hmac
 import html
 import io
 import json
+import math
 import os
 import re
 import threading
@@ -276,6 +277,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/reference":
             return self._reference(query.get("i", []))
+        if path == "/api/reference_span":
+            return self._reference_span(query)
         if path == "/api/original":
             return self._send(
                 HTTPStatus.OK,
@@ -285,14 +288,33 @@ class Handler(BaseHTTPRequestHandler):
             )
         return self._error(HTTPStatus.NOT_FOUND, "no such call")
 
-    def _reference(self, asked: list[str]) -> None:
-        references = self.server.studio.references
+    def _which(self, asked: list[str]) -> int | None:
         given = asked[0] if len(asked) == 1 else ""
         if not (given.isascii() and given.isdigit() and len(given) < 4):
-            return self._error(HTTPStatus.BAD_REQUEST, "i is a reference number")
-        if int(given) >= len(references):
+            return None
+        return int(given) if int(given) < len(self.server.studio.references) else None
+
+    def _reference_span(self, query: dict[str, list[str]]) -> None:
+        which = self._which(query.get("i", []))
+        try:
+            start, end = float(query["start"][0]), float(query["end"][0])
+        except (KeyError, ValueError):
+            return self._error(HTTPStatus.BAD_REQUEST, "start and end are seconds")
+        if which is None:
             return self._error(HTTPStatus.BAD_REQUEST, "no such reference")
-        _, samples, rate, lufs = references[int(given)]
+        _, samples, rate, _ = self.server.studio.references[which]
+        if not (
+            math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= len(samples) / rate
+        ):
+            return self._error(HTTPStatus.BAD_REQUEST, "the span lies outside the reference")
+        lufs = integrated_lufs(samples[int(start * rate) : int(end * rate)], rate)
+        return self._json(HTTPStatus.OK, {"lufs": lufs if math.isfinite(lufs) else None})
+
+    def _reference(self, asked: list[str]) -> None:
+        which = self._which(asked)
+        if which is None:
+            return self._error(HTTPStatus.BAD_REQUEST, "no such reference")
+        _, samples, rate, lufs = self.server.studio.references[which]
         return self._send(
             HTTPStatus.OK, wav_bytes(samples, rate), "audio/wav", {"X-Lufs": f"{lufs:.2f}"}
         )

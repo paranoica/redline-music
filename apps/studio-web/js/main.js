@@ -130,8 +130,10 @@ const wave = new Waveform(
 );
 
 function setLoop(loop) {
+  const resized = Math.abs(loop.end - loop.start - (player.loop.end - player.loop.start)) > 0.05;
   player.setLoop(loop);
   wave.setLoop(loop);
+  if (resized) placeReference();
   ui.loopSpan.textContent = `петля ${clock(loop.start)}–${clock(loop.end)}`;
   // a preview only covers the loop it was made for
   if (ui.state.dataset.state !== "exact") preview(firstStage(null, values));
@@ -277,6 +279,17 @@ function showSide() {
   ui.r.setAttribute("aria-pressed", String(player.side === "reference"));
 }
 
+let reference = null; // the chosen reference: its index, name and decoded audio
+
+// the reference loops its loudest stretch of the loop's length, levelled by that stretch
+async function placeReference() {
+  if (!reference) return;
+  const length = Math.min(player.loop.end - player.loop.start || 20, reference.buffer.duration);
+  const span = loudestSpan(reference.buffer, length);
+  const { lufs } = await api.referenceSpan(reference.index, span.start, span.end);
+  player.setReference(reference.buffer, lufs, span.start);
+}
+
 async function loadReferences() {
   const list = await api.references();
   for (const ref of list) ui.reference.append(new Option(ref.name, String(ref.index)));
@@ -285,9 +298,8 @@ async function loadReferences() {
     const chosen = list[Number(ui.reference.value)];
     story("Загружаю референс ", [chosen.name], "…");
     const audio = await api.reference(chosen.index);
-    const buffer = await decode(audio.bytes);
-    const span = loudestSpan(buffer, Math.min(player.loop.end - player.loop.start || 20, buffer.duration));
-    player.setReference(buffer, audio.lufs, span.start);
+    reference = { index: chosen.index, name: chosen.name, buffer: await decode(audio.bytes) };
+    await placeReference();
     ui.r.disabled = false;
     story("Референс ", [chosen.name], " готов: R или кнопка «Референс». Играет его самый громкий кусок той же длины, на той же громкости.");
   };

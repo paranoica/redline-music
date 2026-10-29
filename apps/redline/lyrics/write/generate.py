@@ -134,13 +134,17 @@ def style_for(notes: str, seed: int) -> str:
 BPM_SLACK = 0.5
 
 
-def _other_ask(state: dict[str, Any], topic: str | None, bpm: float | None) -> str | None:
+def _other_ask(
+    state: dict[str, Any], topic: str | None, bpm: float | None, delivery: str | None = None
+) -> str | None:
     """How a started seed differs from what is asked now; None when it does not."""
     if topic and topic not in (state["asked_topic"], state["topic"]):
         return f"about {state['topic']!r}"
     started = state.get("bpm")
     if bpm is not None and (started is None or abs(bpm - started) > BPM_SLACK):
         return f"for a beat at {started:g} BPM" if started else "without a beat"
+    if delivery is not None and delivery != state.get("delivery"):
+        return f"with a {state.get('delivery') or 'plain'} delivery"
     return None
 
 
@@ -237,14 +241,20 @@ class Session:
         ]
 
     def _settled(
-        self, state: dict[str, Any], seed: int, topic: str | None, bpm: float | None, force: bool
+        self,
+        state: dict[str, Any],
+        seed: int,
+        topic: str | None,
+        bpm: float | None,
+        force: bool,
+        delivery: str | None = None,
     ) -> Saved | Failed | None:
         """A saved or given-up seed's answer; None when the seed goes on or starts over."""
         if not (isinstance(state.get("round"), int) and 1 <= state["round"] <= ROUNDS):
             raise LyricsError(f"seed {seed}: its state file is damaged; --force to restart it")
         if state["profile"] != self.profile_name:
             raise LyricsError(f"seed {seed} is written from profile {state['profile']!r}")
-        other = _other_ask(state, topic, bpm)
+        other = _other_ask(state, topic, bpm, delivery)
         if state["status"] == "saved":
             if force:
                 raise LyricsError(f"seed {seed} is saved; it is final")
@@ -281,11 +291,11 @@ class Session:
             force: Start a pending or failed seed over.
             bpm: The beat's half-time tempo; None keeps the started seed's.
             bars: The beat's whole bars, or None when only its tempo is known.
-            delivery: "hard" or "calm" for the beat; taken only when the seed starts.
+            delivery: "hard" or "calm" for the beat; another one for a started seed is refused.
         """
         state = self._state()
         if state:
-            settled = self._settled(state, seed, topic, bpm, force)
+            settled = self._settled(state, seed, topic, bpm, force, delivery)
             if settled:
                 return settled
         if state is None or force:

@@ -46,6 +46,8 @@ export const api = {
   original: async () => audio(await call("GET", "/api/original")),
   references: async () => (await call("GET", "/api/references")).json(),
   reference: async (index) => audio(await call("GET", `/api/reference?i=${index}`)),
+  referenceSpan: async (index, start, end) =>
+    (await call("GET", `/api/reference_span?i=${index}&start=${start}&end=${end}`)).json(),
   preview: async (settings, start, end, seq, signal) =>
     audio(await call("POST", "/api/preview", { settings, start, end, seq }, signal)),
   render: async (settings, seq, signal) =>

@@ -15,7 +15,8 @@ export class Player {
     this.resultStart = 0;
     // a reference is another song: it loops its own loudest stretch, the loop's length
     this.referenceStart = 0;
-    this.lufs = { original: 0, result: 0, reference: null };
+    // unknown until measured: a side with no number is left at its own level
+    this.lufs = { original: null, result: null, reference: null };
     this.levels = { original: 0, result: 0, reference: 0 };
     this.side = "result";
     this.loop = { on: true, start: 0, end: 0 };

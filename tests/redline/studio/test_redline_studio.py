@@ -296,3 +296,20 @@ def test_a_reference_index_outside_the_list_is_refused(server, query):
 
 def test_references_need_the_token(server):
     assert call(server, "GET", "/api/reference?i=0", token=None)[0] == 403
+
+
+def test_a_reference_span_has_its_own_loudness(server, studio):
+    from redline.core.loudness import integrated_lufs
+
+    status, _, body = call(server, "GET", "/api/reference_span?i=0&start=0.5&end=2.5")
+    _, samples, rate, _ = studio.references[0]
+    want = integrated_lufs(samples[int(0.5 * rate) : int(2.5 * rate)], rate)
+    assert status == 200 and json.loads(body)["lufs"] == pytest.approx(want, abs=0.01)
+    for query in (
+        "i=0&start=2&end=1",
+        "i=0&start=-1&end=1",
+        "i=0&start=0&end=9",
+        "i=3&start=0&end=1",
+        "i=0&start=x&end=1",
+    ):
+        assert call(server, "GET", f"/api/reference_span?{query}")[0] == 400

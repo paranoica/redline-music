@@ -572,3 +572,10 @@ def test_a_second_edit_starts_from_the_newest_version_and_a_pending_one_is_kept(
     assert "вторая версия этой строки" in request
     assert edit(base, 65, "три", "--force") == 3
     assert "три" in (folder(base, 65) / "edit-3" / "request-1.md").read_text(encoding="utf-8")
+
+
+def test_another_delivery_for_a_started_seed_is_refused(base):
+    assert run(base, 66, "--bpm", "140", "--delivery", "calm") == 3
+    assert run(base, 66, "--bpm", "140", "--delivery", "hard") == 2
+    assert run(base, 66, "--bpm", "140", "--delivery", "calm") == 3
+    assert run(base, 66) == 3

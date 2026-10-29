@@ -39,7 +39,9 @@ def phrases(samples: Samples, rate: int) -> list[tuple[int, int]]:
         return []
     voiced = db > np.percentile(heard, LOUD_PERCENTILE) - VOICED_BELOW_LOUD_DB
     frame, hop = int(FRAME_S * rate), int(HOP_S * rate)
-    gap = round(MIN_GAP_S / HOP_S)
+    # a frame overlaps the voice on both sides of a pause: the silent frames between two
+    # phrases are the pause minus a frame
+    gap = round((MIN_GAP_S - FRAME_S) / HOP_S)
     out: list[tuple[int, int]] = []
     start = None
     last = -1
@@ -94,10 +96,19 @@ def reverb(
 
 
 def throws(
-    samples: Samples, rate: int, level_db: float, time_ms: float, feedback: float, tone_hz: float
+    samples: Samples,
+    rate: int,
+    level_db: float,
+    time_ms: float,
+    feedback: float,
+    tone_hz: float,
+    found: list[tuple[int, int]] | None = None,
 ) -> Samples:
-    """The last words of each phrase thrown into echoes that bounce left and right."""
-    ends = phrase_ends(samples, rate)
+    """The last words of each phrase thrown into echoes that bounce left and right.
+
+    found: the phrases, when another effect already changed the pauses they are read from.
+    """
+    ends = [end for _, end in (phrases(samples, rate) if found is None else found)]
     if not ends:
         return samples.copy()
     mono = samples.mean(axis=1)
@@ -117,9 +128,15 @@ def throws(
     return (samples + _lowpass(wet.astype(np.float32), rate, tone_hz)).astype(np.float32)
 
 
-def stutter(samples: Samples, rate: int, slice_ms: float, repeats: int) -> Samples:
+def stutter(
+    samples: Samples,
+    rate: int,
+    slice_ms: float,
+    repeats: int,
+    found: list[tuple[int, int]] | None = None,
+) -> Samples:
     """The last slice of each phrase repeated into the pause after it, never into the next."""
-    found = phrases(samples, rate)
+    found = phrases(samples, rate) if found is None else found
     piece = int(slice_ms / 1000 * rate)
     fade = min(int(FADE_S * rate), piece // 4)
     ramp = np.ones(piece, dtype=np.float32)

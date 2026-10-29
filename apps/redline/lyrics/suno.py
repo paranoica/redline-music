@@ -143,6 +143,9 @@ def _style(recipe: Recipe | None) -> str:
     if recipe is None or not recipe.bpm:
         return ", ".join(STYLE)
     flows = dict.fromkeys(FLOW_TAGS[s.flow] for s in recipe.sections if s.flow)
+    if recipe.delivery == "hard" and FLOW_TAGS["chant"] in flows:
+        # a hard beat's hook is a chant: that tag must not be the one cut for room
+        flows = {FLOW_TAGS["chant"]: None, **flows}
     vocals = HARD_VOCALS if recipe.delivery == "hard" else VOCALS
     return ", ".join([*vocals, *list(flows)[: MAX_STYLE_TERMS - len(vocals)]])
 
