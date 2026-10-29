@@ -189,3 +189,55 @@ def test_a_newer_request_cancels_an_older_one(studio):
 def test_an_old_sequence_number_is_dropped_at_once(studio):
     assert studio.render(Settings(), 5) is not None
     assert studio.render(Settings(), 4) is None
+
+
+def test_a_broken_preset_or_settings_file_does_not_break_the_page(server, studio):
+    (studio.folder / "presets").mkdir(parents=True)
+    (studio.folder / "presets" / "broken.json").write_text("{not json", encoding="utf-8")
+    (studio.folder / "presets" / "list.json").write_text("[1, 2]", encoding="utf-8")
+    (studio.folder / "presets" / "fine.json").write_text('{"drive_db": 20}', encoding="utf-8")
+    status, _, body = call(server, "GET", "/api/presets")
+    assert status == 200 and json.loads(body) == {"fine": {"drive_db": 20}}
+    (studio.folder / "track-key").mkdir(parents=True)
+    (studio.folder / "track-key" / "settings.json").write_text("[1]", encoding="utf-8")
+    status, _, body = call(server, "GET", "/api/schema")
+    assert status == 200 and json.loads(body)["current"]["formant"] == 1.0
+
+
+def test_the_browser_opens_a_private_file_not_an_address_with_the_token(tmp_path):
+    import stat
+
+    from redline.studio.server import browser_file
+
+    url = f"http://127.0.0.1:5555/?t={TOKEN}"
+    old = tmp_path / "studio" / "open.html"
+    old.parent.mkdir()
+    old.write_text("old", encoding="utf-8")
+    old.chmod(0o644)
+    path = browser_file(url, tmp_path / "studio")
+    assert path == old and TOKEN in path.read_text(encoding="utf-8")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert TOKEN not in path.as_uri()
+
+
+def test_an_idle_connection_is_dropped(studio, monkeypatch):
+    import socket
+
+    from redline.studio import server as studio_server
+
+    assert studio_server.Handler.timeout is not None and studio_server.Handler.timeout <= 30
+    monkeypatch.setattr(studio_server.Handler, "timeout", 0.5)
+    httpd = make_server(studio, TOKEN, port=0)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with socket.create_connection(httpd.server_address, timeout=5) as idle:
+            assert idle.recv(1) == b""
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_a_length_that_is_not_ascii_digits_is_refused(server):
+    status = call(server, "POST", "/api/render", b"{}", headers={"Content-Length": "²"})[0]
+    assert status in (400, 411)

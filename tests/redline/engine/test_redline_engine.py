@@ -132,3 +132,16 @@ def test_a_preview_after_an_exact_render_takes_its_master_gain(setup, monkeypatc
     assert calls["master_clip"] == 0
     level = np.sqrt(np.mean(whole.final[start:end] ** 2))
     assert np.sqrt(np.mean((preview - whole.final[start:end]) ** 2)) < 0.25 * level
+
+
+def test_a_preview_after_a_louder_vocal_keeps_the_masters_loudness(setup):
+    from redline.core.loudness import integrated_lufs
+
+    vocal, beat, ctx = setup
+    engine = Engine(vocal, beat, ctx)
+    engine.render(Settings())
+    louder = from_dict({"vocal_db": 3.0})
+    start, end = 1 * RATE, 5 * RATE
+    preview = engine.preview(louder, start, end)
+    whole = engine.render(louder).final[start:end]
+    assert abs(integrated_lufs(preview, RATE) - integrated_lufs(whole, RATE)) < 0.5

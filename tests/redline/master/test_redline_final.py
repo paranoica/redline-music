@@ -670,6 +670,11 @@ def test_cli_studio_prints_a_local_address_with_a_token(inputs, tmp_path, capsys
     args = ["studio", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
     assert main([*args, "--no-browser"], separator=HalfSeparator()) == 0
     out = capsys.readouterr().out
-    assert f"http://127.0.0.1:5555/?t={started['token']}" in out
-    assert len(started["token"]) >= 32 and not opened and started["closed"]
+    first = started["token"]
+    assert main(args, separator=HalfSeparator()) == 0
+    assert len(opened) == 1 and opened[0].startswith("file://")
+    assert started["token"] not in opened[0]
+    opened.clear()
+    assert f"http://127.0.0.1:5555/?t={first}" in out
+    assert len(started["token"]) >= 32 and started["closed"]
     assert started["studio"].folder == tmp_path / "w" / "studio"

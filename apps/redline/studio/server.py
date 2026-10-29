@@ -7,8 +7,10 @@ machine at this port, so neither another site in the browser nor a rebound name 
 
 import contextlib
 import hmac
+import html
 import io
 import json
+import os
 import re
 import threading
 import time
@@ -145,7 +147,11 @@ class Studio:
         folder = self.folder / "presets"
         out = {}
         for path in sorted(folder.glob("*.json")) if folder.exists() else []:
-            out[path.stem] = json.loads(path.read_text(encoding="utf-8"))
+            # a preset edited by hand into something else is skipped, not fatal
+            with contextlib.suppress(ValueError):
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    out[path.stem] = data
         return out
 
     def save_preset(self, name: str, settings: Settings) -> None:
@@ -188,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
     """Answers the page; the studio and the token sit on the server."""
 
     server: "StudioServer"  # pyright: ignore[reportIncompatibleVariableOverride]
+    # a connection that sends nothing must not hold a thread for good
+    timeout = 10
 
     def log_message(self, format: str, *args: Any) -> None:
         """Keep the console for the page address and render times."""
@@ -252,7 +260,9 @@ class Handler(BaseHTTPRequestHandler):
         current = Settings()
         if saved.exists():
             with contextlib.suppress(ValueError):
-                current = from_dict(json.loads(saved.read_text(encoding="utf-8")))
+                data = json.loads(saved.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    current = from_dict(data)
         ctx = studio.engine.context
         return {
             **schema(),
@@ -273,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Transfer-Encoding"):
             raise BadRequest(HTTPStatus.LENGTH_REQUIRED, "no chunked bodies")
         length = self.headers.get("Content-Length", "")
-        if not length.isdigit():
+        if not (length.isascii() and length.isdigit()):
             raise BadRequest(HTTPStatus.LENGTH_REQUIRED, "Content-Length is needed")
         if int(length) > MAX_BODY:
             self.close_connection = True
@@ -375,6 +385,22 @@ class StudioServer(ThreadingHTTPServer):
         self.studio = studio
         self.token = token
         self.files = site_files()
+
+
+def browser_file(url: str, folder: Path) -> Path:
+    """A page only the owner can read that sends the browser to url.
+
+    Opening the address itself would put the token on the browser's command line, which
+    every user of the machine can read.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "open.html"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    page = f'<!doctype html><meta http-equiv="refresh" content="0;url={html.escape(url)}">'
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(page)
+    return path
 
 
 def make_server(studio: Studio, token: str, port: int = 0) -> StudioServer:

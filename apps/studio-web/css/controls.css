@@ -17,8 +17,8 @@
 }
 
 .btn:hover:not(:disabled) {
-  border-color: #50565e;
-  background: #22262b;
+  border-color: var(--line-hover);
+  background: var(--raised-hover);
 }
 
 .btn:active:not(:disabled) {
@@ -49,12 +49,12 @@
   border-radius: 50%;
   background: var(--red);
   border-color: var(--red);
-  color: #170806;
+  color: var(--ink-on-red);
 }
 
 .btn--play:hover:not(:disabled) {
-  background: #ff6150;
-  border-color: #ff6150;
+  background: var(--red-hover);
+  border-color: var(--red-hover);
 }
 
 .btn--play .icon--pause,
@@ -67,8 +67,9 @@
 }
 
 .btn--save:not(:disabled) {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--red-line);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--red-dim);
 }
 
 .icon {
@@ -137,17 +138,17 @@
   height: 22px;
   margin-top: -9px;
   border-radius: 3px;
-  background: linear-gradient(#f1ebe2, #c9c3b9);
-  border: 1px solid #00000099;
-  box-shadow: 0 1px 2px #000000aa;
+  background: linear-gradient(var(--cap-top), var(--cap-bottom));
+  border: 1px solid var(--well);
+  box-shadow: 0 1px 2px var(--well);
 }
 
 .slider__input::-moz-range-thumb {
   width: 14px;
   height: 22px;
   border-radius: 3px;
-  background: linear-gradient(#f1ebe2, #c9c3b9);
-  border: 1px solid #00000099;
+  background: linear-gradient(var(--cap-top), var(--cap-bottom));
+  border: 1px solid var(--well);
 }
 
 .row[data-changed="true"] .slider__input::-webkit-slider-runnable-track {
@@ -276,6 +277,12 @@
   background: var(--text);
 }
 
+/* bypassing a group is a warning, not a feature switched on */
+.card__bypass .switch[aria-checked="true"] {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+}
+
 /* segmented choice */
 .segments {
   display: inline-flex;
@@ -369,10 +376,10 @@
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-s);
-  background: #23272c;
+  background: var(--tip-bg);
   color: var(--text);
   font-size: var(--step--1);
   line-height: 1.45;
-  box-shadow: 0 8px 18px -8px #000000;
+  box-shadow: var(--drop);
   pointer-events: none;
 }

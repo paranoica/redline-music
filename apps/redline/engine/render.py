@@ -3,6 +3,7 @@
 The studio and the final run share it, so the final is what the studio played.
 """
 
+import math
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from dataclasses import astuple, dataclass
 import numpy as np
 import numpy.typing as npt
 
+from redline.core.loudness import integrated_lufs
 from redline.engine.settings import Settings
 from redline.master.clip import MasterResult, clip_at, master_clip, saturate_low
 from redline.vocal.chain import (
@@ -146,7 +148,11 @@ class Engine:
         self._lock = threading.Lock()
         # the master of the last whole render; a preview reuses its gain instead of searching
         self.last_master: MasterResult | None = None
+        self.last_mix: Samples | None = None
+        # set on a preview's piece: the whole render's master and how much louder the piece's
+        # loop must read than the whole mix did there before the master's gain is reused
         self._fixed_master: MasterResult | None = None
+        self._loop: tuple[int, int, float] | None = None
 
     @property
     def cached_bytes(self) -> int:
@@ -201,8 +207,10 @@ class Engine:
         (beat,) = self._stage(beat_key, lambda: (self._beat(settings),))
         check()
         master_key = (*layer_key, *beat_key, "master", *_key(settings, MASTER_KEYS))
-        final, master = self._stage(master_key, lambda: self._master(layered + beat, settings))
+        mix = layered + beat
+        final, master = self._stage(master_key, lambda: self._master(mix, settings))
         self.last_master = master
+        self.last_mix = mix
         return Rendered(layered, beat, final, chain, master)
 
     def preview(self, settings: Settings, start: int, end: int) -> Samples:
@@ -210,7 +218,10 @@ class Engine:
         pad = int(PREVIEW_PAD_S * self.context.rate)
         low, high = max(0, start - pad), min(len(self.vocal), end + pad)
         piece = Engine(self.vocal[low:high], self.beat[low:high], self.context, 0)
-        piece._fixed_master = self.last_master
+        if self.last_master is not None and self.last_mix is not None:
+            piece._fixed_master = self.last_master
+            before = integrated_lufs(self.last_mix[start:end], self.context.rate)
+            piece._loop = (start - low, end - low, before)
         return piece.render(settings).final[start - low : end - low]
 
     def _voice(self, vocal: Samples, settings: Settings) -> Samples:
@@ -259,10 +270,14 @@ class Engine:
             return mix, None
         target = self.context.master_lufs if settings.master_auto else settings.master_lufs
         fixed = self._fixed_master
-        if fixed is not None:
+        if fixed is not None and self._loop is not None:
             # a loop reads louder or quieter than the whole track, so its own gain search
-            # would miss; the whole track's gain, moved by any change of target, is closer
-            gain = fixed.gain_db - fixed.trim_db + target - fixed.target_lufs
+            # would miss; the whole track's gain is closer, moved by the change of target
+            # and by how much the mix got louder at the loop since that render
+            first, last, before = self._loop
+            now = integrated_lufs(mix[first:last], self.context.rate)
+            shift = 0.0 if not (math.isfinite(now) and math.isfinite(before)) else now - before
+            gain = fixed.gain_db - fixed.trim_db + target - fixed.target_lufs - shift
             return clip_at(mix, gain, fixed.trim_db), fixed
         return master_clip(mix, self.context.rate, target)
 

@@ -150,7 +150,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     print(f"studio: {url}")
     print("Ctrl+C stops it")
     if not args.no_browser:
-        webbrowser.open(url)
+        webbrowser.open(studio_server.browser_file(url, args.work / "studio").as_uri())
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

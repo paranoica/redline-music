@@ -13,6 +13,23 @@
   --text-dim: #a8a39b;
   --muted: #8a867f;
 
+  --deck-top: #121417;
+  --raised-hover: #22262b;
+  --line-hover: #50565e;
+  --tip-bg: #23272c;
+  --cap-top: #f1ebe2;
+  --cap-bottom: #c9c3b9;
+  --ink-on-red: #170806;
+  --red-hover: #ff6150;
+  --wave-orig: #34383e;
+  --wave-orig-body: #4a4e55;
+  --wave-res: #ece6dc;
+  --wave-res-body: #ece6dc80;
+  --loop-fill: #ff4b3a14;
+  --row-rule: #ffffff06;
+  --well-shadow: #00000080;
+  --amber-dim: #e8b04a26;
+
   --red: #ff4b3a;
   --red-dim: #ff4b3a33;
   --red-line: #ff4b3a99;

@@ -14,7 +14,6 @@ const ui = {
   a: $("ab-a"),
   b: $("ab-b"),
   blind: $("blind"),
-  reveal: $("reveal"),
   time: $("time"),
   state: $("state"),
   ms: $("render-ms"),
@@ -177,7 +176,7 @@ function toggleSide() {
 
 function setBlind(on) {
   ui.blind.setAttribute("aria-pressed", String(on));
-  ui.reveal.hidden = !on;
+  ui.blind.textContent = on ? "Показать" : "Вслепую";
   if (on) {
     const flip = crypto.getRandomValues(new Uint8Array(1))[0] % 2 === 0;
     blind = flip ? { a: "result", b: "original" } : { a: "original", b: "result" };
@@ -232,10 +231,12 @@ function wire() {
       showSide();
     });
   }
-  ui.blind.addEventListener("click", () => setBlind(!blind));
-  ui.reveal.addEventListener("click", () => {
-    note(`A — ${blind.a === "original" ? "оригинал" : "результат"}, B — ${blind.b === "original" ? "оригинал" : "результат"}.`);
-    setBlind(false);
+  ui.blind.addEventListener("click", () => {
+    if (blind) {
+      const name = (lane) => (lane === "original" ? "оригинал" : "результат");
+      note(`A — ${name(blind.a)}, B — ${name(blind.b)}.`);
+    }
+    setBlind(!blind);
   });
   ui.undo.addEventListener("click", () => {
     const back = history.undo();

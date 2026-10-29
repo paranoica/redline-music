@@ -120,29 +120,48 @@ export class Waveform {
       return;
     }
     const ratio = window.devicePixelRatio || 1;
-    const drawEnvelope = (env, x0, colWidth, peakColor, rmsColor) => {
+    const scale = mid * 0.95;
+    // the original is a filled band, the result an outline over it: where they part, the
+    // processing made that stretch louder or quieter
+    const fill = (env, x0, step, edge, body) => {
       for (let i = 0; i < env.peaks.length; i++) {
-        const x = x0 + i * colWidth;
-        const p = env.peaks[i] * mid * 0.95;
-        const r = env.rms[i] * mid * 0.95 * 1.4;
-        ctx.fillStyle = peakColor;
-        ctx.fillRect(x, mid - p, Math.max(1, colWidth - ratio), p * 2);
-        ctx.fillStyle = rmsColor;
-        ctx.fillRect(x, mid - r, Math.max(1, colWidth - ratio), r * 2);
+        const x = x0 + i * step;
+        const p = env.peaks[i] * scale;
+        const r = Math.min(env.rms[i] * scale * 1.4, p);
+        ctx.fillStyle = edge;
+        ctx.fillRect(x, mid - p, Math.max(1, step), p * 2);
+        ctx.fillStyle = body;
+        ctx.fillRect(x, mid - r, Math.max(1, step), r * 2);
       }
     };
-    drawEnvelope(this.original, 0, width / this.original.peaks.length, "#2f3237", "#4a4e55");
+    const outline = (values, x0, step, color, width) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        for (let i = 0; i < values.length; i++) {
+          const x = x0 + (i + 0.5) * step;
+          const y = mid + sign * values[i] * scale;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    };
+    fill(this.original, 0, width / this.original.peaks.length, css("--wave-orig"), css("--wave-orig-body"));
     if (this.result) {
       const x0 = this.#x(this.result.start);
-      const w = this.#x(this.result.span) / this.result.peaks.length;
-      drawEnvelope(this.result, x0, w, "#ece6dc3d", "#ece6dccc");
+      const step = this.#x(this.result.span) / this.result.peaks.length;
+      outline(this.result.peaks, x0, step, css("--wave-res"), 1.25 * ratio);
+      const body = this.result.rms.map((r, i) => Math.min(r * 1.4, this.result.peaks[i]));
+      outline(body, x0, step, css("--wave-res-body"), ratio);
     }
-    const red = css("--red") || "#ff4b3a";
+    const red = css("--red");
     const { start, end } = this.loop;
     if (end > start) {
       const a = this.#x(start);
       const b = this.#x(end);
-      ctx.fillStyle = "#ff4b3a14";
+      ctx.fillStyle = css("--loop-fill");
       ctx.fillRect(a, 0, b - a, height);
       ctx.strokeStyle = red;
       ctx.lineWidth = 2 * ratio;
