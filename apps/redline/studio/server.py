@@ -100,7 +100,8 @@ class Studio:
         self.rate = engine.context.rate
         self.latest_seq = 0
         self.original_lufs = integrated_lufs(original, self.rate)
-        self.exact: Settings | None = None
+        # every settings value a whole render finished with: any of them may be saved
+        self.exact: set[Settings] = set()
         self._seq_lock = threading.Lock()
         # a whole render takes a minute; a preview must not queue behind it
         self._render_lock = threading.Lock()
@@ -128,7 +129,7 @@ class Studio:
         """The whole track at these settings; None when a newer request came in."""
         rendered = self._run(seq, lambda cancelled: self.engine.render(settings, cancelled))
         if rendered is not None:
-            self.exact = settings
+            self.exact.add(settings)
         return rendered
 
     def preview(self, settings: Settings, seq: int, start: int, end: int) -> Samples | None:
@@ -139,7 +140,7 @@ class Studio:
 
     def save(self, settings: Settings) -> Path:
         """Write the settings the last exact render was made with."""
-        if settings != self.exact:
+        if settings not in self.exact:
             raise BadRequest(HTTPStatus.CONFLICT, "render these settings exactly before saving")
         path = self.folder / self.track_key / "settings.json"
         path.parent.mkdir(parents=True, exist_ok=True)

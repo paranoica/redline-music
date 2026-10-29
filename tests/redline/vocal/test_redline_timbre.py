@@ -185,3 +185,21 @@ def test_a_voice_an_octave_up_keeps_its_formants():
     assert np.median(f0[f0 > 0]) == pytest.approx(300, rel=0.02)
     for b, a in zip(formants(x), formants(y), strict=True):
         assert a == pytest.approx(b, rel=0.06)
+
+
+def test_a_formant_shift_is_the_same_every_time_also_from_two_threads():
+    import threading
+
+    x = sung(150, seconds=3.0)
+    first = formant_shift(x, RATE, 1.3)
+    assert np.array_equal(first, formant_shift(x, RATE, 1.3))
+    out = {}
+    threads = [
+        threading.Thread(target=lambda i=i: out.__setitem__(i, formant_shift(x, RATE, 1.3)))
+        for i in range(3)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert all(np.array_equal(first, out[i]) for i in range(3))

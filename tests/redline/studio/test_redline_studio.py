@@ -265,3 +265,11 @@ def test_a_preview_does_not_wait_for_a_whole_render(studio):
     finally:
         gate.set()
         whole.join(30)
+
+
+def test_any_whole_render_made_can_be_saved(studio):
+    first, second = from_dict({"formant": 1.2}), from_dict({"drive_db": 20.0})
+    assert studio.render(first, 1) is not None
+    assert studio.render(second, 2) is not None
+    assert studio.save(first).exists()
+    assert studio.save(second).exists()

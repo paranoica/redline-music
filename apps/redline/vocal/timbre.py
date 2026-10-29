@@ -1,10 +1,12 @@
 """Vocal timbre effects: doubles, octave layers, bitcrush, formant shift, hard tune."""
 
+import threading
+
 import librosa
 import numpy as np
 import numpy.typing as npt
 import parselmouth
-from parselmouth.praat import call
+from parselmouth.praat import call, run
 
 Samples = npt.NDArray[np.floating]
 
@@ -15,6 +17,10 @@ DOUBLE_LEVEL_DB = -4.0
 PITCH_FLOOR_HZ = 75.0
 PITCH_CEILING_HZ = 600.0
 PITCH_STEP_S = 0.01
+# Praat draws random numbers when it stretches time (formant shift); one seed per call, and
+# one call at a time, makes every render of the same settings the same
+PRAAT_SEED = 20261029
+_praat = threading.Lock()
 
 
 def bitcrush(samples: Samples, rate: int, bits: int, hold: int) -> Samples:
@@ -84,7 +90,9 @@ def _on_mid(samples: Samples, rate: int, change) -> Samples:
     if not mid.any():
         return samples.copy()
     try:
-        sound = change(parselmouth.Sound(mid, sampling_frequency=rate))
+        with _praat:
+            run(f"random_initializeWithSeedUnsafelyButPredictably ({PRAAT_SEED})")
+            sound = change(parselmouth.Sound(mid, sampling_frequency=rate))
     except parselmouth.PraatError as error:
         raise ValueError(f"the voice effect failed: {error}") from error
     out = np.zeros(len(mid))

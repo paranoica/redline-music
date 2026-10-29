@@ -251,7 +251,9 @@ function apply(next, record = true) {
     story("Вернулся к уже собранному треку. Можно сохранять.");
     return;
   }
-  preview(firstStage(before, values));
+  // without the loop the whole track plays, so a piece would not be heard
+  if (player.loop.on) preview(firstStage(before, values));
+  else build();
 }
 
 function setView(view) {

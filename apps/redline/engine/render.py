@@ -147,8 +147,8 @@ class Engine:
         self._cache: OrderedDict[tuple, tuple] = OrderedDict()
         self._lock = threading.Lock()
         # the master of the last whole render; a preview reuses its gain instead of searching
-        self.last_master: MasterResult | None = None
-        self.last_mix: Samples | None = None
+        # the last whole render's master and mix, kept as one pair: a preview reads both
+        self.last: tuple[MasterResult | None, Samples] | None = None
         # set on a preview's piece: the whole render's master and how much louder the piece's
         # loop must read than the whole mix did there before the master's gain is reused
         self._fixed_master: MasterResult | None = None
@@ -209,8 +209,7 @@ class Engine:
         master_key = (*layer_key, *beat_key, "master", *_key(settings, MASTER_KEYS))
         mix = layered + beat
         final, master = self._stage(master_key, lambda: self._master(mix, settings))
-        self.last_master = master
-        self.last_mix = mix
+        self.last = (master, mix)
         return Rendered(layered, beat, final, chain, master)
 
     def preview(self, settings: Settings, start: int, end: int) -> Samples:
@@ -218,9 +217,10 @@ class Engine:
         pad = int(PREVIEW_PAD_S * self.context.rate)
         low, high = max(0, start - pad), min(len(self.vocal), end + pad)
         piece = Engine(self.vocal[low:high], self.beat[low:high], self.context, 0)
-        if self.last_master is not None and self.last_mix is not None:
-            piece._fixed_master = self.last_master
-            before = integrated_lufs(self.last_mix[start:end], self.context.rate)
+        last = self.last
+        if last is not None and last[0] is not None:
+            piece._fixed_master = last[0]
+            before = integrated_lufs(last[1][start:end], self.context.rate)
             piece._loop = (start - low, end - low, before)
         return piece.render(settings).final[start - low : end - low]
 
