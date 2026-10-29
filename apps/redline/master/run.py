@@ -1,11 +1,9 @@
-"""Stage 3 runs: the chosen vocal over the beat, clipped to the references' loudness."""
+"""Stage 3: the blind rounds on the master, the timbre and the 808, and the run itself."""
 
 import json
-import logging
 import re
-import secrets
 import statistics
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,31 +12,25 @@ import numpy.typing as npt
 import soundfile as sf
 
 from redline.core.audio import true_peak_db
-from redline.core.listen import common_lufs, write_listen_set
+from redline.core.listen import common_lufs
 from redline.core.loudness import gated_crest_db, integrated_lufs
 from redline.core.spectrum import low_end
-from redline.engine.render import Context, Engine, timbre_of
-from redline.engine.settings import Settings
-from redline.master.clip import master_clip, saturate_low
+from redline.engine.render import Engine, Rendered, timbre_of
+from redline.engine.settings import SPECS, Settings
 from redline.master.report import write_final_report
 from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.measure.separate import Separator
-from redline.vocal.chain import ALL_LEVELS, ChainResult, check_vocal, process_vocal
-from redline.vocal.rounds import ORIGINAL, VocalRun, check_folders, reference_target
-from redline.vocal.timbre import (
-    bitcrush,
-    double,
-    formant_shift,
-    hard_tune,
-    octave_layer,
-    pitch_shift,
-    voice_octaves,
+from redline.vocal.rounds import (
+    ORIGINAL,
+    VocalRun,
+    blind_round,
+    check_folders,
+    reference_loudness,
+    track_engine,
 )
 
 Samples = npt.NDArray[np.floating]
 
-VOCAL_LEVEL = "loudest"
-VOCAL_DB = -6.0
 QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
 BASE = "base"
@@ -55,8 +47,7 @@ VOICE_EFFECTS = (
 EFFECTS = TIMBRE_EFFECTS + VOICE_EFFECTS
 TIMBRE = "octave down + doubles"
 # each new voice on top of the timbre already picked, pushed far enough to be heard under
-# the drive and the beat. Voice changes go first: the doubles sit half in the side, which
-# the Praat effects keep as it is
+# the drive and the beat
 VOICES = (
     f"formant x1.35 + {TIMBRE}",
     f"formant x0.78 + {TIMBRE}",
@@ -66,51 +57,39 @@ VOICES = (
 FORMANT_UP = 1.2
 FORMANT_DOWN = 0.85
 FORMANT_RATIO = re.compile(r"formant x(\d+(?:\.\d+)?)")
-FORMANT_LIMITS = (0.5, 2.0)
-BASS_FREQ_HZ = 120.0
 BASS_DRIVES_DB = (0.0, 6.0, 12.0, 18.0, 24.0)
-BASS_DRIVE_DB = 12.0
-# the level picked by ear
-OCTAVE_LEVEL_DB = -9.5
-CRUSH_BITS = 8
-CRUSH_HOLD = 3
-log = logging.getLogger(__name__)
-
-
-def _reference_loudness(refs: list[FileResult]) -> list[float]:
-    levels = [r.values.get("mix.lufs") for r in refs]
-    if any(level is None for level in levels):
-        raise ValueError("a reference has no measured loudness")
-    return [float(level) for level in levels if level is not None]
+# the chosen sound without its timbre, what each named effect is switched on over
+BARE = replace(Settings(), octave_down_on=False, doubles_on=False)
+EFFECT_SETTINGS: dict[str, dict[str, Any]] = {
+    "doubles": {"doubles_on": True},
+    "octave down": {"octave_down_on": True},
+    "bitcrush": {"bitcrush_on": True},
+    "formant up": {"formant": FORMANT_UP},
+    "formant down": {"formant": FORMANT_DOWN},
+    "hard tune": {"hard_tune": 100.0},
+    "octave up": {"octave_up_on": True},
+    "voice up": {"voice_octave": 1},
+    "nightcore": {"nightcore": True},
+}
 
 
 def master_targets(refs: list[FileResult]) -> dict[str, float]:
     """Loudness targets for a round: a quiet master, the references' median, their loudest."""
-    known = _reference_loudness(refs)
+    known = reference_loudness(refs)
     targets = sorted(
         {round(t, 1) for t in (QUIET_MASTER_LUFS, statistics.median(known), max(known))}
     )
     return {f"master {t:.1f}": t for t in targets}
 
 
-def _chosen_mix(
-    track: Path, refs: list[Path], work_dir: Path, separator: Separator
-) -> tuple[Inputs, Samples, Samples, ChainResult]:
-    """The original and the chosen vocal (processed, lowered) of a track; beat untouched."""
-    inputs = measure_inputs(track, refs, work_dir, separator)
-    stems = inputs.track_stems
-    rate = stems.rate
-    original = stems.vocal + stems.beat
-    check_vocal(integrated_lufs(stems.vocal, rate), integrated_lufs(original, rate))
-    vocal, chain = process_vocal(
-        stems.vocal, rate, ALL_LEVELS[VOCAL_LEVEL], reference_target(inputs.refs), inputs.upper
-    )
-    return inputs, original, vocal * np.float32(10 ** (VOCAL_DB / 20)), chain
-
-
-def _chosen_sound(vocal: Samples, beat: Samples, rate: int) -> tuple[Samples, Samples]:
-    """The chosen timbre on the vocal and the chosen drive on the 808."""
-    return _with_timbre(TIMBRE, vocal, rate), saturate_low(beat, rate, BASS_FREQ_HZ, BASS_DRIVE_DB)
+def _master_record(name: str, rendered: Rendered, rate: int) -> dict[str, Any]:
+    if rendered.master is None:
+        raise ValueError(f"{name}: rendered without a master")
+    return {
+        "name": name,
+        **asdict(rendered.master),
+        "final_lufs": integrated_lufs(rendered.final, rate),
+    }
 
 
 def master_round(
@@ -123,77 +102,65 @@ def master_round(
 ) -> VocalRun:
     """Blind round on the master: the original, the mix unmastered, and one file per target."""
     check_folders(work_dir, out_dir)
-    inputs, original, vocal, chain = _chosen_mix(track, refs, work_dir, separator)
-    rate = inputs.track_stems.rate
-    vocal, beat = _chosen_sound(vocal, inputs.track_stems.beat, rate)
-    mix = vocal + beat
-    variants = {ORIGINAL: original, NO_MASTER: mix}
-    masters = []
-    for name, target in master_targets(inputs.refs).items():
-        log.info("mastering: %s", name)
-        mastered, result = master_clip(mix, rate, target)
-        variants[name] = mastered
-        masters.append(
-            {"name": name, **asdict(result), "final_lufs": integrated_lufs(mastered, rate)}
-        )
-    record = {
-        "vocal": asdict(chain),
-        "vocal_db": VOCAL_DB,
-        "timbre": TIMBRE,
-        "bass_drive_db": BASS_DRIVE_DB,
-        "masters": masters,
+    inputs = measure_inputs(track, refs, work_dir, separator)
+    engine = track_engine(inputs)
+    rate = engine.context.rate
+    chosen = Settings()
+    targets = master_targets(inputs.refs)
+    variants: dict[str, Settings | Samples] = {
+        ORIGINAL: engine.vocal + engine.beat,
+        NO_MASTER: replace(chosen, master_on=False),
     }
-    return _write_round(work_dir, out_dir, "master", variants, rate, seed, record)
+    for name, target in targets.items():
+        variants[name] = replace(chosen, master_auto=False, master_lufs=target)
+
+    def record(renders: dict[str, Rendered]) -> dict[str, Any]:
+        return {
+            "vocal": asdict(renders[NO_MASTER].chain),
+            "vocal_db": chosen.vocal_db,
+            "timbre": timbre_of(chosen),
+            "bass_drive_db": chosen.bass_drive_db,
+            "masters": [_master_record(name, renders[name], rate) for name in targets],
+        }
+
+    return blind_round(engine, variants, work_dir, out_dir, "master", seed, record)[0]
 
 
 def _effects(name: str) -> list[str]:
     return [part.strip() for part in name.split("+")]
 
 
-def _formant_ratio(effect: str) -> float | None:
-    if effect in ("formant up", "formant down"):
-        return FORMANT_UP if effect == "formant up" else FORMANT_DOWN
+def _effect_settings(effect: str) -> dict[str, Any] | None:
+    if effect in EFFECT_SETTINGS:
+        return EFFECT_SETTINGS[effect]
     named = FORMANT_RATIO.fullmatch(effect)
-    if named and FORMANT_LIMITS[0] <= float(named.group(1)) <= FORMANT_LIMITS[1]:
-        return float(named.group(1))
+    spec = SPECS["formant"]
+    if named and spec.low <= float(named.group(1)) <= spec.high:
+        return {"formant": float(named.group(1))}
     return None
 
 
-def _known(effect: str) -> bool:
-    return effect in EFFECTS or _formant_ratio(effect) is not None
+def timbre_settings(name: str) -> Settings:
+    """The chosen sound without its timbre, with the named effects switched on.
 
-
-def _with_timbre(name: str, vocal: Samples, rate: int, tuning_cents: float = 0.0) -> Samples:
-    """Apply one effect, or several joined by " + ", in order.
+    The engine renders them in its own order, the voice before the layers, whatever order
+    they are named in.
 
     Args:
         name: The effects, joined by " + ".
-        vocal: The processed vocal.
-        rate: Its sample rate.
-        tuning_cents: The track's own tuning against A440, the grid hard tune snaps to.
+
+    Raises:
+        ValueError: An effect is unknown, or two of them set the same setting.
     """
-    out = vocal
+    changes: dict[str, Any] = {}
     for effect in _effects(name):
-        if effect == "doubles":
-            out = double(out, rate)
-        elif effect in ("octave down", "octave up"):
-            out = octave_layer(out, rate, -1 if effect == "octave down" else 1, OCTAVE_LEVEL_DB)
-        elif (ratio := _formant_ratio(effect)) is not None:
-            out = formant_shift(out, rate, ratio)
-        elif effect == "voice up":
-            out = voice_octaves(out, rate, 1)
-        elif effect == "nightcore":
-            # the vocoder moves the formants with the notes, as a sped-up record does
-            out = pitch_shift(out, rate, 12.0)
-        elif effect == "hard tune":
-            out = hard_tune(out, rate, tuning_cents)
-        elif effect == "bitcrush":
-            # the crush works on the vocal's own scale, not on its level under the beat
-            peak = float(np.abs(out).max())
-            out = bitcrush(out / peak, rate, CRUSH_BITS, CRUSH_HOLD) * np.float32(peak)
-        else:
-            raise ValueError(f"unknown timbre {effect!r}, expected some of {', '.join(EFFECTS)}")
-    return out
+        change = _effect_settings(effect)
+        if change is None:
+            raise ValueError(f"unknown timbre {effect}, expected some of {', '.join(EFFECTS)}")
+        if again := sorted(changes.keys() & change.keys()):
+            raise ValueError(f"{name!r} sets {', '.join(again)} twice")
+        changes.update(change)
+    return replace(BARE, **changes)
 
 
 def timbre_round(
@@ -211,50 +178,20 @@ def timbre_round(
     On the voice axis the base carries the chosen timbre, as the final does, and each variant
     names the chosen timbre with one new effect.
     """
-    unknown = [e for name in timbres for e in _effects(name) if not _known(e)]
+    unknown = [e for name in timbres for e in _effects(name) if _effect_settings(e) is None]
     if unknown:
         raise ValueError(
             f"unknown timbre {', '.join(unknown)}, expected some of {', '.join(EFFECTS)}"
         )
+    named = {name: timbre_settings(name) for name in timbres}
     check_folders(work_dir, out_dir)
-    inputs, original, vocal, _ = _chosen_mix(track, refs, work_dir, separator)
-    rate = inputs.track_stems.rate
-    beat = saturate_low(inputs.track_stems.beat, rate, BASS_FREQ_HZ, BASS_DRIVE_DB)
-    target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
-    tuning = float(inputs.track.info.get("vocal.tuning_cents") or 0.0)
-    base = _with_timbre(TIMBRE, vocal, rate) if axis == "voice" else vocal
-    variants = {BASE: master_clip(base + beat, rate, target)[0]}
+    engine = track_engine(measure_inputs(track, refs, work_dir, separator))
+    variants: dict[str, Settings | Samples] = {BASE: Settings() if axis == "voice" else BARE}
     if axis != "voice":
-        variants = {ORIGINAL: original, **variants}
-    for name in timbres:
-        log.info("%s: %s", axis, name)
-        sound = _with_timbre(name, vocal, rate, tuning)
-        variants[name] = master_clip(sound + beat, rate, target)[0]
-    record = {"timbres": timbres, "tuning_cents": tuning}
-    return _write_round(work_dir, out_dir, axis, variants, rate, seed, record)
-
-
-def _write_round(
-    work_dir: Path,
-    out_dir: Path,
-    axis: str,
-    variants: dict[str, Samples],
-    rate: int,
-    seed: int | None,
-    record: dict,
-) -> VocalRun:
-    run_dir = new_run_dir(work_dir / "runs")
-    out_run = new_run_dir(out_dir)
-    keep_out_of_git(out_run)
-    listen_dir = out_run / "listen"
-    seed = secrets.randbits(32) if seed is None else seed
-    key = write_listen_set(variants, rate, listen_dir, seed)
-    (run_dir / "key.json").write_text(
-        json.dumps({"axis": axis, "seed": seed, "key": key, "listen_dir": str(listen_dir)}),
-        encoding="utf-8",
-    )
-    (run_dir / "chain.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
-    return VocalRun(run_dir, listen_dir)
+        variants[ORIGINAL] = engine.vocal + engine.beat
+    variants.update(named)
+    record = {"timbres": timbres, "tuning_cents": engine.context.tuning_cents}
+    return blind_round(engine, variants, work_dir, out_dir, axis, seed, lambda _: record)[0]
 
 
 def bass_round(
@@ -271,46 +208,27 @@ def bass_round(
     listening set levels them; the clip depth each one needed is recorded.
     """
     check_folders(work_dir, out_dir)
-    inputs, original, vocal, _ = _chosen_mix(track, refs, work_dir, separator)
-    beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
-    vocal = _with_timbre(TIMBRE, vocal, rate)
-    target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
-    variants = {ORIGINAL: original}
-    masters = []
-    for drive_db in BASS_DRIVES_DB:
-        name = f"808 +{drive_db:.0f} dB"
-        log.info("808: %s", name)
-        mixed = vocal + saturate_low(beat, rate, BASS_FREQ_HZ, drive_db)
-        final, result = master_clip(mixed, rate, target)
-        variants[name] = final
-        masters.append(
+    inputs = measure_inputs(track, refs, work_dir, separator)
+    engine = track_engine(inputs)
+    rate = engine.context.rate
+    drives = {f"808 +{drive_db:.0f} dB": drive_db for drive_db in BASS_DRIVES_DB}
+    variants: dict[str, Settings | Samples] = {ORIGINAL: engine.vocal + engine.beat}
+    for name, drive_db in drives.items():
+        variants[name] = replace(Settings(), bass_drive_db=drive_db)
+
+    def record(renders: dict[str, Rendered]) -> dict[str, Any]:
+        masters = [
             {
-                "name": name,
+                **_master_record(name, renders[name], rate),
                 "drive_db": drive_db,
-                **asdict(result),
-                "final_lufs": integrated_lufs(final, rate),
-                "low_crest_db": low_end(final, rate).crest_db,
+                "low_crest_db": low_end(renders[name].final, rate).crest_db,
             }
-        )
-    refs_low = [r.values.get("beat.low_crest_db") for r in inputs.refs]
-    record = {"masters": masters, "refs_low_crest_db": refs_low}
-    return _write_round(work_dir, out_dir, "808", variants, rate, seed, record)
+            for name, drive_db in drives.items()
+        ]
+        refs_low = [r.values.get("beat.low_crest_db") for r in inputs.refs]
+        return {"masters": masters, "refs_low_crest_db": refs_low}
 
-
-def track_engine(inputs: Inputs) -> Engine:
-    """The engine of a measured track: its stems, EQ target, tuning and loudness target."""
-    stems = inputs.track_stems
-    rate = stems.rate
-    original = stems.vocal + stems.beat
-    check_vocal(integrated_lufs(stems.vocal, rate), integrated_lufs(original, rate))
-    context = Context(
-        rate,
-        reference_target(inputs.refs),
-        inputs.upper,
-        float(inputs.track.info.get("vocal.tuning_cents") or 0.0),
-        round(statistics.median(_reference_loudness(inputs.refs)), 1),
-    )
-    return Engine(stems.vocal, stems.beat, context)
+    return blind_round(engine, variants, work_dir, out_dir, "808", seed, record)[0]
 
 
 def run_track(

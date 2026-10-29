@@ -1,19 +1,18 @@
 import json
+from dataclasses import asdict
 from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
 import soundfile as sf
 from redline.cli import main
+from redline.core.loudness import integrated_lufs
+from redline.engine.render import Engine
+from redline.engine.settings import Settings, from_dict
 from redline.measure.run import FileResult
-from redline.vocal.rounds import (
-    BALANCE_DB,
-    balance_variants,
-    dirt_variants,
-    reference_target,
-    vocal_run,
-)
-from redline_signals import make_rng, tone, write
+from redline.vocal.chain import ALL_LEVELS, process_vocal
+from redline.vocal.rounds import blind_round, level_settings, reference_target, vocal_run
+from redline_signals import RATE, engine_context, engine_stems, make_rng, tone, write
 
 MARKER_HZ = 7300
 
@@ -144,16 +143,6 @@ def test_cli_vocal_without_references_exits_2(inputs, tmp_path, capsys):
     assert main(args, separator=HalfSeparator()) == 2
 
 
-def test_balance_variants_lower_only_the_vocal():
-    rng = make_rng()
-    vocal = rng.standard_normal((1000, 2)).astype(np.float32)
-    beat = rng.standard_normal((1000, 2)).astype(np.float32)
-    variants = balance_variants(vocal, beat)
-    assert list(variants) == ["vocal 0", "vocal -3", "vocal -6", "vocal -9"]
-    for offset, mix in zip(BALANCE_DB, variants.values(), strict=True):
-        np.testing.assert_allclose(mix - beat, vocal * 10 ** (-offset / 20), atol=1e-6)
-
-
 def test_balance_axis_writes_original_and_four_balances(inputs, tmp_path):
     result = run(inputs, tmp_path, seed=6, axis="balance")
     key = json.loads((result.run_dir / "key.json").read_text())
@@ -164,6 +153,18 @@ def test_balance_axis_writes_original_and_four_balances(inputs, tmp_path):
     chain = json.loads((result.run_dir / "chain.json").read_text())
     assert [c["level"] for c in chain["chains"]] == ["extra"]
     assert chain["balance_db"] == [0, 3, 6, 9]
+    variants = chain["variants"]
+    assert {name: s["vocal_db"] for name, s in variants.items()} == {
+        "vocal 0": 0.0,
+        "vocal -3": -3.0,
+        "vocal -6": -6.0,
+        "vocal -9": -9.0,
+    }
+    # extra: compressor -34 dB 20:1 1/50 ms, drive 24 dB, clip 9 dB under the peak
+    for s in variants.values():
+        chain_part = (s["comp_threshold_db"], s["comp_ratio"], s["comp_attack_ms"])
+        assert chain_part == (-34.0, 20.0, 1.0) and s["comp_release_ms"] == 50.0
+        assert (s["drive_db"], s["clip_on"], s["clip_below_peak_db"]) == (24.0, True, 9.0)
 
 
 @pytest.mark.parametrize("out", ["w", "w/runs", "w/runs/x"])
@@ -211,14 +212,6 @@ def test_a_reference_without_vocal_is_named():
         reference_target([ref_result("a.wav", [0.0, -3.0]), ref_result("b.wav", [])])
 
 
-def test_dirt_variants_lower_the_vocal_only():
-    rng = make_rng()
-    beat = rng.standard_normal((1000, 2)).astype(np.float32)
-    vocal = rng.standard_normal((1000, 2)).astype(np.float32)
-    mix = dirt_variants({"heavy": vocal}, beat, vocal_db=-6.0)["heavy"]
-    np.testing.assert_allclose(mix - beat, vocal * 10 ** (-6 / 20), atol=1e-6)
-
-
 def test_dirt_axis_takes_chosen_levels_at_a_chosen_balance(inputs, tmp_path):
     levels = ("medium", "heavy", "extra", "loudest")
     result = run(inputs, tmp_path, seed=10, levels=levels, vocal_db=-6.0)
@@ -232,16 +225,6 @@ def test_dirt_axis_takes_chosen_levels_at_a_chosen_balance(inputs, tmp_path):
 def test_an_unknown_level_is_refused(inputs, tmp_path):
     with pytest.raises(ValueError, match="unknown dirt level"):
         run(inputs, tmp_path, levels=("heavy", "nuclear"))
-
-
-def test_dirt_variants_add_the_beat_untouched():
-    rng = make_rng()
-    beat = rng.standard_normal((1000, 2)).astype(np.float32)
-    vocals = {name: rng.standard_normal((1000, 2)).astype(np.float32) for name in ("eq", "heavy")}
-    variants = dirt_variants(vocals, beat)
-    assert list(variants) == ["eq", "heavy"]
-    for name, mix in variants.items():
-        np.testing.assert_allclose(mix - vocals[name], beat, atol=1e-6)
 
 
 class ResidueRefsSeparator:
@@ -290,3 +273,74 @@ def test_no_levels_is_refused(inputs, tmp_path):
 def test_dirt_options_on_the_balance_axis_are_refused(inputs, tmp_path, options):
     with pytest.raises(ValueError, match="dirt axis"):
         run(inputs, tmp_path, axis="balance", **options)
+
+
+@pytest.fixture
+def engine():
+    vocal, beat = engine_stems()
+    return Engine(vocal, beat, engine_context(vocal))
+
+
+def test_blind_round_writes_every_variant_at_one_level_with_the_key_and_settings(engine, tmp_path):
+    plain = from_dict({"master_on": False, "doubles_on": False})
+    variants = {"original": engine.vocal + engine.beat, "plain": plain, "mastered": Settings()}
+    result, renders = blind_round(
+        engine,
+        variants,
+        tmp_path / "w",
+        tmp_path / "o",
+        "test",
+        seed=9,
+        record=lambda rendered: {"rendered": sorted(rendered)},
+    )
+    key = json.loads((result.run_dir / "key.json").read_text())
+    assert (key["axis"], key["seed"]) == ("test", 9)
+    assert sorted(key["key"].values()) == ["mastered", "original", "plain"]
+    assert key["listen_dir"] == str(result.listen_dir)
+    files = sorted(result.listen_dir.iterdir())
+    assert [f.name for f in files] == ["A.wav", "B.wav", "C.wav"]
+    levels = [integrated_lufs(sf.read(f, always_2d=True)[0], RATE) for f in files]
+    assert max(levels) - min(levels) <= 0.1
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert chain["rendered"] == ["mastered", "plain"]
+    assert chain["variants"] == {"plain": asdict(plain), "mastered": asdict(Settings())}
+    assert sorted(renders) == ["mastered", "plain"]
+    letters = {name: letter for letter, name in key["key"].items()}
+    heard, _ = sf.read(result.listen_dir / f"{letters['plain']}.wav", always_2d=True)
+    assert np.corrcoef(heard[:, 0], renders["plain"].final[:, 0])[0, 1] > 0.9999
+    heard, _ = sf.read(result.listen_dir / f"{letters['original']}.wav", always_2d=True)
+    assert np.corrcoef(heard[:, 0], (engine.vocal + engine.beat)[:, 0])[0, 1] > 0.9999
+    out_files = sorted(p.name for p in (tmp_path / "o").rglob("*") if p.is_file())
+    assert out_files == [".gitignore", "A.wav", "B.wav", "C.wav"]
+    assert result.run_dir.is_relative_to(tmp_path / "w")
+
+
+@pytest.mark.parametrize("name", ["eq", "light", "heavy", "loudest"])
+def test_a_level_renders_its_vocal_lowered_over_the_untouched_beat(engine, name):
+    ctx = engine.context
+    rendered = engine.render(level_settings(ALL_LEVELS[name], -6.0))
+    processed, _ = process_vocal(engine.vocal, RATE, ALL_LEVELS[name], ctx.target, ctx.upper)
+    assert rendered.chain.level == name
+    assert np.array_equal(rendered.vocal, processed * np.float32(10 ** (-6.0 / 20)))
+    assert np.array_equal(rendered.beat, engine.beat)
+    assert np.array_equal(rendered.final, rendered.vocal + engine.beat)
+
+
+def test_dirt_round_records_each_levels_settings(inputs, tmp_path):
+    result = run(inputs, tmp_path, seed=12, levels=("eq", "heavy"), vocal_db=-3.0)
+    variants = json.loads((result.run_dir / "chain.json").read_text())["variants"]
+    assert sorted(variants) == ["eq", "heavy"]
+    assert variants["eq"]["chain_on"] is False
+    heavy = variants["heavy"]
+    assert heavy["chain_on"] is True
+    # heavy: compressor -30 dB 10:1 2/60 ms, drive 18 dB, clip 6 dB under the peak
+    comp = (heavy["comp_threshold_db"], heavy["comp_ratio"], heavy["comp_attack_ms"])
+    assert comp == (-30.0, 10.0, 2.0) and heavy["comp_release_ms"] == 60.0
+    assert (heavy["drive_db"], heavy["clip_on"], heavy["clip_below_peak_db"]) == (18.0, True, 6.0)
+    for s in variants.values():
+        assert s["vocal_db"] == -3.0 and s["eq_fit"] is True
+        assert (s["master_on"], s["bass_drive_db"], s["beat_db"]) == (False, 0.0, 0.0)
+        assert not any(
+            s[k] for k in ("octave_down_on", "octave_up_on", "doubles_on", "bitcrush_on")
+        )
+        assert (s["hard_tune"], s["formant"], s["voice_octave"], s["nightcore"]) == (0, 1, 0, False)

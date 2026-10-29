@@ -6,7 +6,7 @@ from redline.engine.settings import Settings, from_dict
 from redline.master.clip import master_clip, saturate_low
 from redline.vocal.chain import LOUDEST, process_vocal
 from redline.vocal.timbre import double, octave_layer
-from redline_signals import RATE
+from redline_signals import RATE, make_rng, write
 from redline_signals import engine_context as context
 from redline_signals import engine_stems as stems
 
@@ -163,3 +163,58 @@ def test_effects_off_leave_the_vocal_as_the_layers_made_it(setup):
     on = Engine(vocal, beat, ctx).render(from_dict({"reverb_on": True}))
     assert not np.array_equal(plain.vocal, on.vocal)
     assert np.array_equal(Engine(vocal, beat, ctx).render(Settings()).vocal, plain.vocal)
+
+
+class HalfSeparator:
+    id = "fake:half"
+
+    def __call__(self, samples, rate):
+        return samples * 0.5, samples * 0.5
+
+
+def song(seconds, amp=0.3):
+    rng = make_rng()
+    n = int(seconds * RATE)
+    t = np.arange(n) / RATE
+    kick = np.sin(2 * np.pi * 55 * t) * np.exp(-((t % 0.5) / 0.15))
+    envelope = 0.65 + 0.35 * np.cos(2 * np.pi * 3 * t)
+    voice = np.sin(2 * np.pi * 400 * t) * envelope * 0.5
+    mono = amp * (kick + voice) + 0.0005 * rng.standard_normal(n)
+    return np.column_stack([mono, mono]).astype(np.float32)
+
+
+def test_the_default_chain_keeps_the_levels_the_rounds_rendered(tmp_path):
+    from redline.core.loudness import integrated_lufs
+    from redline.master.run import track_engine
+    from redline.measure.run import measure_inputs
+
+    track = write(tmp_path, "track.wav", song(8), RATE)
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    write(refs, "a.wav", song(6, amp=0.6), RATE, subtype="FLOAT")
+    write(refs, "b.wav", song(6, amp=0.9), RATE, subtype="FLOAT")
+    inputs = measure_inputs(track, sorted(refs.iterdir()), tmp_path / "w", HalfSeparator())
+    final = track_engine(inputs).render(Settings()).final
+    # pinned on the chain the blind rounds ran before the engine, so a change in any shared
+    # step moves them
+    assert integrated_lufs(final, RATE) == pytest.approx(-10.70907, abs=1e-3)
+    rms = float(np.sqrt(np.mean(np.square(final, dtype=np.float64))))
+    assert rms == pytest.approx(0.285086, rel=1e-4)
+    assert float(np.abs(final).max()) == pytest.approx(0.988553, abs=1e-5)
+
+
+def test_no_808_drive_leaves_the_beat_untouched(setup):
+    vocal, beat, ctx = setup
+    engine = Engine(vocal, beat, ctx)
+    assert np.array_equal(engine.render(from_dict({"bass_drive_db": 0.0})).beat, beat)
+    quieter = engine.render(from_dict({"bass_drive_db": 0.0, "beat_db": -6.0})).beat
+    assert np.array_equal(quieter, beat * np.float32(10 ** (-6.0 / 20)))
+    driven = engine.render(from_dict({"bass_drive_db": 1.0})).beat
+    assert not np.allclose(driven, beat, atol=1e-4)
+
+
+def test_a_bitcrush_on_a_silent_vocal_stays_silent(setup):
+    vocal, beat, ctx = setup
+    silent = np.zeros_like(vocal)
+    out = Engine(vocal, beat, ctx)._layers(silent, from_dict({"bitcrush_on": True}))
+    assert np.all(np.isfinite(out)) and not np.any(out)

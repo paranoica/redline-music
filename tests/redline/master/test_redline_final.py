@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
@@ -6,10 +7,10 @@ import soundfile as sf
 from redline.cli import main
 from redline.core.loudness import integrated_lufs
 from redline.core.spectrum import low_end
+from redline.engine.settings import Settings
 from redline.master.clip import CEILING_DB
 from redline.master.run import (
     BASS_DRIVES_DB,
-    TIMBRE,
     TIMBRE_EFFECTS,
     VOICES,
     bass_round,
@@ -17,6 +18,7 @@ from redline.master.run import (
     master_targets,
     run_track,
     timbre_round,
+    timbre_settings,
 )
 from redline.measure.run import FileResult
 from redline_signals import make_rng, tone, write
@@ -97,6 +99,12 @@ def test_master_round_writes_the_original_and_four_masters(inputs, tmp_path):
     for m in masters:
         assert m["reached"] is True
         assert m["final_lufs"] == pytest.approx(m["target_lufs"], abs=0.2)
+    variants = chain["variants"]
+    assert sorted(variants) == sorted(n for n in names if n != "original")
+    assert variants["no master"] == asdict(replace(Settings(), master_on=False))
+    for m in masters:
+        fixed = replace(Settings(), master_auto=False, master_lufs=m["target_lufs"])
+        assert variants[m["name"]] == asdict(fixed)
 
 
 def test_master_round_masters_the_chosen_sound(inputs, tmp_path):
@@ -396,6 +404,16 @@ def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_p
     assert key["axis"] == "timbre"
     assert sorted(key["key"].values()) == sorted(["original", "base", *TIMBRE_EFFECTS])
     assert len(list(result.listen_dir.iterdir())) == 2 + len(TIMBRE_EFFECTS)
+    levels = [integrated_lufs(*sf.read(f, always_2d=True)) for f in result.listen_dir.iterdir()]
+    assert max(levels) - min(levels) <= 0.1
+    variants = json.loads((result.run_dir / "chain.json").read_text())["variants"]
+    bare = replace(Settings(), octave_down_on=False, doubles_on=False)
+    assert variants == {
+        "base": asdict(bare),
+        "doubles": asdict(replace(bare, doubles_on=True)),
+        "octave down": asdict(replace(bare, octave_down_on=True)),
+        "bitcrush": asdict(replace(bare, bitcrush_on=True)),
+    }
 
 
 def test_timbre_round_plays_the_chosen_timbre_as_the_final(inputs, tmp_path):
@@ -459,6 +477,9 @@ def test_bass_round_holds_the_loudness_and_steps_the_808_drive(inputs, tmp_path)
     names = [f"808 +{d:.0f} dB" for d in BASS_DRIVES_DB]
     assert sorted(key["key"].values()) == sorted(["original", *names])
     chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert chain["variants"] == {
+        f"808 +{d:.0f} dB": asdict(replace(Settings(), bass_drive_db=d)) for d in (0, 6, 12, 18, 24)
+    }
     masters = {m["name"]: m for m in chain["masters"]}
     assert sorted(masters) == sorted(names)
     finals = [m["final_lufs"] for m in masters.values()]
@@ -483,6 +504,18 @@ def test_cli_voice_round_writes_the_chosen_timbre_with_each_new_voice(inputs, tm
     assert sorted(key["key"].values()) == sorted(["base", *VOICES])
     assert len(VOICES) == 4
     assert all("octave down + doubles" in v for v in VOICES)
+    # the base is the chosen timbre; each voice changes one thing on top of it
+    variants = json.loads((run_dir / "chain.json").read_text())["variants"]
+    chosen = Settings()
+    assert variants == {
+        "base": asdict(chosen),
+        "formant x1.35 + octave down + doubles": asdict(replace(chosen, formant=1.35)),
+        "formant x0.78 + octave down + doubles": asdict(replace(chosen, formant=0.78)),
+        "voice up + octave down + doubles": asdict(replace(chosen, voice_octave=1)),
+        "nightcore + octave down + doubles": asdict(replace(chosen, nightcore=True)),
+    }
+    letters = list(key["key"])
+    assert sorted(p.name for p in (tmp_path / "o").rglob("*.wav")) == [f"{c}.wav" for c in letters]
 
 
 def test_cli_voice_round_takes_named_voices_and_refuses_unknown_ones(inputs, tmp_path):
@@ -498,17 +531,8 @@ def test_cli_voice_round_takes_named_voices_and_refuses_unknown_ones(inputs, tmp
     assert not (tmp_path / "o2").exists()
 
 
-def test_hard_tune_in_a_round_snaps_to_the_tracks_own_tuning(monkeypatch):
-    from redline.master import run as final_run
-
-    seen = []
-    monkeypatch.setattr(final_run, "hard_tune", lambda x, rate, cents: seen.append(cents) or x)
-    vocal = np.zeros((100, 2), dtype=np.float32)
-    final_run._with_timbre("hard tune", vocal, 44100, tuning_cents=-17.0)
-    assert seen == [-17.0]
-
-
 def test_a_voice_round_hands_the_tracks_measured_tuning_to_hard_tune(inputs, tmp_path, monkeypatch):
+    from redline.engine import render as engine
     from redline.master import run as final_run
 
     measure = final_run.measure_inputs
@@ -520,9 +544,11 @@ def test_a_voice_round_hands_the_tracks_measured_tuning_to_hard_tune(inputs, tmp
 
     seen = []
     monkeypatch.setattr(final_run, "measure_inputs", measured)
-    monkeypatch.setattr(final_run, "hard_tune", lambda x, rate, cents: seen.append(cents) or x)
+    monkeypatch.setattr(
+        engine, "hard_tune", lambda x, rate, cents, strength: seen.append((cents, strength)) or x
+    )
     track, refs = inputs
-    timbre_round(
+    result = timbre_round(
         track,
         sorted(refs.iterdir()),
         tmp_path / "w",
@@ -532,81 +558,70 @@ def test_a_voice_round_hands_the_tracks_measured_tuning_to_hard_tune(inputs, tmp
         ("hard tune",),
         "voice",
     )
-    assert seen == [-23.0]
+    # a full snap on the track's own tuning, only in the variant that names it
+    assert seen == [(-23.0, 1.0)]
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert chain["tuning_cents"] == -23.0
+    assert chain["variants"]["hard tune"]["hard_tune"] == 100.0
+    assert chain["variants"]["base"]["hard_tune"] == 0.0
 
 
-def test_a_voice_round_base_carries_the_chosen_timbre_and_formants_come_first(
-    inputs, tmp_path, monkeypatch
-):
-    from redline.master import run as final_run
+def test_each_named_effect_switches_on_its_setting():
+    bare = replace(Settings(), octave_down_on=False, doubles_on=False)
+    # the timbre the rounds picked is the default chain
+    assert timbre_settings("octave down + doubles") == Settings()
+    assert timbre_settings("doubles") == replace(bare, doubles_on=True)
+    assert timbre_settings("octave up") == replace(bare, octave_up_on=True)
+    assert timbre_settings("octave up").octave_up_db == -9.5
+    crushed = timbre_settings("bitcrush")
+    assert crushed == replace(bare, bitcrush_on=True)
+    assert (crushed.bitcrush_bits, crushed.bitcrush_hold) == (8, 3)
+    assert timbre_settings("formant up") == replace(bare, formant=1.2)
+    assert timbre_settings("formant down") == replace(bare, formant=0.85)
+    assert timbre_settings("hard tune") == replace(bare, hard_tune=100.0)
+    assert timbre_settings("voice up + nightcore") == replace(bare, voice_octave=1, nightcore=True)
 
-    names = []
-    monkeypatch.setattr(final_run, "_with_timbre", lambda name, x, *a: names.append(name) or x)
+
+def test_effects_render_in_the_engines_order_whatever_order_they_are_named_in():
+    assert timbre_settings("doubles + formant down") == timbre_settings("formant down + doubles")
+    assert timbre_settings("bitcrush + doubles") == timbre_settings("doubles + bitcrush")
+
+
+@pytest.mark.parametrize("ratio", ["0.6", "1.8", "1.35", "0.78"])
+def test_a_formant_ratio_in_the_settings_range_can_be_named(ratio):
+    assert timbre_settings(f"formant x{ratio}").formant == float(ratio)
+
+
+@pytest.mark.parametrize(
+    "wild",
+    ["formant x0.59", "formant x1.81", "formant x0.5", "formant x2", "formant x", "formant xabc"],
+)
+def test_a_formant_ratio_outside_the_settings_range_is_refused(wild):
+    with pytest.raises(ValueError, match="unknown timbre"):
+        timbre_settings(wild)
+
+
+@pytest.mark.parametrize(
+    "twice", ["formant x1.35 + formant x0.78", "formant up + formant down", "doubles + doubles"]
+)
+def test_one_setting_named_twice_is_refused(twice):
+    with pytest.raises(ValueError, match="twice"):
+        timbre_settings(twice)
+
+
+def test_a_round_refuses_a_setting_named_twice_before_writing(inputs, tmp_path):
     track, refs = inputs
-    timbre_round(
-        track,
-        sorted(refs.iterdir()),
-        tmp_path / "w",
-        tmp_path / "o",
-        HalfSeparator(),
-        1,
-        VOICES,
-        "voice",
-    )
-    assert names[0] == TIMBRE
-    formant = [v for v in VOICES if "formant" in v]
-    assert formant and all(v.startswith("formant") for v in formant)
-
-
-def test_a_formant_ratio_can_be_named_and_a_wild_one_is_refused(monkeypatch):
-    from redline.master import run as final_run
-
-    seen = []
-    monkeypatch.setattr(final_run, "formant_shift", lambda x, rate, r: seen.append(r) or x)
-    vocal = np.zeros((100, 2), dtype=np.float32)
-    final_run._with_timbre("formant x1.35 + formant x0.78", vocal, 44100)
-    assert seen == [1.35, 0.78]
-    for wild in ("formant x9", "formant x0.1", "formant x", "formant xabc"):
-        with pytest.raises(ValueError, match="unknown timbre"):
-            final_run._with_timbre(wild, vocal, 44100)
-
-
-def test_voice_up_and_nightcore_move_the_whole_voice_an_octave(monkeypatch):
-    from redline.master import run as final_run
-
-    calls = []
-    monkeypatch.setattr(final_run, "voice_octaves", lambda x, rate, n: calls.append(("up", n)) or x)
-    monkeypatch.setattr(final_run, "pitch_shift", lambda x, rate, st: calls.append(("nc", st)) or x)
-    vocal = np.zeros((100, 2), dtype=np.float32)
-    final_run._with_timbre("voice up + nightcore", vocal, 44100)
-    assert calls == [("up", 1), ("nc", 12.0)]
-
-
-def test_the_run_renders_what_it_rendered_before_the_engine(inputs, tmp_path):
-    import statistics
-
-    from redline.master import run as final_run
-    from redline.master.clip import master_clip
-
-    track, refs = inputs
-    files = sorted(refs.iterdir())
-    folder = run_track(track, files, tmp_path / "w", tmp_path / "o", HalfSeparator())
-    got, rate = sf.read(folder / "final.wav", dtype="float32")
-    # the chain as the rounds ran it before the engine. Not a byte hash: numpy's vector math
-    # moves the last bit with the memory layout earlier work left, so bytes depend on order
-    made, _, vocal, _ = final_run._chosen_mix(track, files, tmp_path / "w", HalfSeparator())
-    vocal, beat = final_run._chosen_sound(vocal, made.track_stems.beat, rate)
-    target = round(statistics.median(r.values["mix.lufs"] for r in made.refs), 1)
-    want, _ = master_clip(vocal + beat, rate, target)
-    assert got.shape == want.shape
-    assert np.abs(got - want).max() < 2e-6
-    # and both still match the run that gave the pre-engine file, so a change in the code
-    # they share shows too
-    assert integrated_lufs(got, rate) == pytest.approx(-10.70907, abs=1e-3)
-    assert float(np.sqrt(np.mean(np.square(got, dtype=np.float64)))) == pytest.approx(
-        0.285086, rel=1e-4
-    )
-    assert float(np.abs(got).max()) == pytest.approx(0.988553, abs=1e-5)
+    with pytest.raises(ValueError, match="twice"):
+        timbre_round(
+            track,
+            sorted(refs.iterdir()),
+            tmp_path / "w",
+            tmp_path / "o",
+            HalfSeparator(),
+            6,
+            ("formant up + formant x1.3",),
+        )
+    assert not (tmp_path / "o").exists() and not (tmp_path / "w").exists()
 
 
 def test_run_with_settings_uses_them_and_the_tracks_tuning(inputs, tmp_path, monkeypatch):

@@ -4,7 +4,6 @@ from dataclasses import asdict, fields
 
 import pytest
 from redline.engine.settings import SPECS, Settings, from_dict, load, save, schema
-from redline.master.run import BASS_DRIVE_DB, BASS_FREQ_HZ, OCTAVE_LEVEL_DB, VOCAL_DB
 from redline.vocal.chain import LOUDEST
 from redline.vocal.timbre import DOUBLE_DELAY_MS, DOUBLE_DEPTH_MS, DOUBLE_LEVEL_DB
 
@@ -20,12 +19,13 @@ def test_the_defaults_are_the_picks_made_by_ear():
     )
     assert (s.drive_db, s.clip_below_peak_db) == (LOUDEST.drive_db, LOUDEST.clip_below_peak_db)
     assert s.chain_on and s.clip_on and s.eq_fit and s.eq_offsets_db == (0.0,) * 6
-    assert s.vocal_db == VOCAL_DB
-    assert s.octave_down_on and s.octave_down_db == OCTAVE_LEVEL_DB and not s.octave_up_on
+    # the vocal, octave and 808 picks of RDL-D9 and RDL-D11
+    assert s.vocal_db == -6.0
+    assert s.octave_down_on and s.octave_down_db == -9.5 and not s.octave_up_on
     assert s.doubles_on and s.doubles_db == DOUBLE_LEVEL_DB
     assert (s.doubles_left_ms, s.doubles_right_ms) == DOUBLE_DELAY_MS
     assert s.doubles_wander_ms == DOUBLE_DEPTH_MS
-    assert (s.bass_freq_hz, s.bass_drive_db, s.beat_db) == (BASS_FREQ_HZ, BASS_DRIVE_DB, 0.0)
+    assert (s.bass_freq_hz, s.bass_drive_db, s.beat_db) == (120.0, 12.0, 0.0)
     assert s.hard_tune == 0 and s.formant == 1.0 and s.voice_octave == 0 and not s.nightcore
     assert not s.bitcrush_on and s.master_on and s.master_auto
 

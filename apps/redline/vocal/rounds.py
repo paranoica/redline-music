@@ -1,27 +1,27 @@
-"""Stage 2 run: process the track's vocal at every dirt level and write the blind listening set."""
+"""Blind listening rounds: variants rendered by the engine, written under letters, the key kept.
+
+Stage 2's vocal rounds (dirt, balance) live here; the stage 3 rounds use the same blind_round.
+"""
 
 import json
 import logging
 import secrets
-from dataclasses import asdict, dataclass
+import statistics
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
 
 from redline.core.listen import write_listen_set
 from redline.core.loudness import integrated_lufs
-from redline.measure.run import FileResult, keep_out_of_git, measure_inputs, new_run_dir
+from redline.engine.render import Context, Engine, Rendered
+from redline.engine.settings import Settings
+from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.measure.separate import Separator
-from redline.vocal.chain import (
-    ALL_LEVELS,
-    DIRT_LEVELS,
-    EXTRA,
-    ChainResult,
-    Target,
-    check_vocal,
-    process_vocal,
-)
+from redline.vocal.chain import ALL_LEVELS, DIRT_LEVELS, EXTRA, DirtLevel, Target, check_vocal
 from redline.vocal.report import write_vocal_report
 
 Samples = npt.NDArray[np.floating]
@@ -30,12 +30,16 @@ ORIGINAL = "original"
 AXES = ("dirt", "balance")
 BALANCE_DB = (0, 3, 6, 9)
 DEFAULT_LEVELS = tuple(level.name for level in DIRT_LEVELS)
+# the processed vocal over the beat as it came: no timbre, no 808 drive, no master
+PLAIN = replace(
+    Settings(), octave_down_on=False, doubles_on=False, bass_drive_db=0.0, master_on=False
+)
 log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
 class VocalRun:
-    """Where a stage 2 run put its files."""
+    """Where a round put its files."""
 
     run_dir: Path
     listen_dir: Path
@@ -59,6 +63,30 @@ def reference_target(refs: list[FileResult]) -> Target:
     return Target(centers, tuple(float(v) for v in median))
 
 
+def reference_loudness(refs: list[FileResult]) -> list[float]:
+    """The references' integrated loudness; a reference without one is refused."""
+    levels = [r.values.get("mix.lufs") for r in refs]
+    if any(level is None for level in levels):
+        raise ValueError("a reference has no measured loudness")
+    return [float(level) for level in levels if level is not None]
+
+
+def track_engine(inputs: Inputs) -> Engine:
+    """The engine of a measured track: its stems, EQ target, tuning and loudness target."""
+    stems = inputs.track_stems
+    rate = stems.rate
+    original = stems.vocal + stems.beat
+    check_vocal(integrated_lufs(stems.vocal, rate), integrated_lufs(original, rate))
+    context = Context(
+        rate,
+        reference_target(inputs.refs),
+        inputs.upper,
+        float(inputs.track.info.get("vocal.tuning_cents") or 0.0),
+        round(statistics.median(reference_loudness(inputs.refs)), 1),
+    )
+    return Engine(stems.vocal, stems.beat, context)
+
+
 def check_folders(work_dir: Path, out_dir: Path) -> None:
     """Refuse an output folder inside the work folder or the reverse: the key lives in work."""
     work, out = work_dir.resolve(), out_dir.resolve()
@@ -78,19 +106,77 @@ def _check_levels(levels: tuple[str, ...]) -> None:
         )
 
 
-def dirt_variants(
-    vocals: dict[str, Samples], beat: Samples, vocal_db: float = 0.0
-) -> dict[str, Samples]:
-    """Each processed vocal, moved by vocal_db, over the untouched beat."""
-    gain = np.float32(10 ** (vocal_db / 20))
-    return {name: vocal * gain + beat for name, vocal in vocals.items()}
+def level_settings(level: DirtLevel, vocal_db: float) -> Settings:
+    """A dirt level as settings: its chain on the vocal, moved by vocal_db, over the plain beat.
+
+    A level without a compressor is the EQ alone, the chain switched off.
+    """
+    comp = level.compressor
+    if comp is None:
+        return replace(PLAIN, chain_on=False, vocal_db=vocal_db)
+    clip = level.clip_below_peak_db
+    return replace(
+        PLAIN,
+        comp_threshold_db=comp.threshold_db,
+        comp_ratio=comp.ratio,
+        comp_attack_ms=comp.attack_ms,
+        comp_release_ms=comp.release_ms,
+        drive_db=level.drive_db,
+        clip_on=clip is not None,
+        clip_below_peak_db=PLAIN.clip_below_peak_db if clip is None else clip,
+        vocal_db=vocal_db,
+    )
 
 
-def balance_variants(vocal: Samples, beat: Samples) -> dict[str, Samples]:
-    """The processed vocal over the untouched beat, lowered by each BALANCE_DB step."""
-    return {
-        f"vocal {-offset}": vocal * np.float32(10 ** (-offset / 20)) + beat for offset in BALANCE_DB
-    }
+def blind_round(
+    engine: Engine,
+    variants: Mapping[str, Settings | Samples],
+    work_dir: Path,
+    out_dir: Path,
+    axis: str,
+    seed: int | None = None,
+    record: Callable[[dict[str, Rendered]], dict[str, Any]] = lambda rendered: {},
+) -> tuple[VocalRun, dict[str, Rendered]]:
+    """Render each variant and write the listening set, its key and the round's record.
+
+    Args:
+        engine: The track's engine.
+        variants: Settings to render, or audio played as it is, such as the original.
+        work_dir: Where runs/<run>/ gets key.json and chain.json.
+        out_dir: Where <run>/listen/ gets one letter per variant, all at one loudness.
+        axis: The round's axis, kept in the key.
+        seed: The shuffle's seed; a random one when None.
+        record: Builds chain.json from the renders; the settings of each are added to it.
+
+    Returns:
+        Where the files went, and the render of each settings variant.
+    """
+    renders: dict[str, Rendered] = {}
+    mixes: dict[str, Samples] = {}
+    for name, variant in variants.items():
+        if isinstance(variant, Settings):
+            log.info("%s: %s", axis, name)
+            renders[name] = engine.render(variant)
+            mixes[name] = renders[name].final
+        else:
+            mixes[name] = variant
+    run_dir = new_run_dir(work_dir / "runs")
+    out_run = new_run_dir(out_dir)
+    keep_out_of_git(out_run)
+    listen_dir = out_run / "listen"
+    seed = secrets.randbits(32) if seed is None else seed
+    key = write_listen_set(mixes, engine.context.rate, listen_dir, seed)
+    (run_dir / "key.json").write_text(
+        json.dumps(
+            {"axis": axis, "seed": seed, "key": key, "listen_dir": str(listen_dir)}, indent=1
+        ),
+        encoding="utf-8",
+    )
+    settings = {n: asdict(v) for n, v in variants.items() if isinstance(v, Settings)}
+    (run_dir / "chain.json").write_text(
+        json.dumps({**record(renders), "variants": settings}, indent=1), encoding="utf-8"
+    )
+    return VocalRun(run_dir, listen_dir), renders
 
 
 def vocal_run(
@@ -116,75 +202,49 @@ def vocal_run(
         raise ValueError("--levels and --vocal-db belong to the dirt axis")
     check_folders(work_dir, out_dir)
     inputs = measure_inputs(track, refs, work_dir, separator)
-    stems, upper = inputs.track_stems, inputs.upper
-    rate = stems.rate
-    original = stems.vocal + stems.beat
-    check_vocal(integrated_lufs(stems.vocal, rate), integrated_lufs(original, rate))
-    target = reference_target(inputs.refs)
-    variants = {ORIGINAL: original}
-    chains: list[ChainResult] = []
-    vocals = {ORIGINAL: stems.vocal}
-    for level in [ALL_LEVELS[name] for name in levels] if axis == "dirt" else (EXTRA,):
-        log.info("processing the vocal: %s", level.name)
-        vocal, chain = process_vocal(stems.vocal, rate, level, target, upper)
-        chains.append(chain)
-        vocals[level.name] = vocal
-        if axis == "balance":
-            variants.update(balance_variants(vocal, stems.beat))
+    engine = track_engine(inputs)
+    ctx = engine.context
     if axis == "dirt":
-        variants.update(
-            dirt_variants({k: v for k, v in vocals.items() if k != ORIGINAL}, stems.beat, vocal_db)
-        )
-    run_dir = new_run_dir(work_dir / "runs")
-    out_run = new_run_dir(out_dir)
-    keep_out_of_git(out_run)
-    listen_dir = out_run / "listen"
-    seed = secrets.randbits(32) if seed is None else seed
-    key = write_listen_set(variants, rate, listen_dir, seed)
-    _write_records(run_dir, axis, seed, key, listen_dir, rate, upper, target, chains, vocal_db)
+        variants = {name: level_settings(ALL_LEVELS[name], vocal_db) for name in levels}
+    else:
+        variants = {f"vocal {-offset}": level_settings(EXTRA, -offset) for offset in BALANCE_DB}
+
+    def record(renders: dict[str, Rendered]) -> dict[str, Any]:
+        chains = list(renders.values()) if axis == "dirt" else [renders["vocal 0"]]
+        return {
+            "rate": ctx.rate,
+            "compared_up_to_hz": ctx.upper,
+            "target": asdict(ctx.target),
+            "axis": axis,
+            "chains": [asdict(r.chain) for r in chains],
+            "levels": [asdict(level) for level in ALL_LEVELS.values()],
+            "balance_db": list(BALANCE_DB),
+            "vocal_db": vocal_db,
+        }
+
+    result, renders = blind_round(
+        engine,
+        {ORIGINAL: engine.vocal + engine.beat, **variants},
+        work_dir,
+        out_dir,
+        axis,
+        seed,
+        record,
+    )
+    # the report reads each processed vocal at its own level, before the balance moved it
+    vocals = {ORIGINAL: engine.vocal}
+    if axis == "dirt":
+        undo = np.float32(10 ** (-vocal_db / 20))
+        vocals.update({name: renders[name].vocal * undo for name in levels})
+    else:
+        vocals[EXTRA.name] = renders["vocal 0"].vocal
     write_vocal_report(
-        run_dir / "report.md",
+        result.run_dir / "report.md",
         vocals,
-        rate,
-        upper,
-        target,
+        ctx.rate,
+        ctx.upper,
+        ctx.target,
         [r.values for r in inputs.refs],
         inputs.track.native_rate,
     )
-    return VocalRun(run_dir, listen_dir)
-
-
-def _write_records(
-    run_dir: Path,
-    axis: str,
-    seed: int,
-    key: dict[str, str],
-    listen_dir: Path,
-    rate: int,
-    upper: float,
-    target: Target,
-    chains: list[ChainResult],
-    vocal_db: float,
-) -> None:
-    (run_dir / "key.json").write_text(
-        json.dumps(
-            {"axis": axis, "seed": seed, "key": key, "listen_dir": str(listen_dir)}, indent=1
-        ),
-        encoding="utf-8",
-    )
-    (run_dir / "chain.json").write_text(
-        json.dumps(
-            {
-                "rate": rate,
-                "compared_up_to_hz": upper,
-                "target": asdict(target),
-                "axis": axis,
-                "chains": [asdict(c) for c in chains],
-                "levels": [asdict(level) for level in ALL_LEVELS.values()],
-                "balance_db": list(BALANCE_DB),
-                "vocal_db": vocal_db,
-            },
-            indent=1,
-        ),
-        encoding="utf-8",
-    )
+    return result

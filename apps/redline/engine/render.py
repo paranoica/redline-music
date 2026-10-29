@@ -279,6 +279,9 @@ class Engine:
         beat = self.beat
         if settings.beat_db:
             beat = beat * np.float32(10 ** (settings.beat_db / 20))
+        if settings.bass_drive_db <= 0:
+            # the crossover alone is an allpass, not the beat as it came
+            return beat
         return saturate_low(beat, self.context.rate, settings.bass_freq_hz, settings.bass_drive_db)
 
     def _master(self, mix: Samples, settings: Settings) -> tuple[Samples, MasterResult | None]:
