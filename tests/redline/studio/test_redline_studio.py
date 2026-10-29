@@ -2,6 +2,7 @@ import http.client
 import io
 import json
 import threading
+from pathlib import Path
 
 import pytest
 import soundfile as sf
@@ -313,3 +314,12 @@ def test_a_reference_span_has_its_own_loudness(server, studio):
         "i=0&start=x&end=1",
     ):
         assert call(server, "GET", f"/api/reference_span?{query}")[0] == 400
+
+
+def test_the_browser_file_opens_from_a_relative_folder(tmp_path, monkeypatch):
+    from redline.web.local import browser_file
+
+    monkeypatch.chdir(tmp_path)
+    path = browser_file("http://127.0.0.1:5555/", Path("work") / "studio")
+    assert path.as_uri().startswith("file:///")
+    assert path == tmp_path / "work" / "studio" / "open.html"

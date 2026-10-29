@@ -184,7 +184,8 @@ def browser_file(url: str, folder: Path) -> Path:
     every user of the machine can read.
     """
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / "open.html"
+    # a file URI takes an absolute path only
+    path = folder.resolve() / "open.html"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     os.fchmod(fd, 0o600)
     page = f'<!doctype html><meta http-equiv="refresh" content="0;url={html.escape(url)}">'
