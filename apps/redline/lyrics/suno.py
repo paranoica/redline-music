@@ -73,6 +73,39 @@ SETTINGS = {
     "Variety": "0",
 }
 TITLE_WORDS = 3
+# words a title must not end on: it reads as cut off
+LITTLE = frozenset(
+    [
+        "и",
+        "а",
+        "но",
+        "да",
+        "или",
+        "в",
+        "во",
+        "на",
+        "с",
+        "со",
+        "к",
+        "ко",
+        "по",
+        "о",
+        "об",
+        "у",
+        "за",
+        "из",
+        "от",
+        "до",
+        "для",
+        "не",
+        "ни",
+        "же",
+        "ли",
+        "бы",
+        "что",
+        "как",
+    ]
+)
 Mark = Callable[[str], str]
 
 
@@ -143,8 +176,18 @@ def title_of(track: Track) -> str:
     if not said:
         return "Без названия"
     top = max(said.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
-    first = " ".join(top.split()[:TITLE_WORDS]).rstrip(" ,.;:-\u2013\u2014")
+    words = top.split()
+    count = min(TITLE_WORDS, len(words))
+    while count < min(len(words), TITLE_WORDS + 2) and _little(words[count - 1]):
+        count += 1
+    while count > 1 and _little(words[count - 1]):
+        count -= 1
+    first = " ".join(words[:count]).rstrip(" ,.;:-\u2013\u2014")
     return first[:1].upper() + first[1:]
+
+
+def _little(word: str) -> bool:
+    return word.strip(",.;:!?-\u2013\u2014").lower() in LITTLE
 
 
 def _style(recipe: Recipe | None) -> str:

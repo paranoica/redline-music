@@ -147,7 +147,22 @@ def test_the_owners_style_wins_on_a_beat_seed_too():
 def test_a_title_cut_at_a_comma_or_dash_loses_it():
     text = "[Припев]\nдым в клубе, и дым в голове\nдым в клубе, и дым в голове\n"
     assert title_of(parse_text(text)) == "Дым в клубе"
-    assert title_of(parse_text("[Припев]\nночь — и я снова тут\n")) == "Ночь — и"
+    assert title_of(parse_text("[Припев]\nночь — и я снова тут\n")) == "Ночь — и я"
+
+
+@pytest.mark.parametrize(
+    ("hook", "title"),
+    [
+        ("аптека, бит и дроп", "Аптека, бит и дроп"),
+        ("холод на мне и в груди", "Холод на мне"),
+        ("я на дне, а ты", "Я на дне"),
+        ("и снова в путь", "И снова в путь"),
+        ("в", "В"),
+        ("бит и и и и и", "Бит"),
+    ],
+)
+def test_a_title_does_not_end_on_a_little_word(hook, title):
+    assert title_of(parse_text(f"[Припев]\n{hook}\n")) == title
 
 
 def test_a_hard_beat_gets_an_aggressive_delivery_in_the_style():
