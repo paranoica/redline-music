@@ -6,7 +6,7 @@ the stage rounds chose.
 
 import json
 import math
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ class Spec:
     step: float = 1.0
     unit: str = ""
     choices: tuple[float, ...] = ()
+    basic: bool = False
 
 
 GROUPS = {
@@ -298,6 +299,24 @@ SPECS: dict[str, Spec] = {
         "LUFS",
     ),
 }
+
+# the settings the studio shows first; the rest wait behind "all settings"
+BASIC = (
+    "vocal_db",
+    "comp_threshold_db",
+    "drive_db",
+    "eq_fit",
+    "hard_tune",
+    "formant",
+    "octave_down_on",
+    "octave_down_db",
+    "doubles_on",
+    "doubles_db",
+    "bass_drive_db",
+    "master_auto",
+    "master_lufs",
+)
+SPECS = {key: replace(spec, basic=key in BASIC) for key, spec in SPECS.items()}
 
 KINDS: dict[str, type] = {f.name: f.type for f in fields(Settings) if isinstance(f.type, type)}
 

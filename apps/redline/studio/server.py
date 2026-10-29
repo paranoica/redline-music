@@ -102,7 +102,9 @@ class Studio:
         self.original_lufs = integrated_lufs(original, self.rate)
         self.exact: Settings | None = None
         self._seq_lock = threading.Lock()
+        # a whole render takes a minute; a preview must not queue behind it
         self._render_lock = threading.Lock()
+        self._preview_lock = threading.Lock()
 
     def _claim(self, seq: int) -> bool:
         with self._seq_lock:
@@ -111,10 +113,10 @@ class Studio:
             self.latest_seq = seq
             return True
 
-    def _run(self, seq: int, work: Any) -> Any:
+    def _run(self, seq: int, work: Any, lock: "threading.Lock | None" = None) -> Any:
         if not self._claim(seq):
             return None
-        with self._render_lock:
+        with lock or self._render_lock:
             if seq != self.latest_seq:
                 return None
             try:
@@ -131,7 +133,9 @@ class Studio:
 
     def preview(self, settings: Settings, seq: int, start: int, end: int) -> Samples | None:
         """The loop at these settings, rendered on the loop alone; None when superseded."""
-        return self._run(seq, lambda _: self.engine.preview(settings, start, end))
+        return self._run(
+            seq, lambda _: self.engine.preview(settings, start, end), self._preview_lock
+        )
 
     def save(self, settings: Settings) -> Path:
         """Write the settings the last exact render was made with."""

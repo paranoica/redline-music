@@ -20,6 +20,14 @@ const ui = {
   tuning: $("tuning"),
   target: $("target"),
   save: $("save"),
+  build: $("build"),
+  story: $("story"),
+  progress: $("progress"),
+  progressBar: $("progress-bar"),
+  hint: $("hint"),
+  hintClose: $("hint-close"),
+  showBasic: $("show-basic"),
+  showAll: $("show-all"),
   stages: [...document.querySelectorAll(".stage")],
   loopSpan: $("loop-span"),
   undo: $("undo"),
@@ -41,6 +49,8 @@ let rendered = null; // the settings of the last exact render, as JSON
 let exact = null; // that render's audio and loudness
 let seq = 0;
 let inflight = null;
+let wholeSeconds = null; // how long the last whole render took, the next one's estimate
+let ticking = null;
 // blind mode: which lane each letter plays; null when names are shown
 let blind = null;
 
@@ -54,6 +64,32 @@ function setState(kind, text) {
   ui.state.dataset.state = kind;
   ui.state.textContent = text;
   ui.save.disabled = kind !== "exact";
+}
+
+// the plain-words line under the deck; bold parts are passed as [text]
+function story(...parts) {
+  ui.story.replaceChildren(
+    ...parts.map((part) => {
+      if (!Array.isArray(part)) return document.createTextNode(part);
+      const b = document.createElement("b");
+      b.textContent = part[0];
+      return b;
+    }),
+  );
+}
+
+function loopName() {
+  return `${clock(player.loop.start)}–${clock(player.loop.end)}`;
+}
+
+function remember(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function note(text, command) {
@@ -96,53 +132,105 @@ function setLoop(loop) {
   wave.setLoop(loop);
   ui.loopSpan.textContent = `петля ${clock(loop.start)}–${clock(loop.end)}`;
   // a preview only covers the loop it was made for
-  if (ui.state.dataset.state !== "exact") render(firstStage(null, values));
+  if (ui.state.dataset.state !== "exact") preview(firstStage(null, values));
 }
 
 async function decode(bytes) {
   return player.decode(bytes);
 }
 
-async function render(fromStage = 0) {
+function nextRequest() {
   // the server keeps the newest number it saw, across page reloads too, so numbers grow with time
   seq = Math.max(Date.now(), seq + 1);
-  const mine = seq;
   inflight?.abort();
   inflight = new AbortController();
-  const { signal } = inflight;
+  stopProgress();
+  return { mine: seq, signal: inflight.signal };
+}
+
+function stopProgress() {
+  clearInterval(ticking);
+  ticking = null;
+  ui.progress.hidden = true;
+  ui.build.disabled = false;
+}
+
+function failed(error) {
+  if (error instanceof Superseded || error.name === "AbortError") return;
+  stopProgress();
+  markStages(0, "clear");
+  setState("error", "ошибка");
+  story("Сервер ответил ошибкой: ", [error.message]);
+}
+
+// a loop with the new settings, in a couple of seconds
+async function preview(fromStage = 0) {
+  const { mine, signal } = nextRequest();
   const settings = { ...values };
-  const key = JSON.stringify(settings);
   markStages(0, "clear");
   markStages(fromStage, "busy");
+  setState("busy", "считаю кусок");
+  story("Считаю кусок ", [loopName()], " с новыми настройками…");
   try {
-    if (player.loop.on) {
-      setState("busy", "считаю кусок");
-      const { start, end } = player.loop;
-      const piece = await api.preview(settings, start, end, mine, signal);
-      const buffer = await decode(piece.bytes);
-      if (mine !== seq) return;
-      player.setResult(buffer, start, piece.lufs, piece.originalLufs);
-      wave.setResult(buffer, start);
-      ui.ms.textContent = `${Math.round(piece.ms)} мс`;
-      setState("approx", "примерно");
-    } else {
-      setState("busy", "считаю трек");
-    }
+    const { start, end } = player.loop;
+    const piece = await api.preview(settings, start, end, mine, signal);
+    const buffer = await decode(piece.bytes);
+    if (mine !== seq) return;
+    player.setResult(buffer, start, piece.lufs, piece.originalLufs);
+    wave.setResult(buffer, start);
+    const took = (piece.ms / 1000).toFixed(1);
+    ui.ms.textContent = `${took} с`;
+    markStages(fromStage, "done");
+    setState("approx", "кусок");
+    story(
+      "Слушаешь ",
+      ["кусок " + loopName()],
+      ` с новыми настройками (посчитан за ${took} с). Весь трек ещё не собран: для сохранения — «Собрать весь трек».`,
+    );
+  } catch (error) {
+    failed(error);
+  }
+}
+
+// the whole track, exactly as the final will be; takes about a minute
+async function build() {
+  const { mine, signal } = nextRequest();
+  const settings = { ...values };
+  const key = JSON.stringify(settings);
+  const began = performance.now();
+  const estimate = wholeSeconds || 60;
+  setState("busy", "собираю трек");
+  markStages(0, "busy");
+  ui.build.disabled = true;
+  ui.progress.hidden = false;
+  const update = () => {
+    const passed = (performance.now() - began) / 1000;
+    const share = Math.min(0.95, passed / estimate);
+    ui.progressBar.style.transform = `scaleX(${share})`;
+    story(
+      "Собираю ",
+      ["весь трек"],
+      `: ${Math.round(passed)} с из ~${Math.round(estimate)} с. Можно крутить дальше — тогда сборка отменится.`,
+    );
+  };
+  update();
+  ticking = setInterval(update, 250);
+  try {
     const whole = await api.render(settings, mine, signal);
     const buffer = await decode(whole.bytes);
     if (mine !== seq) return;
+    wholeSeconds = (performance.now() - began) / 1000;
+    stopProgress();
     player.setResult(buffer, 0, whole.lufs, schema.track.original_lufs);
     wave.setResult(buffer, 0);
     rendered = key;
     exact = { buffer, lufs: whole.lufs };
-    ui.ms.textContent = `${(whole.ms / 1000).toFixed(1)} с`;
-    markStages(fromStage, "done");
-    setState("exact", "точно");
+    ui.ms.textContent = `${wholeSeconds.toFixed(0)} с`;
+    markStages(0, "done");
+    setState("exact", "весь трек");
+    story(["Весь трек собран"], ` за ${Math.round(wholeSeconds)} с — это ровно то, что выйдет в финале. Можно сохранять.`);
   } catch (error) {
-    if (error instanceof Superseded || error.name === "AbortError") return;
-    markStages(0, "clear");
-    setState("error", "ошибка");
-    note(`Сервер ответил: ${error.message}`);
+    failed(error);
   }
 }
 
@@ -155,15 +243,22 @@ function apply(next, record = true) {
   ui.redo.disabled = !history.future.length;
   if (JSON.stringify(values) === rendered) {
     // back to what was rendered last: play that render, drop whatever is still running
-    seq = Math.max(Date.now(), seq + 1);
-    inflight?.abort();
+    nextRequest();
     player.setResult(exact.buffer, 0, exact.lufs, schema.track.original_lufs);
     wave.setResult(exact.buffer, 0);
-    markStages(0, "clear");
-    setState("exact", "точно");
+    markStages(0, "done");
+    setState("exact", "весь трек");
+    story("Вернулся к уже собранному треку. Можно сохранять.");
     return;
   }
-  render(firstStage(before, values));
+  preview(firstStage(before, values));
+}
+
+function setView(view) {
+  document.querySelector(".desk").dataset.view = view;
+  ui.showBasic.setAttribute("aria-checked", String(view === "basic"));
+  ui.showAll.setAttribute("aria-checked", String(view === "all"));
+  remember("studio-view", view);
 }
 
 function sideFor(button) {
@@ -231,7 +326,8 @@ function wire() {
     const on = ui.loop.getAttribute("aria-pressed") !== "true";
     ui.loop.setAttribute("aria-pressed", String(on));
     player.setLoop({ on });
-    if (!on && ui.state.dataset.state !== "exact") render(0);
+    // without the loop the result must cover the whole track
+    if (!on && ui.state.dataset.state !== "exact") build();
   });
   for (const button of [ui.a, ui.b]) {
     button.addEventListener("click", () => {
@@ -255,12 +351,19 @@ function wire() {
     if (forward) apply(forward, false);
   });
   ui.resetAll.addEventListener("click", () => apply({ ...defaults }));
+  ui.build.addEventListener("click", build);
+  ui.showBasic.addEventListener("click", () => setView("basic"));
+  ui.showAll.addEventListener("click", () => setView("all"));
+  ui.hintClose.addEventListener("click", () => {
+    ui.hint.hidden = true;
+    remember("studio-hint", "closed");
+  });
   ui.save.addEventListener("click", async () => {
     try {
       const { path } = await api.save(values);
       note("Сохранено. Финал с этими настройками:", `redline run --track <трек> --ref <референсы> --settings ${path}`);
     } catch (error) {
-      note(error instanceof Superseded ? "Дождись «точно», потом сохраняй." : `Не сохранилось: ${error.message}`);
+      note(error instanceof Superseded ? "Сначала «Собрать весь трек», потом сохраняй." : `Не сохранилось: ${error.message}`);
     }
   });
   ui.presetSave.addEventListener("click", async () => {
@@ -312,6 +415,8 @@ async function start() {
   ui.target.textContent = `${schema.track.master_lufs.toFixed(1)} LUFS`;
   ui.undo.disabled = true;
   ui.redo.disabled = true;
+  setView(remember("studio-view") === "all" ? "all" : "basic");
+  ui.hint.hidden = remember("studio-hint") === "closed";
   wire();
   const original = await api.original();
   const buffer = await decode(original.bytes);

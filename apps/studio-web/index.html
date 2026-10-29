@@ -59,8 +59,14 @@
         </div>
       </dl>
 
-      <button class="btn btn--save" id="save" type="button" disabled>Сохранить</button>
+      <div class="actions">
+        <button class="btn" id="build" type="button">Собрать весь трек</button>
+        <button class="btn btn--save" id="save" type="button" disabled>Сохранить</button>
+      </div>
     </div>
+
+    <p class="story" id="story" aria-live="polite">Загружаю трек</p>
+    <div class="progress" id="progress" hidden><span class="progress__bar" id="progress-bar"></span></div>
 
     <div class="wave" id="wave">
       <canvas class="wave__canvas" id="wave-canvas" aria-label="Волна трека: тяни красные края, чтобы выбрать кусок; клик — перемотка"></canvas>
@@ -81,8 +87,22 @@
   </header>
 
   <main class="desk">
+    <section class="hint" id="hint" hidden>
+      <ol class="hint__steps">
+        <li><b>Выбери кусок.</b> Красная скобка на волне — петля, она играет по кругу. Тяни её края или двигай целиком.</li>
+        <li><b>Крути.</b> Отпустил ползунок — через пару секунд кусок звучит с новой настройкой.</li>
+        <li><b>Сравнивай.</b> B (или кнопки сверху) переключает оригинал и результат на одной громкости.</li>
+        <li><b>Готово?</b> «Собрать весь трек» (около минуты), потом «Сохранить».</li>
+      </ol>
+      <button class="btn btn--ghost" id="hint-close" type="button">Понятно</button>
+    </section>
+
     <section class="toolbar" aria-label="Пресеты и история">
       <div class="toolbar__group">
+        <div class="segments segments--wide" role="radiogroup" aria-label="Какие настройки показывать">
+          <button class="segments__item" id="show-basic" type="button" role="radio" aria-checked="true">Основное</button>
+          <button class="segments__item" id="show-all" type="button" role="radio" aria-checked="false">Все настройки</button>
+        </div>
         <button class="btn btn--ghost" id="undo" type="button" title="Отменить (Ctrl+Z)">Отменить</button>
         <button class="btn btn--ghost" id="redo" type="button" title="Вернуть (Ctrl+Shift+Z)">Вернуть</button>
         <button class="btn btn--ghost" id="reset-all" type="button">Сбросить всё</button>

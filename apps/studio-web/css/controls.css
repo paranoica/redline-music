@@ -383,3 +383,8 @@
   box-shadow: var(--drop);
   pointer-events: none;
 }
+
+.segments--wide .segments__item {
+  min-height: 40px;
+  font-family: var(--font-ui);
+}

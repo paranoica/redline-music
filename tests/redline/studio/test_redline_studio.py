@@ -241,3 +241,27 @@ def test_an_idle_connection_is_dropped(studio, monkeypatch):
 def test_a_length_that_is_not_ascii_digits_is_refused(server):
     status = call(server, "POST", "/api/render", b"{}", headers={"Content-Length": "²"})[0]
     assert status in (400, 411)
+
+
+def test_a_preview_does_not_wait_for_a_whole_render(studio):
+    gate = threading.Event()
+    original = studio.engine.render
+
+    def slow(settings, cancelled=lambda: False):
+        gate.wait(20)
+        return original(settings, cancelled)
+
+    studio.engine.render = slow
+    whole = threading.Thread(target=lambda: studio.render(Settings(), 1))
+    whole.start()
+    try:
+        done = []
+        preview = threading.Thread(
+            target=lambda: done.append(studio.preview(Settings(), 2, 0, RATE))
+        )
+        preview.start()
+        preview.join(15)
+        assert done and done[0] is not None and len(done[0]) == RATE
+    finally:
+        gate.set()
+        whole.join(30)

@@ -181,3 +181,35 @@ def test_oversampling_keeps_drive_and_clip_aliasing_down():
     assert inharmonic_db(oversampled(dirty, x, 8), 3000) < -50
     # the same stages at the base rate fold their harmonics back: the measure sees it
     assert inharmonic_db(dirty(x), 3000) > -50
+
+
+def test_oversampling_runs_the_channels_at_once_and_gives_the_serial_result():
+    import threading
+    import time
+
+    from redline.core.dsp import OVERSAMPLING_WINDOW
+    from scipy.signal import resample_poly
+
+    x = np.column_stack([tone(1000, 0.5, amp=0.5)[:, 0], tone(3000, 0.5, amp=0.7)[:, 0]])
+    x = x.astype(np.float32)
+    running, overlap = [0], [False]
+    lock = threading.Lock()
+
+    def stage(v):
+        with lock:
+            running[0] += 1
+            overlap[0] |= running[0] > 1
+        time.sleep(0.2)
+        with lock:
+            running[0] -= 1
+        return np.tanh(v * 4)
+
+    out = oversampled(stage, x, 8)
+    serial = []
+    for c in range(2):
+        up = resample_poly(x[:, c], 8, 1, window=OVERSAMPLING_WINDOW)
+        serial.append(
+            resample_poly(np.tanh(up * 4).astype(np.float32), 1, 8, window=OVERSAMPLING_WINDOW)
+        )
+    assert overlap[0]
+    assert np.array_equal(out, np.column_stack(serial)[: len(x)].astype(np.float32))

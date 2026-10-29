@@ -94,6 +94,10 @@ export class Controls {
     for (const spec of schema.settings) {
       this.cards[spec.group].rows.append(this.#row(spec));
     }
+    for (const [group, card] of Object.entries(this.cards)) {
+      const basic = schema.settings.some((s) => s.group === group && s.basic);
+      card.card.dataset.empty = String(!basic);
+    }
   }
 
   #label(spec) {
@@ -179,6 +183,7 @@ export class Controls {
       row.append(slider, box);
     }
     row.append(this.#resetButton(spec));
+    row.dataset.basic = String(Boolean(spec.basic));
     this.rows[spec.key] = handle;
     return row;
   }

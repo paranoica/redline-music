@@ -77,3 +77,12 @@ def test_the_schema_lists_every_setting_once_with_its_group():
     keys = [row["key"] for row in out["settings"]]
     assert sorted(keys) == sorted(SPECS) and len(keys) == len(set(keys))
     assert all(row["group"] in out["groups"] for row in out["settings"])
+
+
+def test_about_ten_main_settings_are_marked_basic():
+    basic = [key for key, spec in SPECS.items() if spec.basic]
+    assert 8 <= len(basic) <= 14
+    # a basic setting that greys out behind a switch needs that switch in view too
+    assert {"master_auto", "octave_down_on", "doubles_on"} <= set(basic)
+    assert {"vocal_db", "drive_db", "formant", "bass_drive_db"} <= set(basic)
+    assert all(row["basic"] is (row["key"] in basic) for row in schema()["settings"])

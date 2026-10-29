@@ -2,6 +2,7 @@
 
 import math
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import numpy.typing as npt
@@ -144,10 +145,17 @@ def hard_clip(samples: Samples, level: float) -> Samples:
 
 
 def oversampled(stage: Callable[[Samples], Samples], samples: Samples, factor: int) -> Samples:
-    """Run a nonlinear stage at factor times the rate, one channel at a time."""
-    channels = []
-    for channel in range(samples.shape[1]):
+    """Run a nonlinear stage at factor times the rate, every channel on its own thread.
+
+    The filters and resampling release the GIL, and each channel is computed alone, so the
+    result is the same as one channel after the other.
+    """
+
+    def one(channel: int) -> Samples:
         up = resample_poly(samples[:, channel], factor, 1, window=OVERSAMPLING_WINDOW)
         out = stage(up[:, None].astype(np.float32))[:, 0]
-        channels.append(resample_poly(out, 1, factor, window=OVERSAMPLING_WINDOW))
+        return resample_poly(out, 1, factor, window=OVERSAMPLING_WINDOW)
+
+    with ThreadPoolExecutor(max_workers=samples.shape[1]) as pool:
+        channels = list(pool.map(one, range(samples.shape[1])))
     return np.column_stack(channels)[: len(samples)].astype(np.float32)
