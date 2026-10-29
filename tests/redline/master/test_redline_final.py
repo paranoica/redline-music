@@ -583,15 +583,23 @@ def test_voice_up_and_nightcore_move_the_whole_voice_an_octave(monkeypatch):
 
 
 def test_the_run_renders_what_it_rendered_before_the_engine(inputs, tmp_path):
-    import hashlib
+    import statistics
+
+    from redline.master import run as final_run
+    from redline.master.clip import master_clip
 
     track, refs = inputs
-    folder = run_track(
-        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator()
-    )
-    digest = hashlib.sha256((folder / "final.wav").read_bytes()).hexdigest()
-    # taken from the run before it moved onto the engine
-    assert digest == "e30b1b72e40d7f7d8d5371f3ff1934a44b1ab9c5590553a1cd8ffa6a20f1381b"
+    files = sorted(refs.iterdir())
+    folder = run_track(track, files, tmp_path / "w", tmp_path / "o", HalfSeparator())
+    got, rate = sf.read(folder / "final.wav", dtype="float32")
+    # the chain as the rounds ran it before the engine. Not a byte hash: numpy's vector math
+    # moves the last bit with the memory layout earlier work left, so bytes depend on order
+    made, _, vocal, _ = final_run._chosen_mix(track, files, tmp_path / "w", HalfSeparator())
+    vocal, beat = final_run._chosen_sound(vocal, made.track_stems.beat, rate)
+    target = round(statistics.median(r.values["mix.lufs"] for r in made.refs), 1)
+    want, _ = master_clip(vocal + beat, rate, target)
+    assert got.shape == want.shape
+    assert np.abs(got - want).max() < 2e-6
 
 
 def test_run_with_settings_uses_them_and_the_tracks_tuning(inputs, tmp_path, monkeypatch):
