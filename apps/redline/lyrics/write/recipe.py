@@ -271,8 +271,9 @@ def make_recipe(
     vocabulary = [
         (w["word"], w["per_1000"]) for w in profile["vocabulary"]["top"] if _material(w["word"])
     ]
-    # drawn by weight, the same top words came back in every text
     avoid = frozenset(stem(w) for w in worn)
+    # words on their own stream: how they are drawn moves nothing else
+    words_rng = np.random.Generator(np.random.PCG64([seed, 2]))
     latin = [(w["word"], w["per_1000"]) for w in profile["latin"]["top"]]
     names = sorted(DEVICES)
     count = int(rng.integers(DEVICE_COUNT[0], DEVICE_COUNT[1] + 1))
@@ -283,8 +284,9 @@ def make_recipe(
         topic=topic or _anchors(rng, avoid),
         band=band,
         sections=tuple(sections),
-        words=_sample(rng, vocabulary, WORDS, weighted=False, avoid=avoid),
-        latin=_sample(rng, latin, LATIN, weighted=False, avoid=avoid),
+        # without weight: by weight the same top words came back in every text
+        words=_sample(words_rng, vocabulary, WORDS, weighted=False, avoid=avoid),
+        latin=_sample(words_rng, latin, LATIN, weighted=False, avoid=avoid),
         adlibs=_sample(rng, [(w, s) for w, s in profile["adlibs"]["top"]], ADLIBS),
         adlib_share=float(profile["adlibs"]["line_share"] or 0.0),
         hook_repeat_share=float(profile["hook"]["repeated_line_share"] or 0.0),

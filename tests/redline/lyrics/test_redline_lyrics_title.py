@@ -2,7 +2,7 @@ import pytest
 from redline.lyrics.write.title import TitlePlan, check_title, split_title, title_request
 from redline.lyrics.write.worn import worn_problems, worn_words
 
-TEXT = "[Куплет]\nсиний свет на мне\nи снова ночь\n"
+TEXT = "[Припев]\nсиний свет на мне\nи снова ночь\n"
 
 
 def test_the_title_line_is_split_off_the_text():
@@ -98,3 +98,36 @@ def test_a_draft_leaning_on_worn_words_is_sent_back_naming_them():
     assert len(found) == 1 and found[0].kind == "worn"
     assert all(w in found[0].detail for w in ("синий", "стакан", "заны", "мама"))
     assert worn_problems(four, ()) == []
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        f"  \nTitle: NEON\n{TEXT}",
+        f"﻿Title: NEON\n{TEXT}",
+        f"**Title:** NEON\n{TEXT}",
+        f"`Title: NEON`\n{TEXT}",
+        f'Title: "NEON"\n{TEXT}',
+        f"Title: «NEON»\n{TEXT}",
+    ],
+)
+def test_a_title_line_is_found_under_dressing_and_loses_its_quotes(draft):
+    assert split_title(draft) == ("NEON", TEXT)
+
+
+def test_a_text_without_a_hook_has_no_hook_to_repeat():
+    verse = "[Куплет]\nночной город спит\n"
+    assert check_title("ночной город", TitlePlan(2, "cyrillic", "any", False), verse) == []
+
+
+def test_adlibs_are_not_worn_words(tmp_path):
+    for seed in range(4):
+        saved(tmp_path, seed, f"[Куплет]\nдорога номер {seed} (skrrt)\n", 1000 + seed)
+    assert worn_words(tmp_path) == ("дорога", "номер")
+
+
+def test_short_words_do_not_stand_for_longer_ones():
+    worn = ("полночь", "дорога", "пачка", "карман")
+    assert worn_problems("[Куплет]\nполно дорогой пачкать кармане\n", worn) == []
+    found = worn_problems("[Куплет]\nполночь дорога пачка кармане\n", worn)
+    assert found and "4 worn-out" in found[0].detail

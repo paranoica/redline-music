@@ -1,5 +1,6 @@
 """Words the last texts have worn out: in four of the last fifteen, they are a habit."""
 
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from redline.lyrics.base.profile import STOP_WORDS
 from redline.lyrics.text.normalize import words
 from redline.lyrics.write.problem import Problem
 
+ADLIB = re.compile(r"\([^)]*\)")
 RECENT = 15
 MIN_TEXTS = 4
 # words no text can do without; a habit is an image or a name, not grammar
@@ -85,17 +87,20 @@ PLAIN_WORDS = frozenset(
 MIN_LETTERS = 4
 # a draft may still say a few of them; past this it leans on them
 MAX_USED = 3
-# endings move, the start stays: стакан, стакане, стаканы
-STEM = 5
+# endings move, the start stays: стакан, стакане, стаканы. A shorter cut would join words
+# that only start alike, полно and полночь
+STEM = 6
+ENDING = 2
 
 
 def stem(word: str) -> str:
     """The part of a word its forms share, near enough."""
-    return word[:STEM]
+    return word[: max(STEM, len(word) - ENDING)]
 
 
 def _sung_words(text: str) -> list[str]:
-    lines = [line for line in text.splitlines() if not line.strip().startswith("[")]
+    # adlibs in brackets are the recipe's to give; they are not the writer's habit
+    lines = [ADLIB.sub(" ", line) for line in text.splitlines() if not line.strip().startswith("[")]
     return [
         w
         for w in words("\n".join(lines))

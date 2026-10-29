@@ -18,7 +18,9 @@ LATIN_SHARE = 0.63
 CASES = {"caps": 0.26, "lower": 0.37, "any": 0.37}
 DIGIT_SHARE = 0.15
 WORD_SLACK = 1
-TITLE_LINE = re.compile(r"^\s*title:\s*(.*?)\s*$", re.IGNORECASE)
+# the writer may dress the line: **Title:** NEON, `Title: NEON`
+TITLE_LINE = re.compile(r"^[\s*`]*title[*`]*\s*:[\s*`]*(.*?)[\s*`]*$", re.IGNORECASE)
+QUOTES = "\"'«»“”„`"
 CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
 LATIN = re.compile(r"[a-z]", re.IGNORECASE)
 PLAIN = re.compile(r"[^\w\s]")
@@ -49,11 +51,11 @@ def draw_title(seed: int) -> TitlePlan:
 
 def split_title(text: str) -> tuple[str | None, str]:
     """The title from a draft's first line `Title: ...`, and the text without that line."""
-    first, _, rest = text.lstrip("\n").partition("\n")
+    first, _, rest = text.lstrip("\ufeff \t\n").partition("\n")
     found = TITLE_LINE.match(first)
     if not found:
         return None, text
-    return found.group(1) or None, rest.lstrip("\n")
+    return found.group(1).strip(QUOTES).strip() or None, rest.lstrip("\n")
 
 
 def title_request(plan: TitlePlan) -> str:
@@ -72,7 +74,7 @@ def title_request(plan: TitlePlan) -> str:
 def _hook_start(text: str) -> list[str]:
     lines = text.splitlines()
     starts = [i + 1 for i, line in enumerate(lines) if HOOK_HEADER.match(line)]
-    for i in [*starts, 0]:
+    for i in starts:
         for line in lines[i:]:
             if line.strip() and not line.strip().startswith("["):
                 return PLAIN.sub(" ", line.lower()).split()

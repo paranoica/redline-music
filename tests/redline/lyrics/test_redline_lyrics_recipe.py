@@ -182,17 +182,18 @@ def test_without_a_beat_recipes_are_the_ones_drawn_before_beats_existed(profile)
 
     from redline.lyrics.write.recipe import recipe_from_json
 
-    # the words are drawn without weight now and a title shape was added; everything else is
-    # the draw from before beats existed, hashed by the code of that time without those keys
+    # the words moved to their own stream and lost their weight, and a title shape was added;
+    # the adlibs, drawn after the words, moved with them. The rest is the draw from before
+    # beats existed, hashed by the code of that time without those four keys
     before = {
-        0: "6d1f8c9a2f5bb680dcfed55f75e1e3778f5b62f9db465d34048b39914e7ad5a3",
-        7: "42b87045e3870c246b7d9fc02c714659fb7b8ddc4ebfee0da4e535378d4b4d40",
-        31: "7e8eb30e84003fa38932b4e866cd0f603c9f95660a3879d37a652d40131d47a3",
+        0: "df2081392d48a728528deca4116e4a797cca92d63d768aef8dc112057f64553b",
+        7: "10c6af841fb52ed6aaa5e594bf7b53c4f43f2e8e340d3ff50c39001431285539",
+        31: "3eed6180585602422339e0b379d2eb94f4e1b29649243331f6e1c98a613bb839",
     }
     for seed, digest in before.items():
         text = recipe_json(make_recipe(profile, seed))
         data = json.loads(text)
-        for key in ("words", "latin", "title"):
+        for key in ("words", "latin", "title", "adlibs"):
             data.pop(key)
         rest = json.dumps(data, ensure_ascii=False, sort_keys=True)
         assert hashlib.sha256(rest.encode()).hexdigest() == digest
@@ -278,11 +279,11 @@ def test_scene_words_are_drawn_without_weight(profile):
 
 
 def test_worn_words_are_never_drawn_and_go_into_the_recipe(profile):
-    words = [(f"слово{i}", 1.0) for i in range(40)] + [("стаканчик", 1.0), ("стакан", 1.0)]
+    words = [(f"слово{i}", 1.0) for i in range(40)] + [("стакане", 1.0), ("стакан", 1.0)]
     p = flat_profile(profile, words)
     for seed in range(60):
         recipe = make_recipe(p, seed, worn=("стакан", "кэш"))
-        assert not {"стакан", "стаканчик"} & set(recipe.words)
+        assert not {"стакан", "стакане"} & set(recipe.words)
         assert "кэш" not in recipe.topic.split(", ")
         assert recipe.worn == ("стакан", "кэш")
     back = recipe_from_json(recipe_json(make_recipe(p, 5, worn=("стакан",))))
@@ -329,3 +330,17 @@ def test_first_person_verbs_and_pronoun_forms_are_not_scene_words(profile):
     p = flat_profile(profile, [(w, 1.0) for w in plain + images])
     drawn = set().union(*(make_recipe(p, seed).words for seed in range(60)))
     assert not drawn & set(plain)
+
+
+def test_how_the_words_are_drawn_moves_no_other_draw(profile):
+    p = flat_profile(profile, [(f"слово{i}", 1.0 + i % 3) for i in range(60)])
+    p["adlibs"]["top"] = [[f"адлиб{i}", 0.1] for i in range(10)]
+    for seed in range(20):
+        plain = make_recipe(p, seed)
+        worn = make_recipe(p, seed, worn=tuple(f"слово{i}" for i in range(30)))
+        assert plain.words != worn.words
+        assert (plain.adlibs, plain.sections, plain.devices) == (
+            worn.adlibs,
+            worn.sections,
+            worn.devices,
+        )
