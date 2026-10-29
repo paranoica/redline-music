@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from redline.lyrics.write.recipe import DEVICES, Recipe
+from redline.lyrics.write.title import title_request
 
 PROMPT = Path(__file__).with_name("writer_prompt.md")
 REFUSAL = "REFUSED:"
@@ -141,16 +142,8 @@ def _marks(request: WriterRequest) -> list[str]:
     return out
 
 
-def render(request: WriterRequest, answer_to: Path | None = None) -> str:
-    """The request as one Markdown page."""
-    r = request.recipe
-    out = [
-        request.prompt.rstrip(),
-        "",
-        "## Recipe",
-        "",
-        f"- Vibe and anchor words, not a story: {r.topic}",
-    ]
+def _recipe(r: Recipe) -> list[str]:
+    out = [f"- Vibe and anchor words, not a story: {r.topic}"]
     if r.bpm:
         out.append(
             f"- Beat: {r.bpm:g} BPM at half time; one line is one bar. Keep the lines of a "
@@ -176,6 +169,19 @@ def render(request: WriterRequest, answer_to: Path | None = None) -> str:
     if r.devices:
         out.append("- What this text must also do:")
         out += [f"  - {count} times: {DEVICES[name]}" for name, count in r.devices]
+    if r.worn:
+        out.append(
+            "- Worn out by the last texts, keep off them (a few at most): " + ", ".join(r.worn)
+        )
+    return out
+
+
+def render(request: WriterRequest, answer_to: Path | None = None) -> str:
+    """The request as one Markdown page."""
+    r = request.recipe
+    out = [request.prompt.rstrip(), "", "## Recipe", "", *_recipe(r)]
+    if r.title is not None and not request.change:
+        out += ["", "## Title", "", title_request(r.title)]
     if request.style.strip():
         out += ["", "## Notes on the scene's style", "", request.style.strip()]
     out += _marks(request)

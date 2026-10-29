@@ -206,6 +206,7 @@ def card(
     mark: Mark | None = None,
     style: str | None = None,
     recipe: Recipe | None = None,
+    title: str | None = None,
 ) -> str:
     """Everything to fill in Suno for one text, ready to copy field by field.
 
@@ -214,9 +215,10 @@ def card(
         mark: Puts stress marks into a line, or None for none.
         style: The owner's own style box, or None for the default one.
         recipe: The text's recipe; a beat's recipe gets a style of the voice and flows only.
+        title: The title the writer gave, or None to take one from the hook.
     """
     out = [
-        f"Title: {title_of(track)}",
+        f"Title: {title or title_of(track)}",
         "",
         f"Style: {style or _style(recipe)}",
         f"Exclude: {', '.join(EXCLUDE)}",

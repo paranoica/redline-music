@@ -27,6 +27,16 @@ section, syllables per line, rhyme schemes, a topic as vibe words, adlibs, the s
 words, and devices the text must use. The recipe is frozen in the seed's folder, so a seed is the
 same text task every time.
 
+Scene words are drawn without weight, so the most frequent ones do not come back every
+time. Words found in four or more of the last fifteen texts are **worn out**: the recipe never
+draws them, the writer is told to keep off them, and a draft using more than three of them goes
+back.
+
+Each seed also draws the shape of its **title** from the scene's numbers: one to four words,
+Latin or Cyrillic, capitals or lower case, sometimes a digit. The writer names the text on the
+draft's first line (`Title: ...`); it is kept in `title.txt` and goes on the Suno card. An edit
+may rename its version (`title-<n>.txt`).
+
 With `--beat` the recipe fits the beat:
 
 - the tempo is measured at half time (60-120 BPM), so one line is one bar;
@@ -39,7 +49,8 @@ exits with code 3. Once the draft is back, the same command checks it:
 
 - it must be lyrics, of the recipe's length and line form;
 - ordinary places (a kitchen, a district) only as often as the recipe's device asks;
-- no copy from the base or from other generated texts.
+- no copy from the base or from other generated texts;
+- no more than three worn-out words, and a title of the drawn shape.
 
 A failed draft goes back with the reasons, up to four rounds. A saved text is `text.txt` in
 `private/lyrics/generated/<seed>/`.

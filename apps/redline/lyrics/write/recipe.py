@@ -6,6 +6,9 @@ from typing import Any
 
 import numpy as np
 
+from redline.lyrics.write.title import TitlePlan, draw_title
+from redline.lyrics.write.worn import stem
+
 SCHEMES = ("AABB", "ABAB", "ABBA", "AAAA")
 BANDS = ("short", "middle", "long")
 MIN_BAND = 3
@@ -110,6 +113,9 @@ class Recipe:
     bpm: float | None = None
     bars: int | None = None
     delivery: str | None = None
+    title: TitlePlan | None = None
+    # words the last texts wore out: never drawn, and the writer is told to keep off them
+    worn: tuple[str, ...] = ()
 
 
 def _draw(rng: np.random.Generator, items: list[Any], weights: list[float]) -> Any:
@@ -117,11 +123,17 @@ def _draw(rng: np.random.Generator, items: list[Any], weights: list[float]) -> A
     return items[int(rng.choice(len(items), p=shares / shares.sum()))]
 
 
-def _sample(rng: np.random.Generator, rows: list[tuple[str, float]], n: int) -> tuple[str, ...]:
-    rows = [(w, s) for w, s in rows if s > 0]
+def _sample(
+    rng: np.random.Generator,
+    rows: list[tuple[str, float]],
+    n: int,
+    weighted: bool = True,
+    avoid: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    rows = [(w, s) for w, s in rows if s > 0 and stem(w) not in avoid]
     if not rows:
         return ()
-    shares = np.asarray([s for _, s in rows], dtype=float)
+    shares = np.asarray([s if weighted else 1.0 for _, s in rows], dtype=float)
     picked = rng.choice(len(rows), size=min(n, len(rows)), replace=False, p=shares / shares.sum())
     return tuple(rows[int(i)][0] for i in sorted(picked))
 
@@ -172,9 +184,10 @@ def _flow(rng: np.random.Generator, kind: str, known: dict[str, Any] | None, bpm
     return str(_draw(rng, names, [float(w) for w in weights]))
 
 
-def _anchors(rng: np.random.Generator) -> str:
+def _anchors(rng: np.random.Generator, avoid: frozenset[str] = frozenset()) -> str:
     count = int(rng.integers(ANCHOR_COUNT[0], ANCHOR_COUNT[1] + 1))
-    return ", ".join(ANCHORS[int(i)] for i in rng.choice(len(ANCHORS), size=count, replace=False))
+    left = [a for a in ANCHORS if stem(a) not in avoid] or list(ANCHORS)
+    return ", ".join(left[int(i)] for i in rng.choice(len(left), size=count, replace=False))
 
 
 def make_recipe(
@@ -184,6 +197,7 @@ def make_recipe(
     bpm: float | None = None,
     bars: int | None = None,
     delivery: str | None = None,
+    worn: tuple[str, ...] = (),
 ) -> Recipe:
     """Draw a text's shape and material from the profile; the same seed draws the same.
 
@@ -195,6 +209,7 @@ def make_recipe(
             syllables, and the draw differs from the seed's draw without a beat.
         bars: The beat's whole bars; the text sings in all but a few of them.
         delivery: "hard" or "calm" for the beat, or None; it draws nothing.
+        worn: Words the last texts wore out; none of them is drawn.
     """
     rng = np.random.Generator(np.random.PCG64(seed))
     patterns = profile["structure"]["patterns"]
@@ -242,6 +257,8 @@ def make_recipe(
             for i, p in enumerate(sections)
         ]
     vocabulary = [(w["word"], w["per_1000"]) for w in profile["vocabulary"]["top"]]
+    # drawn by weight, the same top words came back in every text
+    avoid = frozenset(stem(w) for w in worn)
     latin = [(w["word"], w["per_1000"]) for w in profile["latin"]["top"]]
     names = sorted(DEVICES)
     count = int(rng.integers(DEVICE_COUNT[0], DEVICE_COUNT[1] + 1))
@@ -249,11 +266,11 @@ def make_recipe(
     devices = tuple((names[i], int(rng.integers(1, 3))) for i in picked)
     return Recipe(
         seed=seed,
-        topic=topic or _anchors(rng),
+        topic=topic or _anchors(rng, avoid),
         band=band,
         sections=tuple(sections),
-        words=_sample(rng, vocabulary, WORDS),
-        latin=_sample(rng, latin, LATIN),
+        words=_sample(rng, vocabulary, WORDS, weighted=False, avoid=avoid),
+        latin=_sample(rng, latin, LATIN, weighted=False, avoid=avoid),
         adlibs=_sample(rng, [(w, s) for w, s in profile["adlibs"]["top"]], ADLIBS),
         adlib_share=float(profile["adlibs"]["line_share"] or 0.0),
         hook_repeat_share=float(profile["hook"]["repeated_line_share"] or 0.0),
@@ -262,15 +279,19 @@ def make_recipe(
         bpm=bpm,
         bars=bars,
         delivery=delivery,
+        title=draw_title(seed),
+        worn=tuple(worn),
     )
 
 
 def recipe_json(recipe: Recipe) -> str:
     """Byte-stable JSON of a recipe; a recipe without a beat reads as before beats existed."""
     data = asdict(recipe)
-    for key in ("bpm", "bars", "delivery"):
+    for key in ("bpm", "bars", "delivery", "title"):
         if data[key] is None:
             del data[key]
+    if not data["worn"]:
+        del data["worn"]
     for section in data["sections"]:
         if section["flow"] is None:
             del section["flow"]
@@ -287,4 +308,7 @@ def recipe_from_json(text: str) -> Recipe:
     for key in ("words", "latin", "adlibs"):
         data[key] = tuple(data[key])
     data["devices"] = tuple((name, count) for name, count in data.get("devices", ()))
+    data["worn"] = tuple(data.get("worn", ()))
+    if data.get("title") is not None:
+        data["title"] = TitlePlan(**data["title"])
     return Recipe(**data)

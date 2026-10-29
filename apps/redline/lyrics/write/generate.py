@@ -15,6 +15,8 @@ from redline.lyrics.marks.store import marked_lines
 from redline.lyrics.text.parse import LyricsError, Track, parse_text
 from redline.lyrics.write.form import Problem, check_draft
 from redline.lyrics.write.recipe import make_recipe, recipe_from_json, recipe_json
+from redline.lyrics.write.title import check_title, split_title
+from redline.lyrics.write.worn import worn_problems, worn_words
 from redline.lyrics.write.writer import (
     Draft,
     HandoffWriter,
@@ -200,7 +202,8 @@ class Session:
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         for old in self.folder.glob("*"):
             old.unlink()
-        recipe = make_recipe(self.profile, seed, topic, bpm, bars, delivery)
+        worn = worn_words(self.folder.parent, skip=seed)
+        recipe = make_recipe(self.profile, seed, topic, bpm, bars, delivery, worn)
         _write(self.folder / "recipe.json", recipe_json(recipe))
         state = {
             "seed": seed,
@@ -333,9 +336,13 @@ class Session:
         return self._judge(state, recipe, answer)
 
     def _judge(self, state: dict[str, Any], recipe: Any, draft: Draft) -> Saved | Pending | Failed:
-        problems, stats = check_draft(draft.text, recipe, self.mark)
+        title, text = split_title(draft.text)
+        problems, stats = check_draft(text, recipe, self.mark)
         if not any(p.kind == "not lyrics" for p in problems):
-            problems += self._copies(parse_text(draft.text))
+            problems += self._copies(parse_text(text))
+            problems += worn_problems(text, recipe.worn)
+            if recipe.title is not None:
+                problems += check_title(title, recipe.title, text)
         reasons = [f"{p.kind}, {p.where}: {p.detail}" for p in problems]
         checks = {
             "round": state["round"],
@@ -352,10 +359,12 @@ class Session:
         )
         if not problems:
             _write(self.folder / "checks.json", json.dumps(checks, ensure_ascii=False, indent=1))
-            _write(self.folder / "text.txt", draft.text)
+            _write(self.folder / "text.txt", text)
+            if title:
+                _write(self.folder / "title.txt", title + "\n")
             state.update(status="saved", reasons=[])
             self._save_state(state)
-            return Saved(self.folder / "text.txt", draft.text)
+            return Saved(self.folder / "text.txt", text)
         if state["round"] >= ROUNDS:
             state.update(status="failed", reasons=reasons)
             self._save_state(state)
@@ -475,19 +484,22 @@ class Editor:
     def _judge(
         self, seed: int, edits: dict[str, Any], pending: dict[str, Any], recipe: Any, draft: Draft
     ) -> Saved | Pending | Failed:
-        problems, _ = check_draft(draft.text, recipe, self.session.mark)
+        title, text = split_title(draft.text)
+        problems, _ = check_draft(text, recipe, self.session.mark)
         # an edit may change the form on purpose: only what makes a text unusable sends it back
         problems = [p for p in problems if p.kind in ("not lyrics", "length", "places")]
         if not any(p.kind == "not lyrics" for p in problems):
-            problems += self.session._copies(parse_text(draft.text))
+            problems += self.session._copies(parse_text(text))
         reasons = [f"{p.kind}, {p.where}: {p.detail}" for p in problems]
         if not problems:
             path = self.folder / f"text-{pending['version']}.txt"
-            _write(path, draft.text)
+            _write(path, text)
+            if title:
+                _write(self.folder / f"title-{pending['version']}.txt", title + "\n")
             edits.pop("pending", None)
             edits["done"].append({k: pending[k] for k in ("version", "source", "change")})
             self._save(edits)
-            return Saved(path, draft.text)
+            return Saved(path, text)
         if pending["round"] >= ROUNDS:
             edits.pop("pending", None)
             self._save(edits)

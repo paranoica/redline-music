@@ -3,13 +3,13 @@
 import itertools
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from redline.lyrics.text.normalize import words
 from redline.lyrics.text.parse import HEADER, parse_text
 from redline.lyrics.text.rhyme import last_word, rhymes
 from redline.lyrics.text.syllables import count_syllables
+from redline.lyrics.write.problem import Problem
 from redline.lyrics.write.recipe import Recipe
 
 LINE_SLACK = 1
@@ -47,15 +47,6 @@ NOT_VERBS_TEXT = (
 )
 NOT_VERBS = set(NOT_VERBS_TEXT.split())
 StressMark = Callable[[str], str]
-
-
-@dataclass(frozen=True)
-class Problem:
-    """Something a draft must fix: what kind, where, and how."""
-
-    kind: str
-    where: str
-    detail: str
 
 
 def is_verb(word: str) -> bool:

@@ -250,7 +250,10 @@ def _lyrics_suno(args: argparse.Namespace) -> int:
         own = args.lyrics / "suno-style.txt"
         lines = own.read_text(encoding="utf-8").splitlines() if own.exists() else []
         style = ", ".join(line.strip() for line in lines if line.strip())
-        text = card(track, mark, style or None, recipe)
+        named = [folder / f"title-{v}.txt" for v in range(version, 1, -1)] + [folder / "title.txt"]
+        found = next((p for p in named if p.exists()), None)
+        title = found.read_text(encoding="utf-8").strip() if found else None
+        text = card(track, mark, style or None, recipe, title or None)
         (folder / "suno.md").write_text(text, encoding="utf-8")
     except (LyricsError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)

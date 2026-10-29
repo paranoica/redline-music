@@ -59,7 +59,7 @@ recipe below; it was drawn from the statistics of the scene and of the owner's o
 - Use some of the given words and brands, not all; they show the vocabulary.
 - Do everything the recipe's "must also do" list asks, inside the lines, without labels.
 - No capital letters inside words. A shouted line may be all capitals. No Suno tags, no stage
-  directions, no title.
+  directions. The title goes only on the first line as `Title: ...`, when the request asks.
 - Write the lyrics only, as on Genius: a section header in square brackets on its own line
   (`[Куплет]`, `[Припев]`, `[Интро]`, `[Предприпев]`, `[Бридж]`, `[Аутро]`, and `[Скит]` for a
   section of another kind), then its lines; an empty line between sections. Write a hook out

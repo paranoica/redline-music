@@ -6,7 +6,7 @@ import sys
 import pytest
 from redline.lyrics.base.profile import count_tracks, to_profile
 from redline.lyrics.text.parse import parse_text
-from redline.lyrics.write.recipe import ANCHORS, make_recipe, recipe_json
+from redline.lyrics.write.recipe import ANCHORS, make_recipe, recipe_from_json, recipe_json
 
 COMMON = (
     "[Куплет]\n"
@@ -182,14 +182,20 @@ def test_without_a_beat_recipes_are_the_ones_drawn_before_beats_existed(profile)
 
     from redline.lyrics.write.recipe import recipe_from_json
 
+    # the words are drawn without weight now and a title shape was added; everything else is
+    # the draw from before beats existed, hashed by the code of that time without those keys
     before = {
-        0: "e838384e97b4cf2b0c7a21c668d650fca75912c2c701d3ebee050d393e66d2ca",
-        7: "dff038b2876623355d29eb730b83f44debae01976236e1978cad577fe0e8bc10",
-        31: "f783a7903a187083c0d74dc4db658f50d147a190dfa06c1e618db6efd3138584",
+        0: "6d1f8c9a2f5bb680dcfed55f75e1e3778f5b62f9db465d34048b39914e7ad5a3",
+        7: "42b87045e3870c246b7d9fc02c714659fb7b8ddc4ebfee0da4e535378d4b4d40",
+        31: "7e8eb30e84003fa38932b4e866cd0f603c9f95660a3879d37a652d40131d47a3",
     }
     for seed, digest in before.items():
         text = recipe_json(make_recipe(profile, seed))
-        assert hashlib.sha256(text.encode()).hexdigest() == digest
+        data = json.loads(text)
+        for key in ("words", "latin", "title"):
+            data.pop(key)
+        rest = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        assert hashlib.sha256(rest.encode()).hexdigest() == digest
         assert recipe_json(recipe_from_json(text)) == text
 
 
@@ -255,3 +261,54 @@ def test_a_delivery_rides_along_and_reads_back(profile):
     assert hard.sections == plain.sections and hard.words == plain.words
     assert recipe_from_json(recipe_json(hard)) == hard
     assert "delivery" not in recipe_json(plain)
+
+
+def flat_profile(profile, words):
+    p = json.loads(json.dumps(profile))
+    p["vocabulary"]["top"] = [{"word": w, "per_1000": share} for w, share in words]
+    return p
+
+
+def test_scene_words_are_drawn_without_weight(profile):
+    # one word as common as all the others together: by weight it would be in every recipe
+    words = [("частое", 1000.0)] + [(f"слово{i}", 1.0) for i in range(99)]
+    p = flat_profile(profile, words)
+    hits = sum("частое" in make_recipe(p, seed).words for seed in range(300))
+    assert 0.15 * 300 < hits < 0.4 * 300
+
+
+def test_worn_words_are_never_drawn_and_go_into_the_recipe(profile):
+    words = [(f"слово{i}", 1.0) for i in range(40)] + [("стаканчик", 1.0), ("стакан", 1.0)]
+    p = flat_profile(profile, words)
+    for seed in range(60):
+        recipe = make_recipe(p, seed, worn=("стакан", "кэш"))
+        assert not {"стакан", "стаканчик"} & set(recipe.words)
+        assert "кэш" not in recipe.topic.split(", ")
+        assert recipe.worn == ("стакан", "кэш")
+    back = recipe_from_json(recipe_json(make_recipe(p, 5, worn=("стакан",))))
+    assert back.worn == ("стакан",)
+
+
+def test_every_recipe_draws_a_title_shape_by_the_scenes_numbers(profile):
+    from redline.lyrics.write.title import TitlePlan
+
+    plans = [make_recipe(profile, seed).title for seed in range(400)]
+    assert all(isinstance(p, TitlePlan) for p in plans)
+    assert {p.words for p in plans} == {1, 2, 3, 4}
+    latin = sum(p.script == "latin" for p in plans) / len(plans)
+    assert 0.5 < latin < 0.75
+    assert {p.case for p in plans} == {"caps", "lower", "any"}
+    assert 0.07 < sum(p.digits for p in plans) / len(plans) < 0.25
+    assert make_recipe(profile, 9).title == make_recipe(profile, 9).title
+    back = recipe_from_json(recipe_json(make_recipe(profile, 9)))
+    assert back.title == make_recipe(profile, 9).title
+
+
+def test_an_old_recipe_without_title_or_worn_reads_and_writes_as_before(profile):
+    old = json.loads(recipe_json(make_recipe(profile, 3)))
+    old.pop("title")
+    old.pop("worn", None)
+    text = json.dumps(old, ensure_ascii=False, sort_keys=True, indent=1)
+    recipe = recipe_from_json(text)
+    assert recipe.title is None and recipe.worn == ()
+    assert recipe_json(recipe) == text

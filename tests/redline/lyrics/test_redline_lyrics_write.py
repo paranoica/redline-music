@@ -70,8 +70,19 @@ def line_of(syllables, end):
     return " ".join(["та"] * filler + [end])
 
 
-def good_draft(recipe):
-    out = []
+def title_for(plan):
+    pool = (
+        ["ice", "age", "cold", "flow"] if plan.script == "latin" else ["лёд", "ночь", "дым", "свет"]
+    )
+    words = pool[: plan.words]
+    if plan.digits:
+        words[0] += "9"
+    title = " ".join(words)
+    return title.upper() if plan.case == "caps" else title
+
+
+def good_draft(recipe, titled=True):
+    out = [f"Title: {title_for(recipe.title)}"] if titled and recipe.title else []
     for plan in recipe.sections:
         out.append(f"[{HEADERS[plan.kind]}]")
         target = sum(plan.syllables) // 2
@@ -132,7 +143,7 @@ def test_a_good_draft_is_saved_and_printed_again(base, capsys):
 def test_a_copied_draft_goes_back_naming_its_lines_only(base):
     run(base, 4)
     copied = good_draft(recipe_of(base, 4)).replace(
-        "\n", "\nмой город спит и я не сплю опять кэш в кармане\n", 1
+        "]\n", "]\nмой город спит и я не сплю опять кэш в кармане\n", 1
     )
     draft(base, 4, copied)
     assert run(base, 4) == 3
@@ -651,3 +662,52 @@ def test_the_owners_marks_on_other_texts_reach_a_new_seed_and_an_edit(base):
 def test_a_request_without_marks_has_no_marks_section(base):
     run(base, 72)
     assert "owner's marks" not in (folder(base, 72) / "request-1.md").read_text(encoding="utf-8")
+
+
+def test_a_saved_text_keeps_the_writers_title_apart_and_suno_takes_it(base, capsys):
+    run(base, 80)
+    recipe = recipe_of(base, 80)
+    draft(base, 80, good_draft(recipe))
+    assert run(base, 80) == 0
+    text = (folder(base, 80) / "text.txt").read_text(encoding="utf-8")
+    title = (folder(base, 80) / "title.txt").read_text(encoding="utf-8").strip()
+    assert title == title_for(recipe.title) and "Title:" not in text
+    request = (folder(base, 80) / "request-1.md").read_text(encoding="utf-8")
+    assert "## Title" in request and "Title: ..." in request
+    capsys.readouterr()
+    assert main(["lyrics", "suno", "--seed", "80", "--lyrics", str(base[0])]) == 0
+    assert f"Title: {title}" in capsys.readouterr().out
+
+
+def test_a_draft_without_a_title_goes_back(base):
+    run(base, 81)
+    draft(base, 81, good_draft(recipe_of(base, 81), titled=False))
+    assert run(base, 81) == 3
+    assert "title, missing" in (folder(base, 81) / "request-2.md").read_text(encoding="utf-8")
+
+
+def test_an_edit_may_rename_the_text_for_its_version_only(base, capsys):
+    text = saved_seed(base, 82)
+    first = (folder(base, 82) / "title.txt").read_text(encoding="utf-8").strip()
+    edit(base, 82, "новое название")
+    (folder(base, 82) / "edit-2" / "draft-1.txt").write_text(f"Title: NEW ONE\n{text}", "utf-8")
+    assert edit(base, 82) == 0
+    assert (folder(base, 82) / "text-2.txt").read_text(encoding="utf-8") == text
+    lyrics = ["lyrics", "suno", "--seed", "82", "--lyrics", str(base[0])]
+    capsys.readouterr()
+    assert main(lyrics) == 0
+    assert "Title: NEW ONE" in capsys.readouterr().out
+    assert main([*lyrics, "--version", "1"]) == 0
+    assert f"Title: {first}" in capsys.readouterr().out
+
+
+def test_words_worn_by_the_last_texts_reach_the_recipe_and_the_request(base):
+    for seed in (90, 91, 92, 94):
+        root = folder(base, seed)
+        root.mkdir(parents=True)
+        (root / "text.txt").write_text("[Куплет]\nпфайзер снова в стакане\n", encoding="utf-8")
+    run(base, 93)
+    recipe = recipe_of(base, 93)
+    assert {"пфайзер", "стакане"} <= set(recipe.worn) and "снова" not in recipe.worn
+    request = (folder(base, 93) / "request-1.md").read_text(encoding="utf-8")
+    assert "Worn out by the last texts" in request and "пфайзер" in request
