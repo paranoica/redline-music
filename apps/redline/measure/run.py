@@ -11,7 +11,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from redline.core.audio import Audio, Decoded, decode, hot_master, to_analysis
+import numpy as np
+
+from redline.core.audio import (
+    ANALYSIS_RATE,
+    Audio,
+    Decoded,
+    Samples,
+    decode,
+    hot_master,
+    to_analysis,
+)
 from redline.core.dynamics import low_end_kurtosis, tail_decay, waveform_kurtosis
 from redline.core.loudness import integrated_lufs, measure_loudness
 from redline.core.pitch import estimate_key, measure_pitch, tempo_candidates
@@ -193,50 +203,152 @@ class Inputs:
     upper: float
 
 
-def measure_inputs(track: Path, refs: list[Path], work_dir: Path, separator: Separator) -> Inputs:
-    """Decode, separate and measure the track and every reference, through the caches."""
-    decoded = [decode(p) for p in [track, *refs]]
-    analysed = [to_analysis(d) for d in decoded]
+def _band_limits(analysed: list[Audio]) -> tuple[float, float]:
     limits = [a.band_limit_hz for a in analysed if a.band_limit_hz is not None]
     side_limits = [a.side_band_limit_hz for a in analysed if a.side_band_limit_hz is not None]
     upper = min(limits, default=analysed[0].rate / 2)
-    side_upper = min(side_limits, default=upper)
+    return upper, min(side_limits, default=upper)
+
+
+def _cache_dir(work_dir: Path) -> Path:
     keep_out_of_git(work_dir / "runs", work_dir / "cache")
-    cache_dir = work_dir / "cache"
-    code = code_fingerprint()
-    results = []
-    track_stems = None
-    for path, dec, audio in zip([track, *refs], decoded, analysed, strict=True):
-        log.info("measuring %s", path.name)
-        try:
-            stems = separate(audio, separator, cache_dir)
-            key = metrics_key(
-                cache_key(audio, separator.id), upper, side_upper, dec.codec, dec.rate, code
-            )
-            measured, from_cache = _metrics_cached(
-                cache_dir,
-                key,
-                lambda dec=dec, audio=audio, stems=stems: _measure(
-                    dec, audio, stems, upper, side_upper
-                ),
-            )
-        except ValueError as error:
-            raise ValueError(f"{path.name}: {error}") from error
-        if track_stems is None:
-            track_stems = stems
-        results.append(
-            FileResult(
-                path.name,
-                dec.codec,
-                dec.rate,
-                stems.cached and from_cache,
-                not stems.cached and bool(getattr(separator, "fallback_used", False)),
-                measured["values"],
-                measured["info"],
-            )
+    return work_dir / "cache"
+
+
+def _separated(
+    path: Path,
+    dec: Decoded,
+    audio: Audio,
+    separator: Separator,
+    limits: tuple[float, float],
+    cache_dir: Path,
+    code: str,
+) -> tuple[FileResult, Stems]:
+    upper, side_upper = limits
+    log.info("measuring %s", path.name)
+    try:
+        stems = separate(audio, separator, cache_dir)
+        key = metrics_key(
+            cache_key(audio, separator.id), upper, side_upper, dec.codec, dec.rate, code
         )
-    assert track_stems is not None
-    return Inputs(results[0], results[1:], track_stems, upper)
+        measured, from_cache = _metrics_cached(
+            cache_dir, key, lambda: _measure(dec, audio, stems, upper, side_upper)
+        )
+    except ValueError as error:
+        raise ValueError(f"{path.name}: {error}") from error
+    result = FileResult(
+        path.name,
+        dec.codec,
+        dec.rate,
+        stems.cached and from_cache,
+        not stems.cached and bool(getattr(separator, "fallback_used", False)),
+        measured["values"],
+        measured["info"],
+    )
+    return result, stems
+
+
+def measure_inputs(track: Path, refs: list[Path], work_dir: Path, separator: Separator) -> Inputs:
+    """Decode, separate and measure the track and every reference, through the caches."""
+    paths = [track, *refs]
+    decoded = [decode(p) for p in paths]
+    analysed = [to_analysis(d) for d in decoded]
+    limits = _band_limits(analysed)
+    cache_dir = _cache_dir(work_dir)
+    code = code_fingerprint()
+    measured = [
+        _separated(path, dec, audio, separator, limits, cache_dir, code)
+        for path, dec, audio in zip(paths, decoded, analysed, strict=True)
+    ]
+    (track_result, track_stems), *ref_measured = measured
+    return Inputs(track_result, [r for r, _ in ref_measured], track_stems, limits[0])
+
+
+def _padded(samples: Samples, length: int) -> Samples:
+    return np.pad(samples, ((0, length - len(samples)), (0, 0)))
+
+
+def _aligned(vocal: Samples, beat: Samples, shift: int) -> tuple[Samples, Samples]:
+    if shift > 0:
+        vocal = np.pad(vocal, ((shift, 0), (0, 0)))
+    elif shift < 0:
+        vocal = vocal[-shift:]
+    if len(vocal) == 0:
+        raise ValueError("the offset drops the whole vocal")
+    length = max(len(vocal), len(beat))
+    return _padded(vocal, length), _padded(beat, length)
+
+
+def _own_key(mix: Audio, vocal: Samples) -> str:
+    # the mix alone would not tell the vocal from a beat swapped with it
+    digest = hashlib.sha256(np.ascontiguousarray(vocal, dtype=np.float32).tobytes())
+    return f"{cache_key(mix, 'own')}|{digest.hexdigest()}"
+
+
+def measure_own(
+    vocal: Path,
+    beat: Path,
+    refs: list[Path],
+    work_dir: Path,
+    separator: Separator,
+    offset_s: float = 0.0,
+) -> Inputs:
+    """Measure an own vocal and beat given apart; only the references are separated.
+
+    Args:
+        vocal: The recorded vocal; the track is named after it and takes its codec and rate.
+        beat: The beat the vocal goes over.
+        refs: The reference tracks, separated and measured as in measure_inputs.
+        work_dir: Folder holding the caches and the runs.
+        separator: Separates the references.
+        offset_s: Seconds to delay the vocal by; a negative offset drops its start.
+
+    Returns:
+        The measurements, with the given vocal and beat as the track's stems.
+
+    Raises:
+        ValueError: The offset drops the whole vocal, or a file cannot be measured.
+    """
+    vocal_dec, beat_dec, *ref_decoded = [decode(p) for p in [vocal, beat, *refs]]
+    vocal_audio, beat_audio, *ref_analysed = [
+        to_analysis(d) for d in [vocal_dec, beat_dec, *ref_decoded]
+    ]
+    try:
+        voice, music = _aligned(
+            vocal_audio.samples, beat_audio.samples, round(offset_s * ANALYSIS_RATE)
+        )
+    except ValueError as error:
+        raise ValueError(f"{vocal.name}: {error}") from error
+    mix_dec = Decoded(vocal, voice + music, ANALYSIS_RATE, vocal_dec.codec)
+    mix = to_analysis(mix_dec)
+    limits = upper, side_upper = _band_limits([mix, vocal_audio, beat_audio, *ref_analysed])
+    cache_dir = _cache_dir(work_dir)
+    code = code_fingerprint()
+    stems = Stems(voice, music, ANALYSIS_RATE, False)
+    log.info("measuring %s", vocal.name)
+    key = metrics_key(
+        _own_key(mix, voice), upper, side_upper, vocal_dec.codec, vocal_dec.rate, code
+    )
+    try:
+        measured, from_cache = _metrics_cached(
+            cache_dir, key, lambda: _measure(mix_dec, mix, stems, upper, side_upper)
+        )
+    except ValueError as error:
+        raise ValueError(f"{vocal.name}: {error}") from error
+    track = FileResult(
+        vocal.name,
+        vocal_dec.codec,
+        vocal_dec.rate,
+        from_cache,
+        False,
+        measured["values"],
+        measured["info"],
+    )
+    ref_results = [
+        _separated(path, dec, audio, separator, limits, cache_dir, code)[0]
+        for path, dec, audio in zip(refs, ref_decoded, ref_analysed, strict=True)
+    ]
+    return Inputs(track, ref_results, stems, upper)
 
 
 def measure_run(track: Path, refs: list[Path], work_dir: Path, separator: Separator) -> Path:
