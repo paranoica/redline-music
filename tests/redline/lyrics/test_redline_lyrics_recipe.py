@@ -321,3 +321,11 @@ def test_scene_words_are_images_not_verbs_or_grammar(profile):
     drawn = set().union(*(make_recipe(p, seed).words for seed in range(80)))
     assert not drawn & set(plain)
     assert {"газ", "лицо"} <= drawn
+
+
+def test_first_person_verbs_and_pronoun_forms_are_not_scene_words(profile):
+    plain = ["поджигаю", "считаю", "убиваю", "чувствую", "свои", "этих", "эта", "тупо", "сам"]
+    images = [f"образ{i}" for i in range(30)]
+    p = flat_profile(profile, [(w, 1.0) for w in plain + images])
+    drawn = set().union(*(make_recipe(p, seed).words for seed in range(60)))
+    assert not drawn & set(plain)

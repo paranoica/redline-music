@@ -1,6 +1,7 @@
 """The recipe of a new text, drawn from a style profile by seed."""
 
 import json
+import re
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -51,6 +52,9 @@ ANCHORS = (
     "сон",
 )
 ANCHOR_COUNT = (2, 3)
+# поджигаю, чувствую: the "I do" form the verb check leaves alone
+FIRST_PERSON = re.compile(r"(аю|яю|ую|юю|ею)$")
+FIRST_PERSON_LETTERS = 6
 # what a text does besides rhyming: the writer gets a few of these, so texts differ in kind
 DEVICES = {
     "punch": "a punchline on a double meaning of one word",
@@ -185,6 +189,13 @@ def _flow(rng: np.random.Generator, kind: str, known: dict[str, Any] | None, bpm
     return str(_draw(rng, names, [float(w) for w in weights]))
 
 
+def _material(word: str) -> bool:
+    """An image or a name to draw on, not a verb or a word of grammar."""
+    if len(word) <= 2 or word in PLAIN_WORDS or is_verb(word):
+        return False
+    return not (len(word) >= FIRST_PERSON_LETTERS and FIRST_PERSON.search(word))
+
+
 def _anchors(rng: np.random.Generator, avoid: frozenset[str] = frozenset()) -> str:
     count = int(rng.integers(ANCHOR_COUNT[0], ANCHOR_COUNT[1] + 1))
     left = [a for a in ANCHORS if stem(a) not in avoid] or list(ANCHORS)
@@ -257,11 +268,8 @@ def make_recipe(
             )
             for i, p in enumerate(sections)
         ]
-    # an image or a name to draw on, not a verb or a word of grammar
     vocabulary = [
-        (w["word"], w["per_1000"])
-        for w in profile["vocabulary"]["top"]
-        if len(w["word"]) > 2 and w["word"] not in PLAIN_WORDS and not is_verb(w["word"])
+        (w["word"], w["per_1000"]) for w in profile["vocabulary"]["top"] if _material(w["word"])
     ]
     # drawn by weight, the same top words came back in every text
     avoid = frozenset(stem(w) for w in worn)
