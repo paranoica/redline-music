@@ -182,18 +182,19 @@ def test_without_a_beat_recipes_are_the_ones_drawn_before_beats_existed(profile)
 
     from redline.lyrics.write.recipe import recipe_from_json
 
-    # the words moved to their own stream and lost their weight, and a title shape was added;
-    # the adlibs, drawn after the words, moved with them. The rest is the draw from before
-    # beats existed, hashed by the code of that time without those four keys
+    # the words moved to their own stream and lost their weight, a title shape was added, the
+    # adlibs drawn after the words moved with them, and the devices lost the four the owner
+    # marked as cringe. The rest is the draw from before beats existed, hashed by the code of
+    # that time without those keys
     before = {
-        0: "df2081392d48a728528deca4116e4a797cca92d63d768aef8dc112057f64553b",
-        7: "10c6af841fb52ed6aaa5e594bf7b53c4f43f2e8e340d3ff50c39001431285539",
-        31: "3eed6180585602422339e0b379d2eb94f4e1b29649243331f6e1c98a613bb839",
+        0: "e6c027c90734fa7b669eec057882e5c9239a4a4395e60a929589d575414945f2",
+        7: "257671bb63de6aa656beea79885c0d5c4e35b1560198abd05007508269495182",
+        31: "d9c83c173e49ab1a9d1fc0fb68eca4a9e8a3fceea802ce4c904e140d008430d5",
     }
     for seed, digest in before.items():
         text = recipe_json(make_recipe(profile, seed))
         data = json.loads(text)
-        for key in ("words", "latin", "title", "adlibs"):
+        for key in ("words", "latin", "title", "adlibs", "devices"):
             data.pop(key)
         rest = json.dumps(data, ensure_ascii=False, sort_keys=True)
         assert hashlib.sha256(rest.encode()).hexdigest() == digest
@@ -344,3 +345,16 @@ def test_how_the_words_are_drawn_moves_no_other_draw(profile):
             worn.sections,
             worn.devices,
         )
+
+
+def test_devices_the_owner_marked_as_cringe_are_never_drawn_but_old_recipes_still_read(profile):
+    from redline.lyrics.write.recipe import DEVICES, DROPPED
+    from redline.lyrics.write.writer import WriterRequest, render
+
+    assert set(DROPPED) == {"absurd", "dialogue", "shout", "contrast"}
+    drawn = {name for seed in range(300) for name, _ in make_recipe(profile, seed).devices}
+    assert not drawn & set(DROPPED) and drawn == set(DEVICES) - set(DROPPED)
+    old = json.loads(recipe_json(make_recipe(profile, 3)))
+    old["devices"] = [["absurd", 2], ["punch", 1]]
+    recipe = recipe_from_json(json.dumps(old))
+    assert "absurd, deadpan" in render(WriterRequest("prompt", recipe, (), (), 1))

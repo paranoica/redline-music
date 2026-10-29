@@ -70,6 +70,9 @@ DEVICES = {
     "contrast": "a cold boast and a weak spot in the same line",
     "sound": "a line built for its sound: repeated syllables, chained inner rhymes, alliteration",
 }
+# kept for recipes drawn before, never drawn again: every line the owner marked from these
+# was cringe, two texts running
+DROPPED = ("absurd", "dialogue", "shout", "contrast")
 DEVICE_COUNT = (3, 5)
 # one line is one bar at half time: the scene's lines stop at 16 syllables, the sixteenths
 # of a bar. Each flow fills the bar to its own range of syllables
@@ -275,7 +278,7 @@ def make_recipe(
     # words on their own stream: how they are drawn moves nothing else
     words_rng = np.random.Generator(np.random.PCG64([seed, 2]))
     latin = [(w["word"], w["per_1000"]) for w in profile["latin"]["top"]]
-    names = sorted(DEVICES)
+    names = sorted(set(DEVICES) - set(DROPPED))
     count = int(rng.integers(DEVICE_COUNT[0], DEVICE_COUNT[1] + 1))
     picked = sorted(rng.choice(len(names), size=count, replace=False).tolist())
     devices = tuple((names[i], int(rng.integers(1, 3))) for i in picked)
