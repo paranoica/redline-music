@@ -644,3 +644,33 @@ def test_cli_run_takes_a_settings_file_and_refuses_a_bad_one(inputs, tmp_path):
         == 2
     )
     assert not (tmp_path / "o2").exists()
+
+
+def test_cli_studio_prints_a_local_address_with_a_token(inputs, tmp_path, capsys, monkeypatch):
+    from redline.studio import server as studio_server
+
+    started = {}
+
+    class Fake:
+        server_address = ("127.0.0.1", 5555)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            started["closed"] = True
+
+    def fake_make(studio, token, port=0):
+        started.update(studio=studio, token=token, port=port)
+        return Fake()
+
+    monkeypatch.setattr(studio_server, "make_server", fake_make)
+    opened = []
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    track, refs = inputs
+    args = ["studio", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    assert main([*args, "--no-browser"], separator=HalfSeparator()) == 0
+    out = capsys.readouterr().out
+    assert f"http://127.0.0.1:5555/?t={started['token']}" in out
+    assert len(started["token"]) >= 32 and not opened and started["closed"]
+    assert started["studio"].folder == tmp_path / "w" / "studio"

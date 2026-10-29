@@ -74,6 +74,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--timbres",
         help="timbre variants, comma separated; join effects with +: 'octave down + doubles'",
     )
+    studio = commands.add_parser(
+        "studio", help="a page on this machine that plays the track and re-renders it live"
+    )
+    _inputs(studio, None)
+    studio.add_argument("--port", type=int, default=0, help="the port (default: a free one)")
+    studio.add_argument(
+        "--no-browser", action="store_true", help="print the address, do not open it"
+    )
     run = commands.add_parser(
         "run", help="process a track with the chosen settings and write the result folder"
     )
@@ -259,6 +267,47 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     print(folder)
+    return 0
+
+
+def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
+    import hashlib
+    import secrets
+    import webbrowser
+
+    from redline.final_run import track_engine
+    from redline.run import measure_inputs
+    from redline.separate import RoformerSeparator, SeparationError
+    from redline.studio import server as studio_server
+
+    refs = reference_files(args.ref)
+    if not refs:
+        print("redline: no reference audio files given", file=sys.stderr)
+        return 2
+    try:
+        inputs = measure_inputs(args.track, refs, args.work, separator or RoformerSeparator())
+        engine = track_engine(inputs)
+        stems = inputs.track_stems
+        digest = hashlib.sha256(str(args.track.resolve()).encode()).hexdigest()[:8]
+        studio = studio_server.Studio(
+            engine, stems.vocal + stems.beat, args.work / "studio", f"{args.track.stem}-{digest}"
+        )
+        token = secrets.token_urlsafe(32)
+        httpd = studio_server.make_server(studio, token, args.port)
+    except (AudioError, SeparationError, ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/?t={token}"
+    print(f"studio: {url}")
+    print("Ctrl+C stops it")
+    if not args.no_browser:
+        webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
     return 0
 
 
@@ -492,23 +541,23 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    if args.command == "measure":
-        return _measure(args, separator)
-    if args.command == "vocal":
-        return _vocal(args, separator)
-    if args.command == "master":
-        return _master(args, separator)
-    if args.command == "run":
-        return _run(args, separator)
-    if args.command == "lyrics" and args.lyrics_command == "check":
-        return _lyrics_check(args)
-    if args.command == "lyrics" and args.lyrics_command == "index":
-        return _lyrics_index(args)
-    if args.command == "lyrics" and args.lyrics_command == "write":
-        return _lyrics_write(args)
-    if args.command == "lyrics" and args.lyrics_command == "suno":
-        return _lyrics_suno(args)
-    if args.command == "lyrics" and args.lyrics_command == "stats":
-        return _lyrics_stats(args)
+    sound = {
+        "measure": _measure,
+        "vocal": _vocal,
+        "master": _master,
+        "run": _run,
+        "studio": _studio,
+    }
+    lyrics = {
+        "check": _lyrics_check,
+        "index": _lyrics_index,
+        "write": _lyrics_write,
+        "suno": _lyrics_suno,
+        "stats": _lyrics_stats,
+    }
+    if args.command in sound:
+        return sound[args.command](args, separator)
+    if args.command == "lyrics" and args.lyrics_command in lyrics:
+        return lyrics[args.lyrics_command](args)
     parser.print_help()
     return 0
