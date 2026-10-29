@@ -64,6 +64,8 @@ class LocalServer(ThreadingHTTPServer):
     """The HTTP server with its token and the page's files."""
 
     daemon_threads = True
+    # the default backlog of five refuses a burst of quick clicks
+    request_queue_size = 64
 
     def __init__(
         self,

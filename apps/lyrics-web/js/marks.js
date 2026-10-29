@@ -8,7 +8,9 @@ const LABELS = { cringe: "кринж", good: "норм" };
 const KEYS = { c: "cringe", с: "cringe", n: "good", т: "good", 0: null };
 
 const $ = (id) => document.getElementById(id);
-const state = { texts: [], current: null, marks: {}, rows: [] };
+// sent counts requests, shown is the newest one whose answer is on screen: quick clicks
+// can be answered out of order, and an older answer must not paint over a newer one
+const state = { texts: [], current: null, marks: {}, rows: [], sent: 0, shown: 0 };
 
 async function call(method, path, body) {
   const response = await fetch(path, {
@@ -87,6 +89,7 @@ async function mark(line, value) {
   const text = state.current;
   const before = state.marks[line] || null;
   const next = before === value ? null : value;
+  const seq = ++state.sent;
   try {
     const answer = await call("POST", "/api/mark", {
       seed: text.seed,
@@ -94,9 +97,13 @@ async function mark(line, value) {
       line,
       mark: next,
     });
-    state.marks = answer.marks;
+    if (seq < state.shown) return;
+    state.shown = seq;
     text.marked = Object.keys(answer.marks).length;
-    paint();
+    if (text === state.current) {
+      state.marks = answer.marks;
+      paint();
+    }
     renderList();
     status(next ? `${LABELS[next]}: сохранено` : "отметка снята");
   } catch (error) {

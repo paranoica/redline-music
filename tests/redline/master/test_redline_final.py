@@ -600,6 +600,13 @@ def test_the_run_renders_what_it_rendered_before_the_engine(inputs, tmp_path):
     want, _ = master_clip(vocal + beat, rate, target)
     assert got.shape == want.shape
     assert np.abs(got - want).max() < 2e-6
+    # and both still match the run that gave the pre-engine file, so a change in the code
+    # they share shows too
+    assert integrated_lufs(got, rate) == pytest.approx(-10.70907, abs=1e-3)
+    assert float(np.sqrt(np.mean(np.square(got, dtype=np.float64)))) == pytest.approx(
+        0.285086, rel=1e-4
+    )
+    assert float(np.abs(got).max()) == pytest.approx(0.988553, abs=1e-5)
 
 
 def test_run_with_settings_uses_them_and_the_tracks_tuning(inputs, tmp_path, monkeypatch):

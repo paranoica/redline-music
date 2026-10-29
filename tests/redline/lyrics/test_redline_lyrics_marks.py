@@ -1,13 +1,21 @@
 import http.client
 import json
-import os
 import threading
 
 import pytest
 from redline.lyrics.marks import server as marks_server
-from redline.lyrics.marks.store import MARKS, marked_lines, read_marks, set_mark
+from redline.lyrics.marks import store
+from redline.lyrics.marks.store import MARKS, DamagedMarks, marked_lines, read_marks, set_mark
 
 TOKEN = "t" * 40
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    ticks = iter(range(1, 10**6))
+    monkeypatch.setattr(store.time, "time_ns", lambda: next(ticks))
+
+
 TEXT = "[Припев]\nснег идёт (е)\nснег идёт (е)\n\n[Куплет]\nпервая строка\nвторая строка\n"
 
 
@@ -39,12 +47,21 @@ def test_only_the_known_marks_are_taken(tmp_path, mark):
     assert MARKS == ("cringe", "good")
 
 
-def test_a_damaged_marks_file_reads_as_no_marks(tmp_path):
+def test_a_damaged_marks_file_reads_as_no_marks_and_is_not_written_over(tmp_path):
     folder = seed(tmp_path, 1)
-    for broken in ("{", "[1, 2]", json.dumps({"строка": "meh", "другая": 3})):
+    broken_files = (
+        "{",
+        "[1, 2]",
+        json.dumps({"строка": {"mark": "meh", "at": 1}}),
+        '{"a": "good"}',
+    )
+    for broken in broken_files:
         (folder / "marks-1.json").write_text(broken, encoding="utf-8")
         assert read_marks(folder, 1) == {}
-    assert marked_lines(tmp_path) == ((), ())
+        assert marked_lines(tmp_path) == ((), ())
+        with pytest.raises(DamagedMarks):
+            set_mark(folder, 1, "первая строка", "good")
+        assert (folder / "marks-1.json").read_text(encoding="utf-8") == broken
 
 
 def test_marked_lines_put_the_newest_first_once_each_and_keep_to_the_limits(tmp_path):
@@ -54,11 +71,23 @@ def test_marked_lines_put_the_newest_first_once_each_and_keep_to_the_limits(tmp_
     set_mark(new, 1, "новая плохая", "cringe")
     set_mark(new, 1, "новая хорошая", "good")
     set_mark(new, 1, "старая 0", "cringe")
-    os.utime(old / "marks-1.json", (1, 1))
     cringe, good = marked_lines(tmp_path, cringe=3, good=10)
     assert cringe == ("старая 0", "новая плохая", "старая 4")
     assert good == ("новая хорошая",)
     assert marked_lines(tmp_path / "missing") == ((), ())
+
+
+def test_newest_means_when_marked_not_which_file_was_touched_last(tmp_path):
+    old, recent = seed(tmp_path, 3), seed(tmp_path, 9)
+    for i in range(20):
+        set_mark(old, 1, f"давняя {i}", "cringe")
+    for i in range(5):
+        set_mark(recent, 1, f"вчерашняя {i}", "cringe")
+    set_mark(old, 1, "сегодняшняя", "cringe")
+    set_mark(old, 1, "давняя 3", None)
+    cringe, _ = marked_lines(tmp_path)
+    assert cringe[:6] == ("сегодняшняя", *(f"вчерашняя {i}" for i in range(4, -1, -1)))
+    assert "давняя 19" in cringe and "давняя 0" not in cringe and "давняя 3" not in cringe
 
 
 def test_a_line_marked_again_counts_as_its_newest_mark(tmp_path):
@@ -144,6 +173,8 @@ def test_a_mark_from_the_page_is_saved_for_that_version(server, tmp_path):
         {"seed": 99, "version": 1, "line": "первая строка", "mark": "cringe"},
         {"seed": "3", "version": 1, "line": "первая строка", "mark": "cringe"},
         {"seed": True, "version": 1, "line": "первая строка", "mark": "cringe"},
+        {"seed": 10**300, "version": 1, "line": "первая строка", "mark": "cringe"},
+        {"seed": 3, "version": 10**300, "line": "первая строка", "mark": "cringe"},
         {"seed": 3, "version": 1, "line": "первая строка", "mark": "cringe", "path": "x"},
     ],
 )
@@ -151,6 +182,14 @@ def test_a_mark_the_text_does_not_hold_is_refused(server, tmp_path, body):
     status, _ = call(server, "POST", "/api/mark", body)
     assert status in (400, 404)
     assert not list(tmp_path.glob("*/marks-*.json"))
+
+
+def test_a_damaged_marks_file_is_reported_not_replaced(server, tmp_path):
+    (tmp_path / "3" / "marks-1.json").write_text("{", encoding="utf-8")
+    body = {"seed": 3, "version": 1, "line": "первая строка", "mark": "good"}
+    status, answer = call(server, "POST", "/api/mark", body)
+    assert status == 409 and "marks-1.json" in answer["error"]
+    assert (tmp_path / "3" / "marks-1.json").read_text(encoding="utf-8") == "{"
 
 
 @pytest.mark.parametrize(
@@ -213,3 +252,30 @@ def test_cli_marks_without_saved_texts_exits_2(tmp_path):
     from redline.cli import main
 
     assert main(["lyrics", "marks", "--lyrics", str(tmp_path / "none"), "--no-browser"]) == 2
+
+
+def test_marks_sent_at_once_from_two_tabs_are_all_kept(tmp_path):
+    lines = [f"строка номер {i}" for i in range(24)]
+    seed(tmp_path, 4, "[Куплет]\n" + "\n".join(lines) + "\n")
+    httpd = marks_server.make_server(tmp_path, TOKEN, port=0)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    statuses = []
+    start = threading.Barrier(len(lines))
+
+    def post(line):
+        start.wait()
+        body = {"seed": 4, "version": 1, "line": line, "mark": "good"}
+        statuses.append(call(httpd, "POST", "/api/mark", body)[0])
+
+    try:
+        posts = [threading.Thread(target=post, args=(line,)) for line in lines]
+        for one in posts:
+            one.start()
+        for one in posts:
+            one.join()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert statuses == [200] * len(lines)
+    assert len(read_marks(tmp_path / "4", 1)) == len(lines)

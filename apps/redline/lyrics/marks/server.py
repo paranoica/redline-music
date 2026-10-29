@@ -1,9 +1,10 @@
 """The marks page: every saved text line by line, each line marked cringe or good."""
 
+import threading
 from http import HTTPStatus
 from pathlib import Path
 
-from redline.lyrics.marks.store import MARKS, read_marks, set_mark
+from redline.lyrics.marks.store import MARKS, DamagedMarks, read_marks, set_mark
 from redline.lyrics.write.generate import versions
 from redline.web.local import BadRequest, LocalHandler, LocalServer, only, site_files
 
@@ -22,8 +23,12 @@ def _kind(line: str) -> str:
     return "line"
 
 
+# a seed or version past this is no folder name the writer makes
+LARGEST = 10**9
+
+
 def _number(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < LARGEST:
         raise BadRequest(HTTPStatus.BAD_REQUEST, f"{name} is a whole number from 0")
     return value
 
@@ -88,7 +93,13 @@ class Handler(LocalHandler):
         folder, lines = self._text(seed, version)
         if not isinstance(line, str) or _kind(line) != "line" or line not in lines:
             raise BadRequest(HTTPStatus.BAD_REQUEST, "the text holds no such line")
-        return self.json(HTTPStatus.OK, {"marks": set_mark(folder, version, line, mark)})
+        # each request has its own thread; a mark reads the file and writes it back
+        with self.server.writing:
+            try:
+                marks = set_mark(folder, version, line, mark)
+            except DamagedMarks as error:
+                raise BadRequest(HTTPStatus.CONFLICT, str(error)) from error
+        return self.json(HTTPStatus.OK, {"marks": marks})
 
 
 class MarksServer(LocalServer):
@@ -100,6 +111,7 @@ class MarksServer(LocalServer):
         files["/css/tokens.css"] = (TOKENS, "text/css; charset=utf-8")
         super().__init__(address, Handler, token, files)
         self.generated = generated
+        self.writing = threading.Lock()
 
 
 def make_server(generated: Path, token: str, port: int = 0) -> MarksServer:
