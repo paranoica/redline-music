@@ -23,6 +23,7 @@ from redline.vocal.chain import (
     Target,
     process_vocal,
 )
+from redline.vocal.fx import reverb, stutter, throws
 from redline.vocal.timbre import (
     bitcrush,
     double,
@@ -70,6 +71,21 @@ LAYER_KEYS = (
     "bitcrush_on",
     "bitcrush_bits",
     "bitcrush_hold",
+)
+FX_KEYS = (
+    "stutter_on",
+    "stutter_ms",
+    "stutter_repeats",
+    "throw_on",
+    "throw_db",
+    "throw_ms",
+    "throw_feedback",
+    "throw_tone_hz",
+    "reverb_on",
+    "reverb_mix_db",
+    "reverb_decay_s",
+    "reverb_predelay_ms",
+    "reverb_tone_hz",
 )
 BEAT_KEYS = ("beat_db", "bass_freq_hz", "bass_drive_db")
 MASTER_KEYS = ("master_on", "master_auto", "master_lufs")
@@ -203,10 +219,13 @@ class Engine:
         layer_key = (*voice_key, "layers", *_key(settings, LAYER_KEYS))
         (layered,) = self._stage(layer_key, lambda: (self._layers(voiced, settings),))
         check()
+        fx_key = (*layer_key, "fx", *_key(settings, FX_KEYS))
+        (layered,) = self._stage(fx_key, lambda: (self._fx(layered, settings),))
+        check()
         beat_key = ("beat", *_key(settings, BEAT_KEYS))
         (beat,) = self._stage(beat_key, lambda: (self._beat(settings),))
         check()
-        master_key = (*layer_key, *beat_key, "master", *_key(settings, MASTER_KEYS))
+        master_key = (*fx_key, *beat_key, "master", *_key(settings, MASTER_KEYS))
         mix = layered + beat
         final, master = self._stage(master_key, lambda: self._master(mix, settings))
         self.last = (master, mix)
@@ -259,6 +278,30 @@ class Engine:
                 out = crushed * np.float32(peak)
         return out
 
+    def _fx(self, layered: Samples, settings: Settings) -> Samples:
+        out, rate = layered, self.context.rate
+        if settings.stutter_on:
+            out = stutter(out, rate, settings.stutter_ms, settings.stutter_repeats)
+        if settings.throw_on:
+            out = throws(
+                out,
+                rate,
+                settings.throw_db,
+                settings.throw_ms,
+                settings.throw_feedback,
+                settings.throw_tone_hz,
+            )
+        if settings.reverb_on:
+            out = reverb(
+                out,
+                rate,
+                settings.reverb_mix_db,
+                settings.reverb_decay_s,
+                settings.reverb_predelay_ms,
+                settings.reverb_tone_hz,
+            )
+        return out
+
     def _beat(self, settings: Settings) -> Samples:
         beat = self.beat
         if settings.beat_db:
@@ -298,6 +341,9 @@ def timbre_of(settings: Settings) -> str:
         (settings.octave_up_on, "octave up"),
         (settings.doubles_on, "doubles"),
         (settings.bitcrush_on, "bitcrush"),
+        (settings.stutter_on, "stutter"),
+        (settings.throw_on, "delay throws"),
+        (settings.reverb_on, "reverb"),
     ):
         if on:
             parts.append(name)

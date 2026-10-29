@@ -81,7 +81,7 @@ def test_the_schema_lists_every_setting_once_with_its_group():
 
 def test_about_ten_main_settings_are_marked_basic():
     basic = [key for key, spec in SPECS.items() if spec.basic]
-    assert 8 <= len(basic) <= 14
+    assert 8 <= len(basic) <= 16
     # a basic setting that greys out behind a switch needs that switch in view too
     assert {"master_auto", "octave_down_on", "doubles_on"} <= set(basic)
     assert {"vocal_db", "drive_db", "formant", "bass_drive_db"} <= set(basic)

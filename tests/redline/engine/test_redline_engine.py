@@ -145,3 +145,21 @@ def test_a_preview_after_a_louder_vocal_keeps_the_masters_loudness(setup):
     preview = engine.preview(louder, start, end)
     whole = engine.render(louder).final[start:end]
     assert abs(integrated_lufs(preview, RATE) - integrated_lufs(whole, RATE)) < 0.5
+
+
+def test_an_effect_change_re_runs_only_the_effects_and_the_master(setup, monkeypatch):
+    vocal, beat, ctx = setup
+    calls = counting(monkeypatch, "process_vocal", "octave_layer", "reverb", "master_clip")
+    engine = Engine(vocal, beat, ctx)
+    engine.render(Settings())
+    engine.render(from_dict({"reverb_on": True}))
+    engine.render(from_dict({"reverb_on": True, "reverb_mix_db": -8.0}))
+    assert calls == {"process_vocal": 1, "octave_layer": 1, "reverb": 2, "master_clip": 3}
+
+
+def test_effects_off_leave_the_vocal_as_the_layers_made_it(setup):
+    vocal, beat, ctx = setup
+    plain = Engine(vocal, beat, ctx).render(Settings())
+    on = Engine(vocal, beat, ctx).render(from_dict({"reverb_on": True}))
+    assert not np.array_equal(plain.vocal, on.vocal)
+    assert np.array_equal(Engine(vocal, beat, ctx).render(Settings()).vocal, plain.vocal)

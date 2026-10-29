@@ -32,7 +32,8 @@ GROUPS = {
     "chain": "Цепочка голоса",
     "eq": "Эквалайзер голоса",
     "voice": "Сам голос",
-    "layers": "Слои и эффекты",
+    "layers": "Слои",
+    "fx": "Эффекты",
     "beat": "Бит",
     "master": "Мастер",
 }
@@ -74,6 +75,19 @@ class Settings:
     bitcrush_on: bool = False
     bitcrush_bits: int = 8
     bitcrush_hold: int = 3
+    stutter_on: bool = False
+    stutter_ms: float = 90.0
+    stutter_repeats: int = 3
+    throw_on: bool = False
+    throw_db: float = -6.0
+    throw_ms: float = 375.0
+    throw_feedback: float = 0.4
+    throw_tone_hz: float = 4000.0
+    reverb_on: bool = False
+    reverb_mix_db: float = -16.0
+    reverb_decay_s: float = 1.8
+    reverb_predelay_ms: float = 25.0
+    reverb_tone_hz: float = 5000.0
     beat_db: float = 0.0
     bass_freq_hz: float = 120.0
     bass_drive_db: float = 12.0
@@ -270,6 +284,71 @@ SPECS: dict[str, Spec] = {
         1,
         "\u00d7",
     ),
+    "stutter_on": _onoff(
+        "fx", "Статтер", "В паузе после фразы повторяет её последний кусочек, как заевшая пластинка"
+    ),
+    "stutter_ms": Spec(
+        "fx",
+        "Длина кусочка",
+        "Сколько от конца фразы повторяется. Меньше — дробнее, как глитч",
+        30,
+        250,
+        5,
+        "мс",
+    ),
+    "stutter_repeats": Spec(
+        "fx", "Повторы", "Сколько раз кусочек повторяется, если влезает в паузу", 1, 8, 1, "\u00d7"
+    ),
+    "throw_on": _onoff(
+        "fx", "Дилей на концах фраз", "Последние слова фразы улетают эхом то влево, то вправо"
+    ),
+    "throw_db": Spec("fx", "Громкость эха", "Насколько первое эхо тише голоса", -24, 0, 0.5, "дБ"),
+    "throw_ms": Spec(
+        "fx",
+        "Шаг эха",
+        "Через сколько приходит каждое эхо. Под бит: 60000 / BPM на долю",
+        60,
+        1000,
+        5,
+        "мс",
+    ),
+    "throw_feedback": Spec(
+        "fx",
+        "Хвост эха",
+        "Сколько остаётся от каждого следующего эха. Больше — длиннее хвост",
+        0,
+        0.85,
+        0.05,
+        "\u00d7",
+    ),
+    "throw_tone_hz": Spec(
+        "fx", "Тембр эха", "Ниже — эхо темнее и уходит назад", 1000, 12000, 100, "Гц"
+    ),
+    "reverb_on": _onoff("fx", "Ревер", "Голос в комнате или зале"),
+    "reverb_mix_db": Spec(
+        "fx",
+        "Громкость ревера",
+        "Насколько хвост тише голоса. Ближе к нулю — голос дальше",
+        -40,
+        0,
+        0.5,
+        "дБ",
+    ),
+    "reverb_decay_s": Spec(
+        "fx",
+        "Длина хвоста",
+        "За сколько хвост затихает. Больше — зал, меньше — комната",
+        0.3,
+        6,
+        0.1,
+        "с",
+    ),
+    "reverb_predelay_ms": Spec(
+        "fx", "Предзадержка", "Пауза перед хвостом: голос остаётся чётким впереди", 0, 150, 1, "мс"
+    ),
+    "reverb_tone_hz": Spec(
+        "fx", "Тембр ревера", "Ниже — хвост темнее и не мешает голосу", 1000, 12000, 100, "Гц"
+    ),
     "beat_db": Spec(
         "beat", "Громкость бита", "Весь бит громче или тише, до мастера", -12, 6, 0.5, "дБ"
     ),
@@ -312,6 +391,8 @@ BASIC = (
     "octave_down_db",
     "doubles_on",
     "doubles_db",
+    "throw_on",
+    "reverb_on",
     "bass_drive_db",
     "master_auto",
     "master_lufs",
