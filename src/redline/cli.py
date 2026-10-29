@@ -363,19 +363,20 @@ def _lazy_stresser(stress: Any) -> Callable[[str], str]:
     return mark
 
 
-def _asked_bpm(args: argparse.Namespace) -> float | None:
-    from redline.lyrics.beat import beat_bpm, half_time
+def _asked_beat(args: argparse.Namespace) -> tuple[float | None, int | None]:
+    from redline.lyrics.beat import beat_bars, beat_bpm, half_time
     from redline.lyrics.parse import LyricsError
 
     if args.beat:
         bpm = beat_bpm(args.beat)
-        print(f"beat tempo: {bpm:g} BPM at half time, {bpm * 2:g} at full")
-        return bpm
+        bars = beat_bars(args.beat, bpm)
+        print(f"beat: {bpm:g} BPM at half time, {bpm * 2:g} at full, {bars} bars")
+        return bpm, bars
     if args.bpm is None:
-        return None
+        return None, None
     if not (math.isfinite(args.bpm) and args.bpm > 0):
         raise LyricsError("--bpm takes a positive number")
-    return half_time((args.bpm,))
+    return half_time((args.bpm,)), None
 
 
 def _lyrics_write(args: argparse.Namespace) -> int:
@@ -413,7 +414,7 @@ def _lyrics_write(args: argparse.Namespace) -> int:
         session = Session(
             folder, profile, name, index, mine, HandoffWriter(folder), mark, args.min_words, style
         )
-        result = session.run(args.seed, args.topic, args.force, _asked_bpm(args))
+        result = session.run(args.seed, args.topic, args.force, *_asked_beat(args))
     except (LyricsError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2

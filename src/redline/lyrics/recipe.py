@@ -72,6 +72,8 @@ FLOWS = {
     "chant": (4, 6),
 }
 HOOK_ONLY = ("chant",)
+# bars of the beat left to the beat alone: an intro and an ending
+INSTRUMENTAL_BARS = 4
 # past this a line turns to mush in Suno
 MAX_SYLLABLES_PER_SECOND = 6.5
 
@@ -106,6 +108,7 @@ class Recipe:
     en_share: float
     devices: tuple[tuple[str, int], ...] = ()
     bpm: float | None = None
+    bars: int | None = None
 
 
 def _draw(rng: np.random.Generator, items: list[Any], weights: list[float]) -> Any:
@@ -174,7 +177,11 @@ def _anchors(rng: np.random.Generator) -> str:
 
 
 def make_recipe(
-    profile: dict[str, Any], seed: int, topic: str | None = None, bpm: float | None = None
+    profile: dict[str, Any],
+    seed: int,
+    topic: str | None = None,
+    bpm: float | None = None,
+    bars: int | None = None,
 ) -> Recipe:
     """Draw a text's shape and material from the profile; the same seed draws the same.
 
@@ -184,6 +191,7 @@ def make_recipe(
         topic: The vibe words, or None to draw them.
         bpm: The beat's half-time tempo; with it every section gets a flow that sets its
             syllables, and the draw differs from the seed's draw without a beat.
+        bars: The beat's whole bars; the text sings in all but a few of them.
     """
     rng = np.random.Generator(np.random.PCG64(seed))
     patterns = profile["structure"]["patterns"]
@@ -214,11 +222,12 @@ def make_recipe(
     groups = [[i] for i, p in enumerate(sections) if p.kind == "verse"]
     groups = groups or [[i] for i, p in enumerate(sections) if p.kind != "hook"] or [hooks]
     turn = 0
-    while sum(p.lines for p in sections) < MIN_LINES:
+    most = MAX_LINES if bars is None else min(MAX_LINES, max(1, bars - INSTRUMENTAL_BARS))
+    while sum(p.lines for p in sections) < min(MIN_LINES, most):
         for i in groups[turn % len(groups)]:
             sections[i] = replace(sections[i], lines=sections[i].lines + 1)
         turn += 1
-    while sum(s.lines for s in sections) > MAX_LINES and max(s.lines for s in sections) > 1:
+    while sum(s.lines for s in sections) > most and max(s.lines for s in sections) > 1:
         longest = max(range(len(sections)), key=lambda i: (sections[i].lines, -i))
         s = sections[longest]
         sections = [
@@ -248,14 +257,16 @@ def make_recipe(
         en_share=float(profile["latin"]["en_share"] or 0.0),
         devices=devices,
         bpm=bpm,
+        bars=bars,
     )
 
 
 def recipe_json(recipe: Recipe) -> str:
     """Byte-stable JSON of a recipe; a recipe without a beat reads as before beats existed."""
     data = asdict(recipe)
-    if data["bpm"] is None:
-        del data["bpm"]
+    for key in ("bpm", "bars"):
+        if data[key] is None:
+            del data[key]
     for section in data["sections"]:
         if section["flow"] is None:
             del section["flow"]

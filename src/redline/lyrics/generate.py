@@ -182,17 +182,20 @@ class Session:
     def _save_state(self, state: dict[str, Any]) -> None:
         _write(self.folder / "state.json", json.dumps(state, ensure_ascii=False, indent=1))
 
-    def _start(self, seed: int, topic: str | None, bpm: float | None) -> dict[str, Any]:
+    def _start(
+        self, seed: int, topic: str | None, bpm: float | None, bars: int | None
+    ) -> dict[str, Any]:
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         for old in self.folder.glob("*"):
             old.unlink()
-        recipe = make_recipe(self.profile, seed, topic, bpm)
+        recipe = make_recipe(self.profile, seed, topic, bpm, bars)
         _write(self.folder / "recipe.json", recipe_json(recipe))
         state = {
             "seed": seed,
             "topic": recipe.topic,
             "asked_topic": topic,
             "bpm": bpm,
+            "bars": bars,
             "profile": self.profile_name,
             "profile_digest": self.profile["meta"]["digest"],
             "prompt": prompt_hash(),
@@ -260,6 +263,7 @@ class Session:
         topic: str | None = None,
         force: bool = False,
         bpm: float | None = None,
+        bars: int | None = None,
     ) -> Saved | Pending | Failed:
         """Take the seed one step on: start it, wait, check a draft, ask again or save.
 
@@ -268,6 +272,7 @@ class Session:
             topic: The vibe words; None keeps the started seed's.
             force: Start a pending or failed seed over.
             bpm: The beat's half-time tempo; None keeps the started seed's.
+            bars: The beat's whole bars, or None when only its tempo is known.
         """
         state = self._state()
         if state:
@@ -276,7 +281,12 @@ class Session:
                 return settled
         if state is None or force:
             before = state or {}
-            state = self._start(seed, topic or before.get("asked_topic"), bpm or before.get("bpm"))
+            state = self._start(
+                seed,
+                topic or before.get("asked_topic"),
+                bpm or before.get("bpm"),
+                bars if bpm else before.get("bars"),
+            )
         recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
         request = WriterRequest(
             prompt_text(),

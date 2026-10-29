@@ -473,3 +473,23 @@ def test_cli_suno_on_a_beat_seed_writes_the_vocal_style(base, capsys):
     assert main(["lyrics", "suno", "--seed", "49", "--lyrics", str(base[0])]) == 0
     out = capsys.readouterr().out
     assert " flow" in out.split("Style: ")[1].split("\n")[0] and "bpm" not in out
+
+
+def test_a_measured_beat_freezes_its_bars_and_a_given_tempo_has_none(base, tmp_path):
+    import numpy as np
+    import soundfile as sf
+
+    rate = 22050
+    x = np.zeros(rate * 40, dtype=np.float32)
+    for i in range(int(40 * 150 / 60)):
+        start = int(i * 60 / 150 * rate)
+        x[start : start + 200] = np.hanning(200)
+    sf.write(tmp_path / "beat.wav", np.column_stack([x, x]), rate)
+    assert run(base, 51, "--beat", str(tmp_path / "beat.wav")) == 3
+    recipe = recipe_of(base, 51)
+    assert abs(recipe.bpm - 75) <= 2 and recipe.bars == int(40 * recipe.bpm / 240)
+    assert sum(s.lines for s in recipe.sections) <= recipe.bars
+    assert run(base, 51, "--force") == 3
+    assert recipe_of(base, 51).bars == recipe.bars
+    run(base, 52, "--bpm", "150")
+    assert recipe_of(base, 52).bars is None

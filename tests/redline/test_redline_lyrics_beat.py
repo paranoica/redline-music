@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from redline_signals import make_rng, write
 
-from redline.lyrics.beat import beat_bpm, half_time
+from redline.lyrics.beat import beat_bars, beat_bpm, half_time
 from redline.lyrics.parse import LyricsError
 
 RATE = 22050
@@ -46,3 +46,10 @@ def test_a_clip_shorter_than_a_few_bars_is_not_a_beat(tmp_path):
     noise = (make_rng().standard_normal((RATE * 2, 2)) * 0.1).astype(np.float32)
     with pytest.raises(LyricsError, match="seconds"):
         beat_bpm(write(tmp_path, "short.wav", noise, RATE))
+
+
+def test_a_beat_has_as_many_whole_bars_as_its_length_holds(tmp_path):
+    path = write(tmp_path, "beat.wav", clicks(150, seconds=30), RATE)
+    # 30 s at 75 BPM half time, a bar of 3.2 s: nine whole bars
+    assert beat_bars(path, 75.0) == 9
+    assert beat_bars(path, 60.0) == 7

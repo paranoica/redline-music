@@ -4,6 +4,8 @@ import math
 from collections.abc import Iterable
 from pathlib import Path
 
+import soundfile as sf
+
 from redline.audio import AudioError, decode
 from redline.lyrics.parse import LyricsError
 from redline.pitch import tempo_candidates
@@ -40,3 +42,12 @@ def beat_bpm(path: Path) -> float:
     if seconds < MIN_SECONDS:
         raise LyricsError(f"the beat lasts {seconds:.1f} seconds; a tempo needs {MIN_SECONDS:g}")
     return half_time(tempo_candidates(decoded.samples, decoded.rate))
+
+
+def beat_bars(path: Path, bpm: float) -> int:
+    """Whole bars of the beat at its half-time tempo, one sung line each."""
+    try:
+        seconds = sf.info(path).duration
+    except (sf.LibsndfileError, RuntimeError) as error:
+        raise LyricsError(f"cannot read {path}: {error}") from error
+    return int(seconds * bpm / 240)

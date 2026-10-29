@@ -229,3 +229,19 @@ def test_a_beat_recipe_reads_back_with_its_tempo_and_flows(profile):
 
     recipe = make_recipe(profile, 5, bpm=82.5)
     assert recipe_from_json(recipe_json(recipe)) == recipe
+
+
+def test_a_beat_of_few_bars_caps_the_lines_and_leaves_room_to_breathe(profile):
+    from redline.lyrics.recipe import INSTRUMENTAL_BARS, recipe_from_json
+
+    profile["structure"]["patterns"] = [["intro-hook-verse-hook-verse-hook", 1.0]]
+    profile["lines_per_section"]["verse"] = {"hist": {"12": 1.0}, "p10": 12, "p50": 12, "p90": 12}
+    for seed in range(20):
+        recipe = make_recipe(profile, seed, bpm=66.3, bars=29)
+        assert sum(s.lines for s in recipe.sections) <= 29 - INSTRUMENTAL_BARS
+        assert all(s.lines >= 1 for s in recipe.sections)
+        assert len({s.lines for s in recipe.sections if s.kind == "hook"}) == 1
+        assert recipe.bars == 29
+        assert recipe_from_json(recipe_json(recipe)) == recipe
+    plenty = make_recipe(profile, 0, bpm=66.3, bars=200)
+    assert sum(s.lines for s in plenty.sections) > 25
