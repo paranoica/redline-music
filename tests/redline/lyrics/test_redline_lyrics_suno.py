@@ -164,3 +164,10 @@ def test_a_hard_beat_gets_an_aggressive_delivery_in_the_style():
     assert "aggressive" in hard and "aggressive" not in calm
     assert calm == field(card(parse_text(TEXT), recipe=beat_recipe("triplets", "eighths")), "Style")
     assert len(hard.split(", ")) <= 7
+
+
+def test_a_shouted_english_word_is_not_spelled_out():
+    assert respell("FAKE НА ВАС") == "FAKE НА ВАС"
+    assert respell("OPPS ВОКРУГ") == "OPPS ВОКРУГ"
+    assert respell("GTA и VVS") == "джи-ти-эй и ви-ви-эс"
+    assert respell("CRTR") == "си-ар-ти-ар"

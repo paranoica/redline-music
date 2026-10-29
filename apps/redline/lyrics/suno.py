@@ -79,7 +79,15 @@ Mark = Callable[[str], str]
 def respell(line: str) -> str:
     """Numbers as Russian words, Latin acronyms letter by letter; the rest as written."""
     line = NUMBER.sub(lambda m: number_words(int(m.group())), DIGIT_GROUP.sub("", line))
-    return ACRONYM.sub(lambda m: "-".join(LETTERS[c] for c in m.group()), line)
+    return ACRONYM.sub(_spelled, line)
+
+
+def _spelled(found: re.Match[str]) -> str:
+    word = found.group()
+    # four capitals with a vowel are a shouted word (FAKE, OPPS), not an acronym
+    if len(word) == 4 and set(word) & set("AEIOUY"):
+        return word
+    return "-".join(LETTERS[c] for c in word)
 
 
 def _stress_end(line: str, marked: str) -> str:
