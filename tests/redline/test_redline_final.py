@@ -424,7 +424,7 @@ def test_timbre_round_takes_chosen_combinations(inputs, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "timbre", ["nightcore", "octave sideways", "pitched up", "doubles + octave sideways"]
+    "timbre", ["chipmunk", "octave sideways", "pitched up", "doubles + octave sideways"]
 )
 def test_an_unknown_timbre_is_refused(inputs, tmp_path, timbre):
     track, refs = inputs
@@ -470,8 +470,9 @@ def test_cli_voice_round_writes_the_chosen_timbre_with_each_new_voice(inputs, tm
     run_dir = next((tmp_path / "w" / "runs").iterdir())
     key = json.loads((run_dir / "key.json").read_text())
     assert key["axis"] == "voice"
-    assert sorted(key["key"].values()) == sorted(["original", "base", *VOICES])
-    assert len(VOICES) == 3
+    # the owner tells the original apart every time, so the voice round leaves it out
+    assert sorted(key["key"].values()) == sorted(["base", *VOICES])
+    assert len(VOICES) == 4
     assert all("octave down + doubles" in v for v in VOICES)
 
 
@@ -546,3 +547,27 @@ def test_a_voice_round_base_carries_the_chosen_timbre_and_formants_come_first(
     assert names[0] == TIMBRE
     formant = [v for v in VOICES if "formant" in v]
     assert formant and all(v.startswith("formant") for v in formant)
+
+
+def test_a_formant_ratio_can_be_named_and_a_wild_one_is_refused(monkeypatch):
+    from redline import final_run
+
+    seen = []
+    monkeypatch.setattr(final_run, "formant_shift", lambda x, rate, r: seen.append(r) or x)
+    vocal = np.zeros((100, 2), dtype=np.float32)
+    final_run._with_timbre("formant x1.35 + formant x0.78", vocal, 44100)
+    assert seen == [1.35, 0.78]
+    for wild in ("formant x9", "formant x0.1", "formant x", "formant xabc"):
+        with pytest.raises(ValueError, match="unknown timbre"):
+            final_run._with_timbre(wild, vocal, 44100)
+
+
+def test_voice_up_and_nightcore_move_the_whole_voice_an_octave(monkeypatch):
+    from redline import final_run
+
+    calls = []
+    monkeypatch.setattr(final_run, "voice_octaves", lambda x, rate, n: calls.append(("up", n)) or x)
+    monkeypatch.setattr(final_run, "pitch_shift", lambda x, rate, st: calls.append(("nc", st)) or x)
+    vocal = np.zeros((100, 2), dtype=np.float32)
+    final_run._with_timbre("voice up + nightcore", vocal, 44100)
+    assert calls == [("up", 1), ("nc", 12.0)]

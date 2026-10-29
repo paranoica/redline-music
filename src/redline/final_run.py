@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import secrets
 import statistics
 from dataclasses import asdict
@@ -20,7 +21,15 @@ from redline.master import master_clip, saturate_low
 from redline.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
 from redline.spectrum import low_end
-from redline.timbre import bitcrush, double, formant_shift, hard_tune, octave_layer
+from redline.timbre import (
+    bitcrush,
+    double,
+    formant_shift,
+    hard_tune,
+    octave_layer,
+    pitch_shift,
+    voice_octaves,
+)
 from redline.vocal_run import ORIGINAL, VocalRun, check_folders, reference_target
 
 Samples = npt.NDArray[np.floating]
@@ -31,15 +40,31 @@ QUIET_MASTER_LUFS = -11.0
 NO_MASTER = "no master"
 BASE = "base"
 TIMBRE_EFFECTS = ("doubles", "octave down", "bitcrush")
-VOICE_EFFECTS = ("formant up", "formant down", "hard tune", "octave up")
+VOICE_EFFECTS = (
+    "formant up",
+    "formant down",
+    "formant x<ratio>",
+    "hard tune",
+    "octave up",
+    "voice up",
+    "nightcore",
+)
 EFFECTS = TIMBRE_EFFECTS + VOICE_EFFECTS
 TIMBRES = TIMBRE_EFFECTS
 TIMBRE = "octave down + doubles"
-# each new voice on top of the timbre already picked; formant down only when asked for.
-# Formants and tune go first: the doubles sit half in the side, which the Praat effects keep
-VOICES = (f"formant up + {TIMBRE}", f"hard tune + {TIMBRE}", f"{TIMBRE} + octave up")
+# each new voice on top of the timbre already picked, pushed far enough to be heard under
+# the drive and the beat. Voice changes go first: the doubles sit half in the side, which
+# the Praat effects keep as it is
+VOICES = (
+    f"formant x1.35 + {TIMBRE}",
+    f"formant x0.78 + {TIMBRE}",
+    f"voice up + {TIMBRE}",
+    f"nightcore + {TIMBRE}",
+)
 FORMANT_UP = 1.2
 FORMANT_DOWN = 0.85
+FORMANT_RATIO = re.compile(r"formant x(\d+(?:\.\d+)?)")
+FORMANT_LIMITS = (0.5, 2.0)
 BASS_FREQ_HZ = 120.0
 BASS_DRIVES_DB = (0.0, 6.0, 12.0, 18.0, 24.0)
 BASS_DRIVE_DB = 12.0
@@ -123,6 +148,19 @@ def _effects(name: str) -> list[str]:
     return [part.strip() for part in name.split("+")]
 
 
+def _formant_ratio(effect: str) -> float | None:
+    if effect in ("formant up", "formant down"):
+        return FORMANT_UP if effect == "formant up" else FORMANT_DOWN
+    named = FORMANT_RATIO.fullmatch(effect)
+    if named and FORMANT_LIMITS[0] <= float(named.group(1)) <= FORMANT_LIMITS[1]:
+        return float(named.group(1))
+    return None
+
+
+def _known(effect: str) -> bool:
+    return effect in EFFECTS or _formant_ratio(effect) is not None
+
+
 def _with_timbre(name: str, vocal: Samples, rate: int, tuning_cents: float = 0.0) -> Samples:
     """Apply one effect, or several joined by " + ", in order.
 
@@ -138,8 +176,13 @@ def _with_timbre(name: str, vocal: Samples, rate: int, tuning_cents: float = 0.0
             out = double(out, rate)
         elif effect in ("octave down", "octave up"):
             out = octave_layer(out, rate, -1 if effect == "octave down" else 1, OCTAVE_LEVEL_DB)
-        elif effect in ("formant up", "formant down"):
-            out = formant_shift(out, rate, FORMANT_UP if effect == "formant up" else FORMANT_DOWN)
+        elif (ratio := _formant_ratio(effect)) is not None:
+            out = formant_shift(out, rate, ratio)
+        elif effect == "voice up":
+            out = voice_octaves(out, rate, 1)
+        elif effect == "nightcore":
+            # the vocoder moves the formants with the notes, as a sped-up record does
+            out = pitch_shift(out, rate, 12.0)
         elif effect == "hard tune":
             out = hard_tune(out, rate, tuning_cents)
         elif effect == "bitcrush":
@@ -166,7 +209,7 @@ def timbre_round(
     On the voice axis the base carries the chosen timbre, as the final does, and each variant
     names the chosen timbre with one new effect.
     """
-    unknown = [e for name in timbres for e in _effects(name) if e not in EFFECTS]
+    unknown = [e for name in timbres for e in _effects(name) if not _known(e)]
     if unknown:
         raise ValueError(
             f"unknown timbre {', '.join(unknown)}, expected some of {', '.join(EFFECTS)}"
@@ -178,7 +221,9 @@ def timbre_round(
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
     tuning = float(inputs.track.info.get("vocal.tuning_cents") or 0.0)
     base = _with_timbre(TIMBRE, vocal, rate) if axis == "voice" else vocal
-    variants = {ORIGINAL: original, BASE: master_clip(base + beat, rate, target)[0]}
+    variants = {BASE: master_clip(base + beat, rate, target)[0]}
+    if axis != "voice":
+        variants = {ORIGINAL: original, **variants}
     for name in timbres:
         log.info("%s: %s", axis, name)
         sound = _with_timbre(name, vocal, rate, tuning)

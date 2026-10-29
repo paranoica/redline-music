@@ -2,7 +2,15 @@ import numpy as np
 import pytest
 from redline_signals import make_rng, tone
 
-from redline.timbre import bitcrush, double, formant_shift, hard_tune, octave_layer, pitch_shift
+from redline.timbre import (
+    bitcrush,
+    double,
+    formant_shift,
+    hard_tune,
+    octave_layer,
+    pitch_shift,
+    voice_octaves,
+)
 
 RATE = 44100
 
@@ -168,3 +176,13 @@ def test_a_clip_praat_cannot_take_is_a_value_error():
     for effect in (lambda: formant_shift(clip, RATE, 1.2), lambda: hard_tune(clip, RATE, 0.0)):
         with pytest.raises(ValueError, match="voice effect"):
             effect()
+
+
+def test_a_voice_an_octave_up_keeps_its_formants():
+    x = sung(150)
+    y = voice_octaves(x, RATE, 1)
+    assert y.shape == x.shape
+    f0 = mid_sound(y).to_pitch(0.01, 75, 600).selected_array["frequency"]
+    assert np.median(f0[f0 > 0]) == pytest.approx(300, rel=0.02)
+    for b, a in zip(formants(x), formants(y), strict=True):
+        assert a == pytest.approx(b, rel=0.06)

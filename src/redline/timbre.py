@@ -110,3 +110,19 @@ def hard_tune(samples: Samples, rate: int, tuning_cents: float) -> Samples:
         return call(manipulation, "Get resynthesis (overlap-add)")
 
     return _on_mid(samples, rate, change)
+
+
+def voice_octaves(samples: Samples, rate: int, octaves: int) -> Samples:
+    """The whole voice whole octaves away, its formants kept: higher, not a cartoon."""
+    factor = 2.0**octaves
+
+    def change(sound: parselmouth.Sound) -> parselmouth.Sound:
+        manipulation = call(
+            sound, "To Manipulation", PITCH_STEP_S, PITCH_FLOOR_HZ, PITCH_CEILING_HZ
+        )
+        tier = call(manipulation, "Extract pitch tier")
+        call(tier, "Formula", f"self * {factor}")
+        call([tier, manipulation], "Replace pitch tier")
+        return call(manipulation, "Get resynthesis (overlap-add)")
+
+    return _on_mid(samples, rate, change)
