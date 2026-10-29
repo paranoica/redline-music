@@ -146,6 +146,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.measure.run import measure_inputs
     from redline.measure.separate import RoformerSeparator, SeparationError
     from redline.studio import server as studio_server
+    from redline.web.local import browser_file
 
     refs = audio_files(args.ref)
     if not refs:
@@ -176,7 +177,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     print(f"studio: {url}", flush=True)
     print("Ctrl+C stops it", flush=True)
     if not args.no_browser:
-        webbrowser.open(studio_server.browser_file(url, args.work / "studio").as_uri())
+        webbrowser.open(browser_file(url, args.work / "studio").as_uri())
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

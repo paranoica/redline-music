@@ -208,7 +208,7 @@ def test_a_broken_preset_or_settings_file_does_not_break_the_page(server, studio
 def test_the_browser_opens_a_private_file_not_an_address_with_the_token(tmp_path):
     import stat
 
-    from redline.studio.server import browser_file
+    from redline.web.local import browser_file
 
     url = f"http://127.0.0.1:5555/?t={TOKEN}"
     old = tmp_path / "studio" / "open.html"

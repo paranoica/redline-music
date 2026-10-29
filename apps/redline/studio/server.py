@@ -1,26 +1,20 @@
 """The studio: a page on 127.0.0.1 that plays the track and re-renders it as settings move.
 
 One render runs at a time and the newest request wins: an older one stops between stages.
-Every API call carries the token printed with the page address, and the Host must be this
-machine at this port, so neither another site in the browser nor a rebound name gets in.
+The guards of the page's server live in `redline.web.local`.
 """
 
 import contextlib
-import hmac
-import html
 import io
 import json
 import math
-import os
 import threading
 import time
 from collections.abc import Sequence
 from dataclasses import asdict
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
 import numpy.typing as npt
@@ -29,49 +23,12 @@ import soundfile as sf
 from redline.core.loudness import integrated_lufs
 from redline.engine.render import Cancelled, Engine, Rendered
 from redline.engine.settings import PRESET_NAME, Settings, from_dict, schema
+from redline.web.local import BadRequest, LocalHandler, LocalServer, only, site_files
 
 Samples = npt.NDArray[np.floating]
 
 # the page lives next to the package, in apps/studio-web
 SITE = Path(__file__).resolve().parents[2] / "studio-web"
-KINDS = {
-    ".html": "text/html; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".svg": "image/svg+xml",
-}
-
-
-def site_files(root: Path = SITE) -> dict[str, tuple[Path, str]]:
-    """Every page file by its URL path, listed once: nothing outside this map is served."""
-    files = {
-        "/" + path.relative_to(root).as_posix(): (path, KINDS[path.suffix])
-        for path in sorted(root.rglob("*"))
-        if path.is_file() and path.suffix in KINDS
-    }
-    files["/"] = files["/index.html"]
-    return files
-
-
-MAX_BODY = 64 * 1024
-HEADERS = {
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; media-src 'self' blob:; img-src 'self' data:; "
-        "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
-    ),
-}
-
-
-class BadRequest(Exception):
-    """The request asks for something the studio does not take."""
-
-    def __init__(self, status: HTTPStatus, message: str) -> None:
-        """Keep the status to answer with."""
-        super().__init__(message)
-        self.status = status
 
 
 def wav_bytes(samples: Samples, rate: int) -> bytes:
@@ -201,72 +158,20 @@ def _seq(body: dict) -> int:
     return seq
 
 
-def _only(body: dict, *keys: str) -> None:
-    extra = sorted(set(body) - set(keys))
-    if extra:
-        raise BadRequest(HTTPStatus.BAD_REQUEST, f"unexpected {', '.join(extra)}")
-
-
-class Handler(BaseHTTPRequestHandler):
+class Handler(LocalHandler):
     """Answers the page; the studio and the token sit on the server."""
 
     server: "StudioServer"  # pyright: ignore[reportIncompatibleVariableOverride]
-    # a connection that sends nothing must not hold a thread for good
-    timeout = 10
 
-    def log_message(self, format: str, *args: Any) -> None:
-        """Keep the console for the page address and render times."""
-
-    def _send(self, status: int, body: bytes, kind: str, extra: dict | None = None) -> None:
-        self.send_response(status)
-        for name, value in {**HEADERS, **(extra or {})}.items():
-            self.send_header(name, value)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        # the page drops a request a newer one replaced; its closed socket is not an error
-        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-            self.wfile.write(body)
-
-    def _json(self, status: int, data: Any) -> None:
-        self._send(status, json.dumps(data, ensure_ascii=False).encode(), "application/json")
-
-    def _error(self, status: int, message: str) -> None:
-        self._json(status, {"error": message})
-
-    def _host_ok(self) -> bool:
-        port = self.server.server_address[1]
-        return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")
-
-    def _token_ok(self, given: str | None) -> bool:
-        return given is not None and hmac.compare_digest(given.encode(), self.server.token.encode())
-
-    def do_GET(self) -> None:
-        """The page, its two static files and the read-only API."""
-        if not self._host_ok():
-            return self._error(HTTPStatus.FORBIDDEN, "wrong host")
-        url = urlsplit(self.path)
-        if url.path in ("/", "/index.html"):
-            given = parse_qs(url.query).get("t", [None])[0]
-            if not self._token_ok(given):
-                return self._error(HTTPStatus.FORBIDDEN, "open the address the studio printed")
-        if url.path in self.server.files:
-            path, kind = self.server.files[url.path]
-            return self._send(HTTPStatus.OK, path.read_bytes(), kind)
-        if not url.path.startswith("/api/"):
-            return self._error(HTTPStatus.NOT_FOUND, "no such page")
-        if not self._token_ok(self.headers.get("X-Token")):
-            return self._error(HTTPStatus.FORBIDDEN, "no token")
-        return self._api_get(url.path, parse_qs(url.query))
-
-    def _api_get(self, path: str, query: dict[str, list[str]]) -> None:
+    def api_get(self, path: str, query: dict[str, list[str]]) -> None:
+        """Schema, presets, the original and the references."""
         studio = self.server.studio
         if path == "/api/schema":
-            return self._json(HTTPStatus.OK, self._schema())
+            return self.json(HTTPStatus.OK, self._schema())
         if path == "/api/presets":
-            return self._json(HTTPStatus.OK, studio.presets())
+            return self.json(HTTPStatus.OK, studio.presets())
         if path == "/api/references":
-            return self._json(
+            return self.json(
                 HTTPStatus.OK,
                 [
                     {"index": i, "name": name, "seconds": len(x) / rate, "lufs": lufs}
@@ -278,13 +183,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/reference_span":
             return self._reference_span(query)
         if path == "/api/original":
-            return self._send(
+            return self.send(
                 HTTPStatus.OK,
                 wav_bytes(studio.original, studio.rate),
                 "audio/wav",
                 {"X-Lufs": f"{studio.original_lufs:.2f}"},
             )
-        return self._error(HTTPStatus.NOT_FOUND, "no such call")
+        return self.error(HTTPStatus.NOT_FOUND, "no such call")
 
     def _which(self, asked: list[str]) -> int | None:
         given = asked[0] if len(asked) == 1 else ""
@@ -297,23 +202,23 @@ class Handler(BaseHTTPRequestHandler):
         try:
             start, end = float(query["start"][0]), float(query["end"][0])
         except (KeyError, ValueError):
-            return self._error(HTTPStatus.BAD_REQUEST, "start and end are seconds")
+            return self.error(HTTPStatus.BAD_REQUEST, "start and end are seconds")
         if which is None:
-            return self._error(HTTPStatus.BAD_REQUEST, "no such reference")
+            return self.error(HTTPStatus.BAD_REQUEST, "no such reference")
         _, samples, rate, _ = self.server.studio.references[which]
         if not (
             math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= len(samples) / rate
         ):
-            return self._error(HTTPStatus.BAD_REQUEST, "the span lies outside the reference")
+            return self.error(HTTPStatus.BAD_REQUEST, "the span lies outside the reference")
         lufs = integrated_lufs(samples[int(start * rate) : int(end * rate)], rate)
-        return self._json(HTTPStatus.OK, {"lufs": lufs if math.isfinite(lufs) else None})
+        return self.json(HTTPStatus.OK, {"lufs": lufs if math.isfinite(lufs) else None})
 
     def _reference(self, asked: list[str]) -> None:
         which = self._which(asked)
         if which is None:
-            return self._error(HTTPStatus.BAD_REQUEST, "no such reference")
+            return self.error(HTTPStatus.BAD_REQUEST, "no such reference")
         _, samples, rate, lufs = self.server.studio.references[which]
-        return self._send(
+        return self.send(
             HTTPStatus.OK, wav_bytes(samples, rate), "audio/wav", {"X-Lufs": f"{lufs:.2f}"}
         )
 
@@ -340,55 +245,27 @@ class Handler(BaseHTTPRequestHandler):
             },
         }
 
-    def _body(self) -> dict:
-        if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
-            raise BadRequest(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "send JSON")
-        if self.headers.get("Transfer-Encoding"):
-            raise BadRequest(HTTPStatus.LENGTH_REQUIRED, "no chunked bodies")
-        length = self.headers.get("Content-Length", "")
-        if not (length.isascii() and length.isdigit()):
-            raise BadRequest(HTTPStatus.LENGTH_REQUIRED, "Content-Length is needed")
-        if int(length) > MAX_BODY:
-            self.close_connection = True
-            raise BadRequest(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "the body is too large")
-        try:
-            body = json.loads(self.rfile.read(int(length)))
-        except ValueError as error:
-            raise BadRequest(HTTPStatus.BAD_REQUEST, "the body is not JSON") from error
-        if not isinstance(body, dict):
-            raise BadRequest(HTTPStatus.BAD_REQUEST, "the body is a JSON object")
-        return body
-
-    def do_POST(self) -> None:
+    def api_post(self, path: str, body: dict) -> None:
         """Renders, saves and presets."""
-        if not self._host_ok():
-            return self._error(HTTPStatus.FORBIDDEN, "wrong host")
-        if not self._token_ok(self.headers.get("X-Token")):
-            return self._error(HTTPStatus.FORBIDDEN, "no token")
-        try:
-            body = self._body()
-            path = urlsplit(self.path).path
-            if path == "/api/preview":
-                return self._preview(body)
-            if path == "/api/render":
-                return self._render(body)
-            if path == "/api/save":
-                _only(body, "settings")
-                saved = self.server.studio.save(_settings(body))
-                return self._json(HTTPStatus.OK, {"path": str(saved)})
-            if path == "/api/preset":
-                _only(body, "name", "settings")
-                name = body.get("name")
-                if not isinstance(name, str):
-                    raise BadRequest(HTTPStatus.BAD_REQUEST, "a preset needs a name")
-                self.server.studio.save_preset(name, _settings(body))
-                return self._json(HTTPStatus.OK, {"name": name})
-            return self._error(HTTPStatus.NOT_FOUND, "no such call")
-        except BadRequest as error:
-            return self._error(error.status, str(error))
+        if path == "/api/preview":
+            return self._preview(body)
+        if path == "/api/render":
+            return self._render(body)
+        if path == "/api/save":
+            only(body, "settings")
+            saved = self.server.studio.save(_settings(body))
+            return self.json(HTTPStatus.OK, {"path": str(saved)})
+        if path == "/api/preset":
+            only(body, "name", "settings")
+            name = body.get("name")
+            if not isinstance(name, str):
+                raise BadRequest(HTTPStatus.BAD_REQUEST, "a preset needs a name")
+            self.server.studio.save_preset(name, _settings(body))
+            return self.json(HTTPStatus.OK, {"name": name})
+        return self.error(HTTPStatus.NOT_FOUND, "no such call")
 
     def _preview(self, body: dict) -> None:
-        _only(body, "settings", "seq", "start", "end")
+        only(body, "settings", "seq", "start", "end")
         studio = self.server.studio
         settings, seq = _settings(body), _seq(body)
         start, end = body.get("start"), body.get("end")
@@ -401,11 +278,11 @@ class Handler(BaseHTTPRequestHandler):
         began = time.monotonic()
         samples = studio.preview(settings, seq, first, last)
         if samples is None:
-            return self._error(HTTPStatus.CONFLICT, "a newer request came in")
+            return self.error(HTTPStatus.CONFLICT, "a newer request came in")
         took = (time.monotonic() - began) * 1000
         print(f"preview {end - start:.1f} s in {took:.0f} ms")  # type: ignore[operator]
         lufs = integrated_lufs(studio.original[first:last], studio.rate)
-        self._send(
+        self.send(
             HTTPStatus.OK,
             wav_bytes(samples, studio.rate),
             "audio/wav",
@@ -417,16 +294,16 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _render(self, body: dict) -> None:
-        _only(body, "settings", "seq")
+        only(body, "settings", "seq")
         studio = self.server.studio
         settings, seq = _settings(body), _seq(body)
         began = time.monotonic()
         rendered = studio.render(settings, seq)
         if rendered is None:
-            return self._error(HTTPStatus.CONFLICT, "a newer request came in")
+            return self.error(HTTPStatus.CONFLICT, "a newer request came in")
         took = (time.monotonic() - began) * 1000
         print(f"exact render in {took:.0f} ms")
-        self._send(
+        self.send(
             HTTPStatus.OK,
             wav_bytes(rendered.final, studio.rate),
             "audio/wav",
@@ -437,33 +314,13 @@ class Handler(BaseHTTPRequestHandler):
         )
 
 
-class StudioServer(ThreadingHTTPServer):
+class StudioServer(LocalServer):
     """The HTTP server with the studio and its token."""
-
-    daemon_threads = True
 
     def __init__(self, address: tuple[str, int], studio: Studio, token: str) -> None:
         """Bind and keep the studio."""
-        super().__init__(address, Handler)
+        super().__init__(address, Handler, token, site_files(SITE))
         self.studio = studio
-        self.token = token
-        self.files = site_files()
-
-
-def browser_file(url: str, folder: Path) -> Path:
-    """A page only the owner can read that sends the browser to url.
-
-    Opening the address itself would put the token on the browser's command line, which
-    every user of the machine can read.
-    """
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / "open.html"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.fchmod(fd, 0o600)
-    page = f'<!doctype html><meta http-equiv="refresh" content="0;url={html.escape(url)}">'
-    with os.fdopen(fd, "w", encoding="utf-8") as out:
-        out.write(page)
-    return path
 
 
 def make_server(studio: Studio, token: str, port: int = 0) -> StudioServer:
