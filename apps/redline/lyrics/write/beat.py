@@ -4,6 +4,7 @@ import math
 from collections.abc import Iterable
 from pathlib import Path
 
+import librosa
 import soundfile as sf
 
 from redline.core.audio import AudioError, decode
@@ -51,3 +52,26 @@ def beat_bars(path: Path, bpm: float) -> int:
     except (sf.LibsndfileError, RuntimeError) as error:
         raise LyricsError(f"cannot read {path}: {error}") from error
     return int(seconds * bpm / 240)
+
+
+# Set between the owner's three type beats: the one they called hard read 2144 Hz, the two
+# others 1751 and 1975. Three beats are a thin base, so the owner can name the delivery instead
+HARD_BRIGHTNESS_HZ = 2050.0
+ANALYSIS_RATE = 22050
+
+
+def beat_brightness(path: Path) -> float:
+    """The beat's mean spectral centroid, in Hz: bright synths and hard 808s read higher."""
+    try:
+        decoded = decode(path)
+    except AudioError as error:
+        raise LyricsError(str(error)) from error
+    mono = librosa.resample(
+        decoded.samples.mean(axis=1), orig_sr=decoded.rate, target_sr=ANALYSIS_RATE
+    )
+    return float(librosa.feature.spectral_centroid(y=mono, sr=ANALYSIS_RATE).mean())
+
+
+def delivery_of(brightness_hz: float) -> str:
+    """Hard or calm, by the beat's brightness."""
+    return "hard" if brightness_hz >= HARD_BRIGHTNESS_HZ else "calm"

@@ -123,20 +123,33 @@ def _lazy_stresser(stress: Any) -> Callable[[str], str]:
     return mark
 
 
-def _asked_beat(args: argparse.Namespace) -> tuple[float | None, int | None]:
+def _asked_beat(args: argparse.Namespace) -> tuple[float | None, int | None, str | None]:
     from redline.lyrics.text.parse import LyricsError
-    from redline.lyrics.write.beat import beat_bars, beat_bpm, half_time
+    from redline.lyrics.write.beat import (
+        beat_bars,
+        beat_bpm,
+        beat_brightness,
+        delivery_of,
+        half_time,
+    )
 
     if args.beat:
         bpm = beat_bpm(args.beat)
         bars = beat_bars(args.beat, bpm)
-        print(f"beat: {bpm:g} BPM at half time, {bpm * 2:g} at full, {bars} bars")
-        return bpm, bars
+        brightness = beat_brightness(args.beat)
+        delivery = args.delivery or delivery_of(brightness)
+        print(
+            f"beat: {bpm:g} BPM at half time, {bpm * 2:g} at full, {bars} bars, "
+            f"brightness {brightness:.0f} Hz, delivery {delivery}"
+        )
+        return bpm, bars, delivery
     if args.bpm is None:
-        return None, None
+        if args.delivery:
+            raise LyricsError("--delivery goes with --beat or --bpm")
+        return None, None, None
     if not (math.isfinite(args.bpm) and args.bpm > 0):
         raise LyricsError("--bpm takes a positive number")
-    return half_time((args.bpm,)), None
+    return half_time((args.bpm,)), None, args.delivery
 
 
 def _lyrics_write(args: argparse.Namespace) -> int:

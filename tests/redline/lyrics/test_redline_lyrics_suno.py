@@ -148,3 +148,19 @@ def test_a_title_cut_at_a_comma_or_dash_loses_it():
     text = "[Припев]\nдым в клубе, и дым в голове\nдым в клубе, и дым в голове\n"
     assert title_of(parse_text(text)) == "Дым в клубе"
     assert title_of(parse_text("[Припев]\nночь — и я снова тут\n")) == "Ночь — и"
+
+
+def test_a_hard_beat_gets_an_aggressive_delivery_in_the_style():
+    from dataclasses import replace
+
+    hard = field(
+        card(parse_text(TEXT), recipe=replace(beat_recipe("triplets", "eighths"), delivery="hard")),
+        "Style",
+    )
+    calm = field(
+        card(parse_text(TEXT), recipe=replace(beat_recipe("triplets", "eighths"), delivery="calm")),
+        "Style",
+    )
+    assert "aggressive" in hard and "aggressive" not in calm
+    assert calm == field(card(parse_text(TEXT), recipe=beat_recipe("triplets", "eighths")), "Style")
+    assert len(hard.split(", ")) <= 7

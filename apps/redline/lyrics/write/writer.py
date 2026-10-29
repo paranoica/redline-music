@@ -67,6 +67,13 @@ def prompt_text() -> str:
     return PROMPT.read_text(encoding="utf-8")
 
 
+DELIVERIES = {
+    "hard": "the beat hits hard; punchy short hits, shouted adlibs, hard consonants at the "
+    "line ends, more chant in the hook",
+    "calm": "the beat floats; lines glide, fewer shouts, adlibs as echoes",
+}
+
+
 def prompt_hash() -> str:
     """A short hash of the prompt, kept with every text written under it."""
     return hashlib.sha256(prompt_text().encode()).hexdigest()[:12]
@@ -89,6 +96,8 @@ def render(request: WriterRequest, answer_to: Path | None = None) -> str:
         )
     else:
         out.append(f"- Line length: {r.band}")
+    if r.delivery:
+        out.append(f"- Delivery: {r.delivery}: {DELIVERIES[r.delivery]}")
     out.append("- Sections, in this order:")
     for i, s in enumerate(r.sections, 1):
         low, high = s.syllables

@@ -244,3 +244,14 @@ def test_a_beat_of_few_bars_caps_the_lines_and_leaves_room_to_breathe(profile):
         assert recipe_from_json(recipe_json(recipe)) == recipe
     plenty = make_recipe(profile, 0, bpm=66.3, bars=200)
     assert sum(s.lines for s in plenty.sections) > 25
+
+
+def test_a_delivery_rides_along_and_reads_back(profile):
+    from redline.lyrics.write.recipe import recipe_from_json
+
+    plain = make_recipe(profile, 9, bpm=75.0)
+    hard = make_recipe(profile, 9, bpm=75.0, delivery="hard")
+    assert hard.delivery == "hard" and plain.delivery is None
+    assert hard.sections == plain.sections and hard.words == plain.words
+    assert recipe_from_json(recipe_json(hard)) == hard
+    assert "delivery" not in recipe_json(plain)

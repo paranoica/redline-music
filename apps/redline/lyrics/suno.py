@@ -42,6 +42,13 @@ STYLE = [
 ]
 # on the owner's own beat (Add Vocals) the style box speaks of the voice only
 VOCALS = ["soundcloud rap", "energetic high-pitched male vocals", "heavy autotune"]
+HARD_VOCALS = [
+    "soundcloud rap",
+    "aggressive high-pitched male vocals",
+    "heavy autotune",
+    "shouted ad-libs",
+]
+MAX_STYLE_TERMS = 7
 FLOW_TAGS = {
     "sixteenths": "fast flow",
     "triplets": "triplet flow",
@@ -136,7 +143,8 @@ def _style(recipe: Recipe | None) -> str:
     if recipe is None or not recipe.bpm:
         return ", ".join(STYLE)
     flows = dict.fromkeys(FLOW_TAGS[s.flow] for s in recipe.sections if s.flow)
-    return ", ".join([*VOCALS, *flows])
+    vocals = HARD_VOCALS if recipe.delivery == "hard" else VOCALS
+    return ", ".join([*vocals, *list(flows)[: MAX_STYLE_TERMS - len(vocals)]])
 
 
 def card(

@@ -492,3 +492,13 @@ def test_a_measured_beat_freezes_its_bars_and_a_given_tempo_has_none(base, tmp_p
     assert recipe_of(base, 51).bars == recipe.bars
     run(base, 52, "--bpm", "150")
     assert recipe_of(base, 52).bars is None
+
+
+def test_a_delivery_reaches_the_recipe_and_the_writer(base):
+    assert run(base, 53, "--bpm", "140", "--delivery", "hard") == 3
+    assert recipe_of(base, 53).delivery == "hard"
+    request = (folder(base, 53) / "request-1.md").read_text(encoding="utf-8")
+    assert "Delivery: hard" in request
+    assert run(base, 54, "--delivery", "hard") == 2
+    assert run(base, 55, "--bpm", "140") == 3
+    assert recipe_of(base, 55).delivery is None

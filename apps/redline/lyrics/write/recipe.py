@@ -109,6 +109,7 @@ class Recipe:
     devices: tuple[tuple[str, int], ...] = ()
     bpm: float | None = None
     bars: int | None = None
+    delivery: str | None = None
 
 
 def _draw(rng: np.random.Generator, items: list[Any], weights: list[float]) -> Any:
@@ -182,6 +183,7 @@ def make_recipe(
     topic: str | None = None,
     bpm: float | None = None,
     bars: int | None = None,
+    delivery: str | None = None,
 ) -> Recipe:
     """Draw a text's shape and material from the profile; the same seed draws the same.
 
@@ -192,6 +194,7 @@ def make_recipe(
         bpm: The beat's half-time tempo; with it every section gets a flow that sets its
             syllables, and the draw differs from the seed's draw without a beat.
         bars: The beat's whole bars; the text sings in all but a few of them.
+        delivery: "hard" or "calm" for the beat, or None; it draws nothing.
     """
     rng = np.random.Generator(np.random.PCG64(seed))
     patterns = profile["structure"]["patterns"]
@@ -258,13 +261,14 @@ def make_recipe(
         devices=devices,
         bpm=bpm,
         bars=bars,
+        delivery=delivery,
     )
 
 
 def recipe_json(recipe: Recipe) -> str:
     """Byte-stable JSON of a recipe; a recipe without a beat reads as before beats existed."""
     data = asdict(recipe)
-    for key in ("bpm", "bars"):
+    for key in ("bpm", "bars", "delivery"):
         if data[key] is None:
             del data[key]
     for section in data["sections"]:

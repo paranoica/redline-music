@@ -52,3 +52,23 @@ def test_a_beat_has_as_many_whole_bars_as_its_length_holds(tmp_path):
     # 30 s at 75 BPM half time, a bar of 3.2 s: nine whole bars
     assert beat_bars(path, 75.0) == 9
     assert beat_bars(path, 60.0) == 7
+
+
+def noise(seconds, cutoff, btype):
+    from scipy.signal import butter, sosfilt
+
+    x = make_rng().standard_normal(RATE * seconds)
+    sos = butter(4, cutoff, btype=btype, fs=RATE, output="sos")
+    y = sosfilt(sos, x)
+    y = 0.3 * y / np.abs(y).max()
+    return np.column_stack([y, y]).astype(np.float32)
+
+
+def test_a_bright_beat_reads_as_hard_and_a_dark_one_as_calm(tmp_path):
+    from redline.lyrics.write.beat import HARD_BRIGHTNESS_HZ, beat_brightness, delivery_of
+
+    dark = beat_brightness(write(tmp_path, "dark.wav", noise(20, 800, "lowpass"), RATE))
+    bright = beat_brightness(write(tmp_path, "bright.wav", noise(20, 3000, "highpass"), RATE))
+    assert dark < HARD_BRIGHTNESS_HZ < bright
+    assert delivery_of(bright) == "hard" and delivery_of(dark) == "calm"
+    assert delivery_of(HARD_BRIGHTNESS_HZ) == "hard"

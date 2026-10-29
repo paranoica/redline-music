@@ -183,12 +183,17 @@ class Session:
         _write(self.folder / "state.json", json.dumps(state, ensure_ascii=False, indent=1))
 
     def _start(
-        self, seed: int, topic: str | None, bpm: float | None, bars: int | None
+        self,
+        seed: int,
+        topic: str | None,
+        bpm: float | None,
+        bars: int | None,
+        delivery: str | None = None,
     ) -> dict[str, Any]:
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         for old in self.folder.glob("*"):
             old.unlink()
-        recipe = make_recipe(self.profile, seed, topic, bpm, bars)
+        recipe = make_recipe(self.profile, seed, topic, bpm, bars, delivery)
         _write(self.folder / "recipe.json", recipe_json(recipe))
         state = {
             "seed": seed,
@@ -196,6 +201,7 @@ class Session:
             "asked_topic": topic,
             "bpm": bpm,
             "bars": bars,
+            "delivery": delivery,
             "profile": self.profile_name,
             "profile_digest": self.profile["meta"]["digest"],
             "prompt": prompt_hash(),
@@ -264,6 +270,7 @@ class Session:
         force: bool = False,
         bpm: float | None = None,
         bars: int | None = None,
+        delivery: str | None = None,
     ) -> Saved | Pending | Failed:
         """Take the seed one step on: start it, wait, check a draft, ask again or save.
 
@@ -273,6 +280,7 @@ class Session:
             force: Start a pending or failed seed over.
             bpm: The beat's half-time tempo; None keeps the started seed's.
             bars: The beat's whole bars, or None when only its tempo is known.
+            delivery: "hard" or "calm" for the beat; taken only when the seed starts.
         """
         state = self._state()
         if state:
@@ -286,6 +294,7 @@ class Session:
                 topic or before.get("asked_topic"),
                 bpm or before.get("bpm"),
                 bars if bpm else before.get("bars"),
+                delivery if bpm else before.get("delivery"),
             )
         recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
         request = WriterRequest(

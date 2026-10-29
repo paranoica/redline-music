@@ -111,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
     beat = write.add_mutually_exclusive_group()
     beat.add_argument("--beat", type=Path, help="the beat the text is for; its tempo is measured")
     beat.add_argument("--bpm", type=float, help="the beat's tempo, when it is known")
+    write.add_argument(
+        "--delivery",
+        choices=("hard", "calm"),
+        help="how hard the beat hits (default: measured from --beat)",
+    )
     suno = lyrics_commands.add_parser(
         "suno", help="a saved text as a Suno card: title, style, settings, tagged lyrics"
     )
