@@ -30,6 +30,7 @@ PICKED = AutoResult(
     {"vocal.crest_db": 11.0, "vocal.kurtosis": None},
     {"vocal.crest_db": (10.0, 1.0)},
     (),
+    {"vocal.crest_db": 1.5},
 )
 
 
@@ -79,7 +80,7 @@ def auto(monkeypatch):
     calls = []
 
     def fake(engine, refs, *args, **kwargs):
-        calls.append((engine, list(refs)))
+        calls.append((engine, list(refs), kwargs.get("separator")))
         return PICKED
 
     monkeypatch.setattr(auto_module, "auto_settings", fake)
@@ -126,9 +127,12 @@ def test_voice_writes_the_folder_named_after_the_vocal_and_separates_only_refs(
 
 
 def test_voice_runs_the_auto_search_by_default_and_records_it(own, tmp_path, auto, capsys):
-    assert main(voice_args(own, tmp_path), separator=CountingSeparator()) == 0
+    separator = CountingSeparator()
+    assert main(voice_args(own, tmp_path), separator=separator) == 0
     (call,) = auto
-    engine, refs = call
+    engine, refs, given = call
+    # the search calibrates on the separator the references went through
+    assert given is separator
     np.testing.assert_allclose(engine.vocal, voice(4), atol=1e-7)
     np.testing.assert_allclose(engine.beat, kick(4), atol=1e-7)
     assert [r.name for r in refs] == ["a.wav", "b.wav"]
@@ -142,6 +146,7 @@ def test_voice_runs_the_auto_search_by_default_and_records_it(own, tmp_path, aut
         "values": {"vocal.crest_db": 11.0, "vocal.kurtosis": None},
         "targets": {"vocal.crest_db": [10.0, 1.0]},
         "at_edge": [],
+        "bias": {"vocal.crest_db": 1.5},
     }
     lines = capsys.readouterr().out.splitlines()
     assert lines == [
@@ -303,7 +308,9 @@ def studio_args(own, tmp_path, *extra):
 
 
 def test_studio_opens_on_the_own_stems_with_the_auto_settings(own, tmp_path, auto, served):
-    assert main(studio_args(own, tmp_path), separator=CountingSeparator()) == 0
+    separator = CountingSeparator()
+    assert main(studio_args(own, tmp_path), separator=separator) == 0
+    assert auto[0][2] is separator
     studio = served["studio"]
     np.testing.assert_allclose(studio.engine.vocal, voice(4), atol=1e-7)
     np.testing.assert_allclose(studio.engine.beat, kick(4), atol=1e-7)

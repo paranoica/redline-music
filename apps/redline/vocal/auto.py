@@ -1,12 +1,14 @@
 """Settings for a track's engine chosen by measurement: the vocal closest to the references.
 
 Close means the references' medians, each metric scaled by how much the references spread on
-it. The references were separated from mastered songs, so a render is scored after its master.
+it. The references were separated from mastered songs, so a render is scored after its master,
+and with a separator the medians are moved by what separation itself adds to the numbers.
 Closer to the references is all the numbers say; whether it sounds better is for the ear.
 """
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -17,6 +19,7 @@ from redline.core.loudness import gated_crest_db, integrated_lufs, short_term_sp
 from redline.engine.render import CACHE_BYTES, Engine, Rendered
 from redline.engine.settings import Settings
 from redline.measure.run import FileResult
+from redline.measure.separate import Separator
 
 Samples = npt.NDArray[np.floating]
 
@@ -48,7 +51,11 @@ SILENT = 1e-6
 
 @dataclass(frozen=True)
 class AutoResult:
-    """The chosen settings and how close they and the base came to the references."""
+    """The chosen settings and how close they and the base came to the references.
+
+    The targets are the ones the distances were taken to: the references' medians less the
+    bias separation adds to each metric; the bias is empty without a separator.
+    """
 
     settings: Settings
     distance_before: float
@@ -56,6 +63,7 @@ class AutoResult:
     values: dict[str, float | None]
     targets: dict[str, tuple[float, float]]
     at_edge: tuple[str, ...]
+    bias: dict[str, float]
 
 
 def _finite(value: float | None) -> float | None:
@@ -188,19 +196,68 @@ def after_master(rendered: Rendered) -> tuple[Samples, Samples]:
     return rendered.vocal * ratio, rendered.beat * ratio
 
 
+def separation_bias(
+    separator: Separator, windows: Sequence[Rendered], rate: int
+) -> dict[str, float]:
+    """What separating a mastered mix adds to each metric, against the stems it was made of.
+
+    Args:
+        separator: Splits a mix into vocal and beat; run once on each window's final.
+        windows: Renders of the windows, each with its master.
+        rate: Sample rate of the renders.
+
+    Returns:
+        Per metric, the median over windows of the separated stems' value less the after-master
+        stems' value; windows missing the metric on either side are left out, and a metric no
+        window has on both is left out.
+    """
+    differences: dict[str, list[float]] = {}
+    for rendered in windows:
+        clean = measure_processed(*after_master(rendered), rate)
+        separated = measure_processed(*separator(rendered.final, rate), rate)
+        for metric in METRICS:
+            if (a := separated[metric]) is not None and (b := clean[metric]) is not None:
+                differences.setdefault(metric, []).append(a - b)
+    return {metric: float(np.median(found)) for metric, found in differences.items()}
+
+
+def _coordinate_search(
+    scores: Callable[[Sequence[Settings]], list[float]],
+    base: Settings,
+    base_score: float,
+    passes: int,
+) -> tuple[Settings, float]:
+    best, best_score = base, base_score
+    for _ in range(passes):
+        moved = False
+        for key, grid in AXES.items():
+            # only the key changes, so the grid's candidates do not depend on each other
+            candidates = [replace(best, **{key: float(value)}) for value in grid]
+            for candidate, score in zip(candidates, scores(candidates), strict=True):
+                # strictly lower only, so a tie keeps what is already chosen
+                if score < best_score:
+                    best, best_score, moved = candidate, score, True
+        if not moved:
+            break
+    return best, best_score
+
+
 def auto_settings(
     engine: Engine,
     refs: Sequence[FileResult],
     base: Settings | None = None,
-    count: int = 4,
-    seconds: float = 8.0,
+    count: int = 3,
+    seconds: float = 6.0,
     passes: int = 2,
+    separator: Separator | None = None,
 ) -> AutoResult:
     """Coordinate search over AXES for the settings whose render measures closest.
 
     Renders only windows spread over the sung part of the track, each through the master,
     and measures them pooled. Each pass goes through the keys in order and tries every grid
-    value with the other keys as currently best.
+    value with the other keys as currently best; the search ends early once a whole pass
+    moves no key. The windows render side by side, which leaves the result as it would be
+    one after another.
 
     Args:
         engine: The track's engine; its stems and context are used, its cache is not.
@@ -208,14 +265,17 @@ def auto_settings(
         base: Settings to start from and to keep outside AXES; the defaults when None.
         count: Most windows rendered.
         seconds: Length of each window.
-        passes: Rounds over the keys.
+        passes: Most rounds over the keys.
+        separator: The one the references were separated with. When given, it is run once
+            on each window's final at the base settings, and each target's median is moved
+            by the bias separation adds to that metric (see separation_bias).
 
     Returns:
         The chosen settings, the distances of the base and of the choice, the choice's
-        metrics, the targets and the keys whose chosen value is the first or last of its grid.
+        metrics, the targets, the keys whose chosen value is the first or last of its grid,
+        and the bias per metric.
     """
     base = Settings() if base is None else base
-    targets = reference_targets(refs)
     rate = engine.context.rate
     windows = spread_windows(engine.vocal, rate, count, seconds)
     # built once, so a candidate reuses the stages it shares with those before it
@@ -225,23 +285,39 @@ def auto_settings(
     ]
     measured: dict[Settings, dict[str, float | None]] = {}
 
-    def measure(settings: Settings) -> dict[str, float | None]:
-        if settings not in measured:
-            stems = [after_master(piece.render(settings)) for piece in pieces]
+    with ThreadPoolExecutor(len(pieces)) as pool:
+
+        def renders(batch: Sequence[Settings]) -> list[list[Rendered]]:
+            # one thread per window, so each piece's stage cache serves its candidates in order
+            jobs = [pool.submit(lambda p: [p.render(s) for s in batch], piece) for piece in pieces]
+            per_piece = [job.result() for job in jobs]
+            return [[done[i] for done in per_piece] for i in range(len(batch))]
+
+        def pooled(rendered: Sequence[Rendered]) -> dict[str, float | None]:
+            stems = [after_master(r) for r in rendered]
             vocal = np.concatenate([v for v, _ in stems])
             beat = np.concatenate([b for _, b in stems])
-            measured[settings] = measure_processed(vocal, beat, rate)
-        return measured[settings]
+            return measure_processed(vocal, beat, rate)
 
-    best = base
-    before = best_distance = distance(measure(base), targets)
-    for _ in range(passes):
-        for key, grid in AXES.items():
-            for value in grid:
-                candidate = replace(best, **{key: float(value)})
-                score = distance(measure(candidate), targets)
-                # strictly lower only, so a tie keeps what is already chosen
-                if score < best_distance:
-                    best, best_distance = candidate, score
+        def measure_all(batch: Sequence[Settings]) -> None:
+            new = [s for s in dict.fromkeys(batch) if s not in measured]
+            if new:
+                measured.update(zip(new, pool.map(pooled, renders(new)), strict=True))
+
+        bias: dict[str, float] = {}
+        if separator is not None:
+            (at_base,) = renders([base])
+            bias = separation_bias(separator, at_base, rate)
+        targets = {
+            metric: (median - bias.get(metric, 0.0), spread)
+            for metric, (median, spread) in reference_targets(refs).items()
+        }
+
+        def scores(batch: Sequence[Settings]) -> list[float]:
+            measure_all(batch)
+            return [distance(measured[s], targets) for s in batch]
+
+        (before,) = scores([base])
+        best, best_distance = _coordinate_search(scores, base, before, passes)
     at_edge = tuple(key for key, grid in AXES.items() if getattr(best, key) in (grid[0], grid[-1]))
-    return AutoResult(best, before, best_distance, measure(best), targets, at_edge)
+    return AutoResult(best, before, best_distance, measured[best], targets, at_edge, bias)

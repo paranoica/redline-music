@@ -185,7 +185,7 @@ def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
         )
         engine = track_engine(inputs)
         if chosen is None and not args.no_auto:
-            found = auto_settings(engine, inputs.refs)
+            found = auto_settings(engine, inputs.refs, separator=separator or RoformerSeparator())
             chosen = found.settings
         extra = None if found is None else {"auto": asdict(found)}
         folder = write_result(inputs, engine, args.out, args.vocal.stem, chosen, extra)
@@ -233,7 +233,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
         track_key = f"{named.stem}-{digest}"
         saved = args.work / "studio" / track_key / "settings.json"
         if args.vocal is not None and not saved.exists():
-            found = auto_settings(engine, inputs.refs)
+            found = auto_settings(engine, inputs.refs, separator=separator)
             saved.parent.mkdir(parents=True, exist_ok=True)
             chain_settings.save(found.settings, saved)
             _print_auto(found)

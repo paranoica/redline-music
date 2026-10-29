@@ -400,3 +400,210 @@ def test_the_found_result_reports_its_edges(result):
         key for key, grid in AXES.items() if getattr(result.settings, key) in (grid[0], grid[-1])
     )
     assert result.at_edge == expected
+
+
+SPREAD = "vocal.short_term_spread_lu"
+KURTOSIS = "vocal.kurtosis"
+ALL_REFS = [
+    ref("a", {PAIR: 2.0, CREST: 10.0, SPREAD: 3.0, KURTOSIS: 4.0}),
+    ref("b", {PAIR: 3.0, CREST: 11.0, SPREAD: 4.0, KURTOSIS: 6.0}),
+    ref("c", {PAIR: 5.0, CREST: 13.0, SPREAD: 4.5, KURTOSIS: 9.0}),
+]
+
+
+def clean_windows(track, settings, count, seconds):
+    """Each window's final and its after-master stems, rendered apart from the search."""
+    vocal, beat, ctx = track
+    out = []
+    for a, b in spread_windows(vocal, RATE, count, seconds):
+        rendered = Engine(vocal[a:b], beat[a:b], ctx).render(settings)
+        out.append((rendered.final, *after_master(rendered)))
+    return out
+
+
+class KnownSeparator:
+    """Gives back each window's own clean stems, changed by `split`, and counts its calls."""
+
+    id = "fake:known"
+
+    def __init__(self, track, settings, count, seconds, split):
+        self.stems = {
+            final.tobytes(): (index, v, b)
+            for index, (final, v, b) in enumerate(clean_windows(track, settings, count, seconds))
+        }
+        self.split = split
+        self.calls = []
+
+    def __call__(self, samples, rate):
+        assert rate == RATE
+        index, vocal, beat = self.stems[np.asarray(samples).tobytes()]
+        self.calls.append(index)
+        return self.split(index, vocal, beat)
+
+
+def expected_bias(track, settings, count, seconds, split):
+    """Median over windows of separated minus clean, per metric both sides have."""
+    diffs: dict[str, list[float]] = {}
+    for index, (_, vocal, beat) in enumerate(clean_windows(track, settings, count, seconds)):
+        clean = measure_processed(vocal, beat, RATE)
+        separated = measure_processed(*split(index, vocal, beat), RATE)
+        for metric in METRICS:
+            if clean[metric] is not None and separated[metric] is not None:
+                diffs.setdefault(metric, []).append(separated[metric] - clean[metric])
+    return {metric: float(np.median(values)) for metric, values in diffs.items()}
+
+
+def bleed(index, vocal, beat):
+    # Roformer-like: some beat stays in the vocal, and the beat loses it
+    return vocal + 0.4 * beat, 0.6 * beat
+
+
+def test_without_a_separator_the_targets_are_the_references_and_no_bias(track, result):
+    assert result.bias == {}
+    assert result.targets == reference_targets(LOUDER_REFS)
+    vocal, beat, ctx = track
+    explicit = auto_settings(
+        Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=2.0, passes=2, separator=None
+    )
+    assert explicit == result
+
+
+def test_the_bias_is_the_median_over_windows_of_separated_minus_clean(track):
+    vocal, beat, ctx = track
+    # three windows, so the median is one window's difference and not a mean of two
+    separator = KnownSeparator(track, BASE, 3, 1.2, bleed)
+    found = auto_settings(
+        Engine(vocal, beat, ctx),
+        ALL_REFS,
+        BASE,
+        count=3,
+        seconds=1.2,
+        passes=0,
+        separator=separator,
+    )
+    bias = expected_bias(track, BASE, 3, 1.2, bleed)
+    assert set(bias) == set(METRICS)
+    # the bleed is far from nothing on every metric, so a zero bias would not pass
+    assert all(abs(value) > 0.05 for value in bias.values()), bias
+    assert found.bias == pytest.approx(bias, rel=1e-9, abs=1e-12)
+    refs = reference_targets(ALL_REFS)
+    for metric in METRICS:
+        median, spread = refs[metric]
+        assert found.targets[metric] == pytest.approx((median - bias[metric], spread))
+    assert found.distance_before == pytest.approx(distance(found.values, found.targets))
+
+
+def test_a_window_missing_a_metric_on_one_side_is_left_out_of_its_median(track):
+    vocal, beat, ctx = track
+
+    def first_silent(index, vocal, beat):
+        return (np.zeros_like(vocal), beat) if index == 0 else bleed(index, vocal, beat)
+
+    separator = KnownSeparator(track, BASE, 3, 1.2, first_silent)
+    found = auto_settings(
+        Engine(vocal, beat, ctx),
+        ALL_REFS,
+        BASE,
+        count=3,
+        seconds=1.2,
+        passes=0,
+        separator=separator,
+    )
+    bias = expected_bias(track, BASE, 3, 1.2, first_silent)
+    # two windows left: their mean, which differs from the three-window median
+    assert found.bias == pytest.approx(bias, rel=1e-9, abs=1e-12)
+    assert bias != pytest.approx(expected_bias(track, BASE, 3, 1.2, bleed))
+
+
+def test_a_metric_no_window_has_on_the_separated_side_gets_no_bias(track):
+    vocal, beat, ctx = track
+
+    def silent(index, vocal, beat):
+        return np.zeros_like(vocal), beat
+
+    separator = KnownSeparator(track, BASE, 2, 1.5, silent)
+    found = auto_settings(
+        Engine(vocal, beat, ctx),
+        ALL_REFS,
+        BASE,
+        count=2,
+        seconds=1.5,
+        passes=0,
+        separator=separator,
+    )
+    assert found.bias == {}
+    assert found.targets == reference_targets(ALL_REFS)
+
+
+def test_a_perfect_separator_finds_no_bias_and_changes_nothing(track, result):
+    vocal, beat, ctx = track
+    separator = KnownSeparator(track, BASE, 2, 2.0, lambda index, v, b: (v, b))
+    found = auto_settings(
+        Engine(vocal, beat, ctx),
+        LOUDER_REFS,
+        BASE,
+        count=2,
+        seconds=2.0,
+        passes=2,
+        separator=separator,
+    )
+    assert set(found.bias) == set(METRICS)
+    assert all(value == pytest.approx(0.0, abs=1e-9) for value in found.bias.values())
+    assert found.settings == result.settings
+    assert found.distance_after == pytest.approx(result.distance_after)
+
+
+def test_a_separator_that_reads_the_vocal_louder_moves_the_target_back(track, result):
+    vocal, beat, ctx = track
+    louder = 20 * math.log10(2)
+    # references that read the vocal 6 dB louder only because they were separated
+    shifted = [ref(r.name, {PAIR: r.values[PAIR] + louder}) for r in LOUDER_REFS]
+    naive = auto_settings(Engine(vocal, beat, ctx), shifted, BASE, count=2, seconds=2.0, passes=2)
+    separator = KnownSeparator(track, BASE, 2, 2.0, lambda index, v, b: (2 * v, b))
+    found = auto_settings(
+        Engine(vocal, beat, ctx),
+        shifted,
+        BASE,
+        count=2,
+        seconds=2.0,
+        passes=2,
+        separator=separator,
+    )
+    assert found.bias[PAIR] == pytest.approx(louder, abs=1e-6)
+    assert found.targets[PAIR] == pytest.approx(result.targets[PAIR])
+    # without the bias the search chases the separated reading and lands louder
+    assert naive.settings.vocal_db > result.settings.vocal_db
+    assert found.settings == result.settings
+
+
+def test_the_separator_runs_once_per_window_on_its_final_not_per_candidate(track):
+    vocal, beat, ctx = track
+    separator = KnownSeparator(track, BASE, 2, 1.5, bleed)
+    found = auto_settings(
+        Engine(vocal, beat, ctx),
+        LOUDER_REFS,
+        BASE,
+        count=2,
+        seconds=1.5,
+        passes=2,
+        separator=separator,
+    )
+    assert found.settings != BASE
+    assert separator.calls == [0, 1]
+
+
+def test_by_default_three_windows_of_six_seconds_are_rendered(monkeypatch):
+    from redline.vocal import auto as auto_module
+
+    vocal, beat = engine_stems(20.0)
+    ctx = engine_context(vocal)
+    built = []
+
+    class Counted(Engine):
+        def __init__(self, *args, **kwargs):
+            built.append(len(args[0]))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(auto_module, "Engine", Counted)
+    auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, passes=0)
+    assert built == [at(6.0)] * 3
