@@ -65,10 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     run = commands.add_parser(
         "run", help="process a track with the chosen settings and write the result folder"
     )
-    _inputs(run, "result folder")
-    run.add_argument(
+    _inputs(run, "result folder", many=True)
+    chosen = run.add_mutually_exclusive_group()
+    chosen.add_argument(
         "--settings", type=Path, help="settings saved from the studio (default: the picks)"
     )
+    chosen.add_argument("--preset", help="a preset saved in the studio, by its name")
     lyrics = commands.add_parser("lyrics", help="lyrics: copy check and line form")
     lyrics_commands = lyrics.add_subparsers(dest="lyrics_command", metavar="command")
     check = lyrics_commands.add_parser(

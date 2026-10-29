@@ -332,7 +332,7 @@ def run_track(
     vocal, beat, final = rendered.vocal, rendered.beat, rendered.final
     chain, master = rendered.chain, rendered.master
     final_lufs = integrated_lufs(final, rate)
-    folder = new_run_dir(out_dir)
+    folder = new_run_dir(out_dir, track.stem)
     keep_out_of_git(folder)
     (folder / "stems").mkdir()
     sf.write(folder / "final.wav", final, rate, subtype="PCM_24")

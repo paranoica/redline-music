@@ -12,7 +12,6 @@ import io
 import json
 import math
 import os
-import re
 import threading
 import time
 from collections.abc import Sequence
@@ -29,7 +28,7 @@ import soundfile as sf
 
 from redline.core.loudness import integrated_lufs
 from redline.engine.render import Cancelled, Engine, Rendered
-from redline.engine.settings import Settings, from_dict, schema
+from redline.engine.settings import PRESET_NAME, Settings, from_dict, schema
 
 Samples = npt.NDArray[np.floating]
 
@@ -55,7 +54,6 @@ def site_files(root: Path = SITE) -> dict[str, tuple[Path, str]]:
 
 
 MAX_BODY = 64 * 1024
-PRESET_NAME = re.compile(r"[\w \-]{1,40}")
 HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",

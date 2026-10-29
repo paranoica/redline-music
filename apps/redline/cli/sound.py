@@ -8,14 +8,14 @@ from redline.core.audio import AudioError
 
 if TYPE_CHECKING:
     from redline.measure.separate import Separator
-from redline.cli.common import reference_files
+from redline.cli.common import audio_files
 
 
 def _measure(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.measure.run import measure_run
     from redline.measure.separate import RoformerSeparator, SeparationError
 
-    refs = reference_files(args.ref)
+    refs = audio_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
@@ -32,7 +32,7 @@ def _vocal(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.measure.separate import RoformerSeparator, SeparationError
     from redline.vocal.rounds import vocal_run
 
-    refs = reference_files(args.ref)
+    refs = audio_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
@@ -68,7 +68,7 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
         if not chosen:
             print("redline: --timbres names no timbre", file=sys.stderr)
             return 2
-    refs = reference_files(args.ref)
+    refs = audio_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
@@ -103,19 +103,36 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.master.run import run_track
     from redline.measure.separate import RoformerSeparator, SeparationError
 
-    refs = reference_files(args.ref)
+    refs = audio_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
+    takes = audio_files(args.track)
+    if not takes:
+        print("redline: no track audio files given", file=sys.stderr)
+        return 2
     try:
-        chosen = chain_settings.load(args.settings) if args.settings else None
-        folder = run_track(
-            args.track, refs, args.work, args.out, separator or RoformerSeparator(), chosen
-        )
-    except (AudioError, SeparationError, ValueError, OSError) as error:
+        if args.preset is not None:
+            chosen = chain_settings.load_preset(args.work / "studio" / "presets", args.preset)
+        else:
+            chosen = chain_settings.load(args.settings) if args.settings else None
+    except (ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
-    print(folder)
+    separator = separator or RoformerSeparator()
+    failed = 0
+    for take in takes:
+        try:
+            folder = run_track(take, refs, args.work, args.out, separator, chosen)
+        except (AudioError, SeparationError, ValueError, OSError) as error:
+            print(f"redline: {take.name}: {error}", file=sys.stderr)
+            failed += 1
+            continue
+        print(folder, flush=True)
+    if failed:
+        if len(takes) > 1:
+            print(f"redline: {failed} of {len(takes)} takes failed", file=sys.stderr)
+        return 2
     return 0
 
 
@@ -130,7 +147,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.measure.separate import RoformerSeparator, SeparationError
     from redline.studio import server as studio_server
 
-    refs = reference_files(args.ref)
+    refs = audio_files(args.ref)
     if not refs:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2

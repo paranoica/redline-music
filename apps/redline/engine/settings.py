@@ -6,11 +6,13 @@ the stage rounds chose.
 
 import json
 import math
+import re
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
 EQ_BANDS_HZ = (200, 400, 1000, 2500, 5000, 8000)
+PRESET_NAME = re.compile(r"[\w \-]{1,40}")
 
 
 @dataclass(frozen=True)
@@ -435,6 +437,15 @@ def load(path: Path) -> Settings:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: settings are a JSON object")
     return from_dict(data)
+
+
+def load_preset(folder: Path, name: str) -> Settings:
+    """A preset the studio saved in the folder, by its name."""
+    path = folder / f"{name}.json"
+    if not PRESET_NAME.fullmatch(name) or name.strip() != name or not path.is_file():
+        saved = sorted(p.stem for p in folder.glob("*.json")) if folder.is_dir() else []
+        raise ValueError(f"no preset {name!r}; saved: {', '.join(saved) or 'none'}")
+    return load(path)
 
 
 def save(settings: Settings, path: Path) -> None:

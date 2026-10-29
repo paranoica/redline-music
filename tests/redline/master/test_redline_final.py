@@ -686,3 +686,78 @@ def test_cli_studio_prints_a_local_address_with_a_token(inputs, tmp_path, capsys
     assert f"http://127.0.0.1:5555/?t={first}" in out
     assert len(started["token"]) >= 32 and started["closed"]
     assert started["studio"].folder == tmp_path / "w" / "studio"
+
+
+@pytest.fixture
+def takes(inputs, tmp_path):
+    _, refs = inputs
+    folder = tmp_path / "takes"
+    folder.mkdir()
+    write(folder, "take one.wav", song(8), 44100)
+    write(folder, "take two.wav", song(8, amp=0.2), 44100)
+    return folder, refs
+
+
+def run_args(tracks, refs, tmp_path, *extra):
+    args = ["run", "--track", *map(str, tracks), "--ref", str(refs)]
+    return [*args, "--work", str(tmp_path / "w"), "--out", str(tmp_path / "o"), *extra]
+
+
+def test_cli_run_takes_a_folder_and_names_each_result_after_its_take(takes, tmp_path, capsys):
+    folder, refs = takes
+    assert main(run_args([folder], refs, tmp_path), separator=HalfSeparator()) == 0
+    printed = capsys.readouterr().out.split("\n")
+    made = sorted((tmp_path / "o").iterdir())
+    assert [p.name.split("-", 2)[2] for p in made] == ["take_one", "take_two"]
+    assert sorted(p for p in printed if p) == [str(p) for p in made]
+    for result in made:
+        assert (result / "final.wav").is_file()
+
+
+def test_cli_run_goes_on_past_a_broken_take_and_exits_2(takes, tmp_path, capsys):
+    folder, refs = takes
+    (folder / "broken.wav").write_bytes(b"not audio at all")
+    assert main(run_args([folder], refs, tmp_path), separator=HalfSeparator()) == 2
+    assert len(list((tmp_path / "o").iterdir())) == 2
+    err = capsys.readouterr().err
+    assert "broken.wav" in err and "1 of 3" in err
+
+
+def test_cli_run_takes_a_preset_the_studio_saved(inputs, tmp_path):
+    track, refs = inputs
+    presets = tmp_path / "w" / "studio" / "presets"
+    presets.mkdir(parents=True)
+    (presets / "мой пресет.json").write_text(
+        json.dumps({"doubles_on": False, "formant": 1.35}, ensure_ascii=False), "utf-8"
+    )
+    args = run_args([track], refs, tmp_path, "--preset", "мой пресет")
+    assert main(args, separator=HalfSeparator()) == 0
+    record = json.loads(next((tmp_path / "o").glob("*/chain.json")).read_text())
+    assert record["settings"]["doubles_on"] is False and record["settings"]["formant"] == 1.35
+
+
+@pytest.mark.parametrize("name", ["missing", "../presets/x", ""])
+def test_cli_run_refuses_a_preset_it_cannot_find(inputs, tmp_path, capsys, name):
+    track, refs = inputs
+    presets = tmp_path / "w" / "studio" / "presets"
+    presets.mkdir(parents=True)
+    (presets / "x.json").write_text("{}", "utf-8")
+    args = run_args([track], refs, tmp_path, "--preset", name)
+    assert main(args, separator=HalfSeparator()) == 2
+    assert "x" in capsys.readouterr().err.split("saved:")[-1]
+    assert not (tmp_path / "o").exists()
+
+
+def test_cli_run_takes_a_preset_or_a_settings_file_not_both(inputs, tmp_path, capsys):
+    track, refs = inputs
+    args = run_args([track], refs, tmp_path, "--preset", "x", "--settings", "s.json")
+    with pytest.raises(SystemExit):
+        main(args, separator=HalfSeparator())
+    assert "not allowed with" in capsys.readouterr().err
+
+
+def test_cli_run_with_no_audio_in_the_folder_exits_2(inputs, tmp_path):
+    _, refs = inputs
+    empty = tmp_path / "none"
+    empty.mkdir()
+    assert main(run_args([empty], refs, tmp_path), separator=HalfSeparator()) == 2

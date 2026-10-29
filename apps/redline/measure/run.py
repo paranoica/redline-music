@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -165,9 +166,12 @@ def keep_out_of_git(*folders: Path) -> None:
             marker.write_text("*\n", encoding="utf-8")
 
 
-def new_run_dir(runs: Path) -> Path:
-    """Create a fresh run folder named by the time, with a suffix on a clash."""
+def new_run_dir(runs: Path, label: str = "") -> Path:
+    """Create a fresh run folder named by the time and the label, with a suffix on a clash."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    label = re.sub(r"[^\w.-]+", "_", label).strip("._")[:40]
+    if label:
+        stamp = f"{stamp}-{label}"
     runs.mkdir(parents=True, exist_ok=True)
     for attempt in range(100):
         folder = runs / (stamp if attempt == 0 else f"{stamp}-{attempt}")

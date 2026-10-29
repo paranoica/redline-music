@@ -13,8 +13,15 @@ LYRICS = Path("private/lyrics")
 LYRICS_BUILD = LYRICS / "build"
 
 
-def _inputs(command: argparse.ArgumentParser, out_help: str | None = None) -> None:
-    command.add_argument("--track", type=Path, required=True, help="the track from Suno")
+def _inputs(
+    command: argparse.ArgumentParser, out_help: str | None = None, many: bool = False
+) -> None:
+    if many:
+        command.add_argument(
+            "--track", type=Path, nargs="+", required=True, help="takes from Suno, or folders"
+        )
+    else:
+        command.add_argument("--track", type=Path, required=True, help="the track from Suno")
     command.add_argument(
         "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
     )
@@ -23,7 +30,7 @@ def _inputs(command: argparse.ArgumentParser, out_help: str | None = None) -> No
         command.add_argument("--out", type=Path, default=Path("output"), help=out_help)
 
 
-def reference_files(paths: Sequence[Path]) -> list[Path]:
+def audio_files(paths: Sequence[Path]) -> list[Path]:
     """Expand folders into the audio files inside them, sorted by name."""
     files: list[Path] = []
     for path in paths:
