@@ -160,3 +160,11 @@ def test_praat_effects_keep_the_side_and_silence():
     quiet = np.zeros((RATE * 2, 2), dtype=np.float32)
     assert not formant_shift(quiet, RATE, 1.2).any()
     assert not hard_tune(quiet, RATE, 0.0).any()
+
+
+def test_a_clip_praat_cannot_take_is_a_value_error():
+    # 100 samples are shorter than three periods of the lowest pitch Praat looks for
+    clip = (0.1 * make_rng().standard_normal((100, 2))).astype(np.float32)
+    for effect in (lambda: formant_shift(clip, RATE, 1.2), lambda: hard_tune(clip, RATE, 0.0)):
+        with pytest.raises(ValueError, match="voice effect"):
+            effect()

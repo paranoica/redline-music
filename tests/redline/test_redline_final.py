@@ -10,6 +10,7 @@ from scipy.signal import butter, sosfiltfilt
 from redline.cli import main
 from redline.final_run import (
     BASS_DRIVES_DB,
+    TIMBRE,
     TIMBRES,
     VOICES,
     bass_round,
@@ -495,3 +496,53 @@ def test_hard_tune_in_a_round_snaps_to_the_tracks_own_tuning(monkeypatch):
     vocal = np.zeros((100, 2), dtype=np.float32)
     final_run._with_timbre("hard tune", vocal, 44100, tuning_cents=-17.0)
     assert seen == [-17.0]
+
+
+def test_a_voice_round_hands_the_tracks_measured_tuning_to_hard_tune(inputs, tmp_path, monkeypatch):
+    from redline import final_run
+
+    measure = final_run.measure_inputs
+
+    def measured(*args):
+        result = measure(*args)
+        result.track.info["vocal.tuning_cents"] = -23.0
+        return result
+
+    seen = []
+    monkeypatch.setattr(final_run, "measure_inputs", measured)
+    monkeypatch.setattr(final_run, "hard_tune", lambda x, rate, cents: seen.append(cents) or x)
+    track, refs = inputs
+    timbre_round(
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w",
+        tmp_path / "o",
+        HalfSeparator(),
+        1,
+        ("hard tune",),
+        "voice",
+    )
+    assert seen == [-23.0]
+
+
+def test_a_voice_round_base_carries_the_chosen_timbre_and_formants_come_first(
+    inputs, tmp_path, monkeypatch
+):
+    from redline import final_run
+
+    names = []
+    monkeypatch.setattr(final_run, "_with_timbre", lambda name, x, *a: names.append(name) or x)
+    track, refs = inputs
+    timbre_round(
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w",
+        tmp_path / "o",
+        HalfSeparator(),
+        1,
+        VOICES,
+        "voice",
+    )
+    assert names[0] == TIMBRE
+    formant = [v for v in VOICES if "formant" in v]
+    assert formant and all(v.startswith("formant") for v in formant)

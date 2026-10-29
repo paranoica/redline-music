@@ -35,8 +35,9 @@ VOICE_EFFECTS = ("formant up", "formant down", "hard tune", "octave up")
 EFFECTS = TIMBRE_EFFECTS + VOICE_EFFECTS
 TIMBRES = TIMBRE_EFFECTS
 TIMBRE = "octave down + doubles"
-# each new voice on top of the timbre already picked; formant down only when asked for
-VOICES = (f"{TIMBRE} + formant up", f"hard tune + {TIMBRE}", f"{TIMBRE} + octave up")
+# each new voice on top of the timbre already picked; formant down only when asked for.
+# Formants and tune go first: the doubles sit half in the side, which the Praat effects keep
+VOICES = (f"formant up + {TIMBRE}", f"hard tune + {TIMBRE}", f"{TIMBRE} + octave up")
 FORMANT_UP = 1.2
 FORMANT_DOWN = 0.85
 BASS_FREQ_HZ = 120.0
@@ -175,7 +176,7 @@ def timbre_round(
     rate = inputs.track_stems.rate
     beat = saturate_low(inputs.track_stems.beat, rate, BASS_FREQ_HZ, BASS_DRIVE_DB)
     target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
-    tuning = float(inputs.track.values.get("vocal.tuning_cents") or 0.0)
+    tuning = float(inputs.track.info.get("vocal.tuning_cents") or 0.0)
     base = _with_timbre(TIMBRE, vocal, rate) if axis == "voice" else vocal
     variants = {ORIGINAL: original, BASE: master_clip(base + beat, rate, target)[0]}
     for name in timbres:

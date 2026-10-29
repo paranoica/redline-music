@@ -75,7 +75,10 @@ def _on_mid(samples: Samples, rate: int, change) -> Samples:
     side = (samples[:, 0] - samples[:, 1]) / 2
     if not mid.any():
         return samples.copy()
-    sound = change(parselmouth.Sound(mid, sampling_frequency=rate))
+    try:
+        sound = change(parselmouth.Sound(mid, sampling_frequency=rate))
+    except parselmouth.PraatError as error:
+        raise ValueError(f"the voice effect failed: {error}") from error
     out = np.zeros(len(mid))
     values = sound.values[0][: len(mid)]
     out[: len(values)] = values
