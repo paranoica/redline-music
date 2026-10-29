@@ -18,6 +18,16 @@ const DEPENDS = {
   doubles_wander_ms: ["doubles_on", true],
   bitcrush_bits: ["bitcrush_on", true],
   bitcrush_hold: ["bitcrush_on", true],
+  stutter_ms: ["stutter_on", true],
+  stutter_repeats: ["stutter_on", true],
+  throw_db: ["throw_on", true],
+  throw_ms: ["throw_on", true],
+  throw_feedback: ["throw_on", true],
+  throw_tone_hz: ["throw_on", true],
+  reverb_mix_db: ["reverb_on", true],
+  reverb_decay_s: ["reverb_on", true],
+  reverb_predelay_ms: ["reverb_on", true],
+  reverb_tone_hz: ["reverb_on", true],
   master_auto: ["master_on", true],
   master_lufs: ["master_auto", false],
 };
@@ -28,12 +38,13 @@ export const NEUTRAL = {
   eq: { eq_fit: false, eq_200: 0, eq_400: 0, eq_1000: 0, eq_2500: 0, eq_5000: 0, eq_8000: 0 },
   voice: { hard_tune: 0, formant: 1, voice_octave: 0, nightcore: false },
   layers: { octave_down_on: false, octave_up_on: false, doubles_on: false, bitcrush_on: false },
+  fx: { stutter_on: false, throw_on: false, reverb_on: false },
   beat: { beat_db: 0, bass_drive_db: 0 },
   master: { master_on: false },
 };
 
 // the first render stage each group touches; every stage after it re-runs too
-export const STAGE_OF = { chain: 0, eq: 0, voice: 1, layers: 2, beat: 3, master: 4 };
+export const STAGE_OF = { chain: 0, eq: 0, voice: 1, layers: 2, fx: 2, beat: 3, master: 4 };
 
 const ICONS = {
   reset:

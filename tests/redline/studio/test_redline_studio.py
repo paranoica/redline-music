@@ -19,7 +19,8 @@ TOKEN = "t0k3n-for-tests"
 def studio(tmp_path):
     vocal, beat = stems(4.0)
     engine = Engine(vocal, beat, context(vocal))
-    return Studio(engine, vocal + beat, tmp_path / "studio", "track-key")
+    ref = (0.3 * vocal[: RATE * 3]).astype("float32")
+    return Studio(engine, vocal + beat, tmp_path / "studio", "track-key", [("ref one", ref, RATE)])
 
 
 @pytest.fixture
@@ -273,3 +274,25 @@ def test_any_whole_render_made_can_be_saved(studio):
     assert studio.render(second, 2) is not None
     assert studio.save(first).exists()
     assert studio.save(second).exists()
+
+
+def test_the_references_are_listed_and_served_by_index(server):
+    status, _, body = call(server, "GET", "/api/references")
+    listed = json.loads(body)
+    assert status == 200 and [r["name"] for r in listed] == ["ref one"]
+    assert listed[0]["seconds"] == pytest.approx(3.0, abs=0.01) and listed[0]["lufs"] < 0
+    status, headers, data = call(server, "GET", "/api/reference?i=0")
+    samples, rate = wav(data)
+    assert status == 200 and rate == RATE and len(samples) == 3 * RATE
+    assert float(headers["X-Lufs"]) == pytest.approx(listed[0]["lufs"], abs=0.01)
+
+
+@pytest.mark.parametrize(
+    "query", ["i=1", "i=-1", "i=x", "", "i=0&i=1", "i=00000000000000000000001"]
+)
+def test_a_reference_index_outside_the_list_is_refused(server, query):
+    assert call(server, "GET", f"/api/reference?{query}")[0] == 400
+
+
+def test_references_need_the_token(server):
+    assert call(server, "GET", "/api/reference?i=0", token=None)[0] == 403

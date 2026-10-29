@@ -44,6 +44,8 @@ export const api = {
   schema: async () => (await call("GET", "/api/schema")).json(),
   presets: async () => (await call("GET", "/api/presets")).json(),
   original: async () => audio(await call("GET", "/api/original")),
+  references: async () => (await call("GET", "/api/references")).json(),
+  reference: async (index) => audio(await call("GET", `/api/reference?i=${index}`)),
   preview: async (settings, start, end, seq, signal) =>
     audio(await call("POST", "/api/preview", { settings, start, end, seq }, signal)),
   render: async (settings, seq, signal) =>

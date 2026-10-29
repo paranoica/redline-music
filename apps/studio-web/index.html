@@ -32,7 +32,11 @@
         <div class="ab" role="group" aria-label="Сравнение (B)">
           <button class="ab__side" id="ab-a" type="button" aria-pressed="false">Оригинал</button>
           <button class="ab__side" id="ab-b" type="button" aria-pressed="true">Результат</button>
+          <button class="ab__side" id="ab-r" type="button" aria-pressed="false" title="Референс (R)" disabled>Референс</button>
         </div>
+        <span class="dropdown dropdown--small">
+          <select class="dropdown__select" id="reference" aria-label="Какой референс"><option value="">референс…</option></select>
+        </span>
         <button class="btn btn--toggle" id="blind" type="button" aria-pressed="false" title="Вслепую: названия спрятаны; нажми ещё раз, чтобы узнать, где что">Вслепую</button>
       </div>
 
@@ -80,7 +84,7 @@
     <ol class="stages" id="stages" aria-label="Этапы обработки">
       <li class="stage" data-stage="0"><span class="stage__n">1</span>Цепочка</li>
       <li class="stage" data-stage="1"><span class="stage__n">2</span>Голос</li>
-      <li class="stage" data-stage="2"><span class="stage__n">3</span>Слои</li>
+      <li class="stage" data-stage="2"><span class="stage__n">3</span>Слои и эффекты</li>
       <li class="stage" data-stage="3"><span class="stage__n">4</span>Бит</li>
       <li class="stage" data-stage="4"><span class="stage__n">5</span>Мастер</li>
     </ol>

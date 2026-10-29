@@ -8,11 +8,15 @@ export class Player {
     this.lanes = {
       original: this.#lane(),
       result: this.#lane(),
+      reference: this.#lane(),
     };
-    this.buffers = { original: null, result: null };
+    this.buffers = { original: null, result: null, reference: null };
     // the result buffer may cover only the loop: its offset in the track, in seconds
     this.resultStart = 0;
-    this.levels = { original: 0, result: 0 };
+    // a reference is another song: it loops its own loudest stretch, the loop's length
+    this.referenceStart = 0;
+    this.lufs = { original: 0, result: 0, reference: null };
+    this.levels = { original: 0, result: 0, reference: 0 };
     this.side = "result";
     this.loop = { on: true, start: 0, end: 0 };
     this.playing = false;
@@ -47,12 +51,30 @@ export class Player {
     const position = this.position();
     this.buffers.result = buffer;
     this.resultStart = start;
-    const quiet = Math.min(resultLufs, originalLufs);
-    this.levels = { original: quiet - originalLufs, result: quiet - resultLufs };
+    this.lufs.original = originalLufs;
+    this.lufs.result = resultLufs;
+    this.#level();
     if (this.playing) {
       this.#restart(position);
     } else {
       this.#applyGains();
+    }
+  }
+
+  setReference(buffer, lufs, start) {
+    this.buffers.reference = buffer;
+    this.lufs.reference = lufs;
+    this.referenceStart = start;
+    this.#level();
+    if (this.playing) this.#restart(this.position());
+  }
+
+  // every side is brought down to the quietest one, so louder never reads as better
+  #level() {
+    const known = Object.values(this.lufs).filter((v) => v !== null);
+    const quiet = Math.min(...known);
+    for (const name of Object.keys(this.levels)) {
+      this.levels[name] = this.lufs[name] === null ? 0 : quiet - this.lufs[name];
     }
   }
 
@@ -143,6 +165,22 @@ export class Player {
       source.start(at, Math.max(0, Math.min(position - offset, buffer.duration - 0.001)));
       this.lanes[name].source = source;
     }
+    const reference = this.buffers.reference;
+    if (reference) {
+      const source = this.ctx.createBufferSource();
+      source.buffer = reference;
+      source.loop = true;
+      let offset = position % reference.duration;
+      if (on && end > start) {
+        const length = Math.min(end - start, reference.duration);
+        source.loopStart = this.referenceStart;
+        source.loopEnd = Math.min(reference.duration, this.referenceStart + length);
+        offset = this.referenceStart + ((position - start) % length + length) % length;
+      }
+      source.connect(this.lanes.reference.gain);
+      source.start(at, Math.min(offset, reference.duration - 0.001));
+      this.lanes.reference.source = source;
+    }
     this.lanes.original.source.onended = () => {
       if (this.playing && !this.loop.on) {
         this.playing = false;
@@ -155,7 +193,7 @@ export class Player {
   }
 
   #applyGains(at = this.ctx.currentTime) {
-    for (const name of ["original", "result"]) {
+    for (const name of ["original", "result", "reference"]) {
       const db = this.levels[name];
       const target = name === this.side ? 10 ** (db / 20) : 0;
       this.lanes[name].gain.gain.setTargetAtTime(target, at, FADE / 3);

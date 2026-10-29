@@ -13,6 +13,8 @@ const ui = {
   loop: $("loop"),
   a: $("ab-a"),
   b: $("ab-b"),
+  r: $("ab-r"),
+  reference: $("reference"),
   blind: $("blind"),
   time: $("time"),
   state: $("state"),
@@ -272,6 +274,23 @@ function sideFor(button) {
 function showSide() {
   ui.a.setAttribute("aria-pressed", String(sideFor(ui.a) === player.side));
   ui.b.setAttribute("aria-pressed", String(sideFor(ui.b) === player.side));
+  ui.r.setAttribute("aria-pressed", String(player.side === "reference"));
+}
+
+async function loadReferences() {
+  const list = await api.references();
+  for (const ref of list) ui.reference.append(new Option(ref.name, String(ref.index)));
+  ui.reference.onchange = async () => {
+    if (ui.reference.value === "") return;
+    const chosen = list[Number(ui.reference.value)];
+    story("Загружаю референс ", [chosen.name], "…");
+    const audio = await api.reference(chosen.index);
+    const buffer = await decode(audio.bytes);
+    const span = loudestSpan(buffer, Math.min(player.loop.end - player.loop.start || 20, buffer.duration));
+    player.setReference(buffer, audio.lufs, span.start);
+    ui.r.disabled = false;
+    story("Референс ", [chosen.name], " готов: R или кнопка «Референс». Играет его самый громкий кусок той же длины, на той же громкости.");
+  };
 }
 
 function toggleSide() {
@@ -337,6 +356,10 @@ function wire() {
       showSide();
     });
   }
+  ui.r.addEventListener("click", () => {
+    player.setSide("reference");
+    showSide();
+  });
   ui.blind.addEventListener("click", () => {
     if (blind) {
       const name = (lane) => (lane === "original" ? "оригинал" : "результат");
@@ -397,6 +420,8 @@ function wire() {
       ui.loop.click();
     } else if (event.code === "KeyB" && !event.ctrlKey) {
       toggleSide();
+    } else if (event.code === "KeyR" && !event.ctrlKey && !ui.r.disabled) {
+      ui.r.click();
     } else if (event.code === "KeyZ" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       (event.shiftKey ? ui.redo : ui.undo).click();
@@ -426,6 +451,7 @@ async function start() {
   wave.setOriginal(buffer);
   setLoop(loudestSpan(buffer, Math.min(LOOP_SECONDS, buffer.duration)));
   await loadPresets();
+  await loadReferences();
   tick();
 }
 

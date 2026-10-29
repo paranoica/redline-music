@@ -124,6 +124,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     import secrets
     import webbrowser
 
+    from redline.core.audio import decode
     from redline.master.run import track_engine
     from redline.measure.run import measure_inputs
     from redline.measure.separate import RoformerSeparator, SeparationError
@@ -138,8 +139,16 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
         engine = track_engine(inputs)
         stems = inputs.track_stems
         digest = hashlib.sha256(str(args.track.resolve()).encode()).hexdigest()[:8]
+        references = []
+        for path in refs:
+            decoded = decode(path)
+            references.append((path.stem, decoded.samples, decoded.rate))
         studio = studio_server.Studio(
-            engine, stems.vocal + stems.beat, args.work / "studio", f"{args.track.stem}-{digest}"
+            engine,
+            stems.vocal + stems.beat,
+            args.work / "studio",
+            f"{args.track.stem}-{digest}",
+            references,
         )
         token = secrets.token_urlsafe(32)
         httpd = studio_server.make_server(studio, token, args.port)

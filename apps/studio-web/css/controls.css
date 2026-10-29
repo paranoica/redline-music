@@ -388,3 +388,13 @@
   min-height: 40px;
   font-family: var(--font-ui);
 }
+
+.dropdown--small .dropdown__select {
+  min-width: 150px;
+  max-width: 200px;
+}
+
+.ab__side:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -14,6 +14,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -84,7 +85,14 @@ def wav_bytes(samples: Samples, rate: int) -> bytes:
 class Studio:
     """The track, its engine and what the page has asked for."""
 
-    def __init__(self, engine: Engine, original: Samples, folder: Path, track_key: str) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        original: Samples,
+        folder: Path,
+        track_key: str,
+        references: Sequence[tuple[str, Samples, int]] = (),
+    ) -> None:
         """Hold the engine of one track.
 
         Args:
@@ -92,7 +100,12 @@ class Studio:
             original: The track as Suno made it, for A/B.
             folder: Where settings and presets are saved.
             track_key: The track's folder name under folder.
+            references: Name, samples and rate of each reference, played in the A/B.
         """
+        self.references = [
+            (name, samples, rate, integrated_lufs(samples, rate))
+            for name, samples, rate in references
+        ]
         self.engine = engine
         self.original = original
         self.folder = folder
@@ -245,12 +258,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "no such page")
         if not self._token_ok(self.headers.get("X-Token")):
             return self._error(HTTPStatus.FORBIDDEN, "no token")
+        return self._api_get(url.path, parse_qs(url.query))
+
+    def _api_get(self, path: str, query: dict[str, list[str]]) -> None:
         studio = self.server.studio
-        if url.path == "/api/schema":
+        if path == "/api/schema":
             return self._json(HTTPStatus.OK, self._schema())
-        if url.path == "/api/presets":
+        if path == "/api/presets":
             return self._json(HTTPStatus.OK, studio.presets())
-        if url.path == "/api/original":
+        if path == "/api/references":
+            return self._json(
+                HTTPStatus.OK,
+                [
+                    {"index": i, "name": name, "seconds": len(x) / rate, "lufs": lufs}
+                    for i, (name, x, rate, lufs) in enumerate(studio.references)
+                ],
+            )
+        if path == "/api/reference":
+            return self._reference(query.get("i", []))
+        if path == "/api/original":
             return self._send(
                 HTTPStatus.OK,
                 wav_bytes(studio.original, studio.rate),
@@ -258,6 +284,18 @@ class Handler(BaseHTTPRequestHandler):
                 {"X-Lufs": f"{studio.original_lufs:.2f}"},
             )
         return self._error(HTTPStatus.NOT_FOUND, "no such call")
+
+    def _reference(self, asked: list[str]) -> None:
+        references = self.server.studio.references
+        given = asked[0] if len(asked) == 1 else ""
+        if not (given.isascii() and given.isdigit() and len(given) < 4):
+            return self._error(HTTPStatus.BAD_REQUEST, "i is a reference number")
+        if int(given) >= len(references):
+            return self._error(HTTPStatus.BAD_REQUEST, "no such reference")
+        _, samples, rate, lufs = references[int(given)]
+        return self._send(
+            HTTPStatus.OK, wav_bytes(samples, rate), "audio/wav", {"X-Lufs": f"{lufs:.2f}"}
+        )
 
     def _schema(self) -> dict:
         studio = self.server.studio
