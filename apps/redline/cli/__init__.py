@@ -13,8 +13,8 @@ from redline.cli.lyrics import (
     _lyrics_suno,
     _lyrics_write,
 )
-from redline.cli.parser import build_parser
-from redline.cli.sound import _master, _measure, _run, _studio, _vocal
+from redline.cli.parser import build_parser, check_studio
+from redline.cli.sound import _master, _measure, _run, _studio, _vocal, _voice
 
 if TYPE_CHECKING:
     from redline.measure.separate import Separator
@@ -26,6 +26,8 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
     """Run the command line and return the exit code; tests pass their own separator."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "studio":
+        check_studio(parser, args)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     sound = {
         "measure": _measure,
@@ -33,6 +35,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         "master": _master,
         "run": _run,
         "studio": _studio,
+        "voice": _voice,
     }
     lyrics = {
         "check": _lyrics_check,

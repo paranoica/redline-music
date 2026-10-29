@@ -1,4 +1,4 @@
-"""The sound commands: measure, vocal and master rounds, run, studio."""
+"""The sound commands: measure, vocal and master rounds, run, voice, studio."""
 
 import argparse
 import sys
@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 from redline.core.audio import AudioError
 
 if TYPE_CHECKING:
+    from redline.engine.settings import Settings
     from redline.measure.separate import Separator
+    from redline.vocal.auto import AutoResult
 from redline.cli.common import audio_files
 
 
@@ -98,8 +100,21 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
-def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
+def _saved_settings(args: argparse.Namespace) -> "Settings | None":
     from redline.engine import settings as chain_settings
+
+    if args.preset is not None:
+        return chain_settings.load_preset(args.work / "studio" / "presets", args.preset)
+    return chain_settings.load(args.settings) if args.settings else None
+
+
+def _print_auto(found: "AutoResult") -> None:
+    for key in ("vocal_db", "comp_threshold_db", "drive_db"):
+        print(f"{key}: {getattr(found.settings, key)}")
+    print(f"distance: {found.distance_before:.2f} → {found.distance_after:.2f}", flush=True)
+
+
+def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
     from redline.master.run import run_track
     from redline.measure.separate import RoformerSeparator, SeparationError
 
@@ -112,10 +127,7 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
         print("redline: no track audio files given", file=sys.stderr)
         return 2
     try:
-        if args.preset is not None:
-            chosen = chain_settings.load_preset(args.work / "studio" / "presets", args.preset)
-        else:
-            chosen = chain_settings.load(args.settings) if args.settings else None
+        chosen = _saved_settings(args)
     except (ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
@@ -136,16 +148,58 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
+def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
+    from dataclasses import asdict
+
+    from redline.master.run import track_engine, write_result
+    from redline.measure.run import measure_own
+    from redline.measure.separate import RoformerSeparator, SeparationError
+    from redline.vocal.auto import auto_settings
+    from redline.vocal.rounds import check_folders
+
+    refs = audio_files(args.ref)
+    if not refs:
+        print("redline: no reference audio files given", file=sys.stderr)
+        return 2
+    found = None
+    try:
+        chosen = _saved_settings(args)
+        check_folders(args.work, args.out)
+        inputs = measure_own(
+            args.vocal,
+            args.beat,
+            refs,
+            args.work,
+            separator or RoformerSeparator(),
+            0.0 if args.offset is None else args.offset,
+        )
+        engine = track_engine(inputs)
+        if chosen is None and not args.no_auto:
+            found = auto_settings(engine, inputs.refs)
+            chosen = found.settings
+        extra = None if found is None else {"auto": asdict(found)}
+        folder = write_result(inputs, engine, args.out, args.vocal.stem, chosen, extra)
+    except (AudioError, SeparationError, ValueError, OSError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    print(folder, flush=True)
+    if found is not None:
+        _print_auto(found)
+    return 0
+
+
 def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     import hashlib
     import secrets
     import webbrowser
 
     from redline.core.audio import decode
+    from redline.engine import settings as chain_settings
     from redline.master.run import track_engine
-    from redline.measure.run import measure_inputs
+    from redline.measure.run import measure_inputs, measure_own
     from redline.measure.separate import RoformerSeparator, SeparationError
     from redline.studio import server as studio_server
+    from redline.vocal.auto import auto_settings
     from redline.web.local import browser_file
 
     refs = audio_files(args.ref)
@@ -153,10 +207,27 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
     try:
-        inputs = measure_inputs(args.track, refs, args.work, separator or RoformerSeparator())
+        separator = separator or RoformerSeparator()
+        if args.vocal is None:
+            named = args.track
+            inputs = measure_inputs(args.track, refs, args.work, separator)
+            source = str(args.track.resolve())
+        else:
+            named = args.vocal
+            offset = 0.0 if args.offset is None else args.offset
+            inputs = measure_own(args.vocal, args.beat, refs, args.work, separator, offset)
+            # the offset is left out, so settings tuned on a pair survive moving it
+            source = f"{args.vocal.resolve()}|{args.beat.resolve()}"
         engine = track_engine(inputs)
         stems = inputs.track_stems
-        digest = hashlib.sha256(str(args.track.resolve()).encode()).hexdigest()[:8]
+        digest = hashlib.sha256(source.encode()).hexdigest()[:8]
+        track_key = f"{named.stem}-{digest}"
+        saved = args.work / "studio" / track_key / "settings.json"
+        if args.vocal is not None and not saved.exists():
+            found = auto_settings(engine, inputs.refs)
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            chain_settings.save(found.settings, saved)
+            _print_auto(found)
         references = []
         for path in refs:
             decoded = decode(path)
@@ -165,7 +236,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
             engine,
             stems.vocal + stems.beat,
             args.work / "studio",
-            f"{args.track.stem}-{digest}",
+            track_key,
             references,
         )
         token = secrets.token_urlsafe(32)

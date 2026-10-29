@@ -76,6 +76,33 @@ uv run redline run --preset "my preset" --track input/takes/ --ref input/refs
 read or has no vocal is reported and skipped; the command exits 2 if any take failed.
 `--settings FILE` takes a full settings file instead of a preset.
 
+## Your own vocal
+
+```sh
+uv run redline voice --vocal input/vocal.wav --beat input/beat.wav --ref input/refs
+```
+
+A vocal recorded by hand comes with its beat as two files, so neither is separated: both are
+brought to the analysis rate, the vocal is moved by `--offset` seconds (later when positive,
+its start dropped when negative), the shorter one is padded with silence, and their sum is
+measured as a take would be. Only the references go through the separator. The vocal should
+be dry, recorded over the beat and exported from the same session, or the two will not line
+up.
+
+Unless `--settings`, `--preset` or `--no-auto` is given, the settings are searched for. The
+loudest 30 seconds are rendered while the vocal level, the compressor threshold and the drive
+step through a grid, one at a time, twice over. Each render's vocal is measured for its level
+against the beat, crest, short-term spread and kurtosis, and the distance to the references is
+the sum of squared differences from their medians, each in units of the references' spread on
+it. The lowest distance wins. That is closest to the references by measurement; whether it
+sounds better is yours to judge. The chosen values and the distance before and after are
+printed and kept under `auto` in `chain.json`.
+
+`redline studio --vocal ... --beat ...` opens on the same pair. The search runs only when the
+pair has no `settings.json` yet and writes its result there, so the studio starts from it and
+never replaces what was saved. The pair's key comes from the two files' paths, not the
+offset.
+
 ## What numbers can and cannot say
 
 Every comparison is made at equal loudness: louder always sounds better, and would hide

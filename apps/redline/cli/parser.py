@@ -2,10 +2,7 @@
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    pass
 from redline import __version__
 from redline.cli.common import LYRICS, LYRICS_BUILD, _inputs
 
@@ -61,7 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     studio = commands.add_parser(
         "studio", help="a page on this machine that plays the track and re-renders it live"
     )
-    _inputs(studio, None)
+    opened = studio.add_mutually_exclusive_group(required=True)
+    opened.add_argument("--track", type=Path, help="the track from Suno")
+    opened.add_argument("--vocal", type=Path, help="your own recorded vocal (with --beat)")
+    studio.add_argument("--beat", type=Path, help="the beat the own vocal was recorded over")
+    studio.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    _own_offset(studio)
+    studio.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     studio.add_argument("--port", type=int, default=0, help="the port (default: a free one)")
     studio.add_argument(
         "--no-browser", action="store_true", help="print the address, do not open it"
@@ -75,6 +80,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--settings", type=Path, help="settings saved from the studio (default: the picks)"
     )
     chosen.add_argument("--preset", help="a preset saved in the studio, by its name")
+    voice = commands.add_parser(
+        "voice",
+        help="your own recorded vocal over a beat, with settings found by measurement",
+    )
+    voice.add_argument("--vocal", type=Path, required=True, help="your own recorded vocal")
+    voice.add_argument(
+        "--beat", type=Path, required=True, help="the beat the vocal was recorded over"
+    )
+    voice.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    _own_offset(voice)
+    voice.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    voice.add_argument("--out", type=Path, default=Path("output"), help="result folder")
+    picked = voice.add_mutually_exclusive_group()
+    picked.add_argument("--settings", type=Path, help="settings saved from the studio")
+    picked.add_argument("--preset", help="a preset saved in the studio, by its name")
+    picked.add_argument(
+        "--no-auto",
+        action="store_true",
+        help="render the picks instead of searching for the settings closest to the references",
+    )
     lyrics = commands.add_parser(
         "lyrics", help="lyrics: write, edit, Suno cards, marks, copy check"
     )
@@ -165,3 +192,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--stress", action="store_true", help="find rhymes by stress (needs the stress extra)"
     )
     return parser
+
+
+def _own_offset(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--offset",
+        type=float,
+        help="seconds to delay the vocal by against the beat; negative drops its start",
+    )
+
+
+def check_studio(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse --beat and --offset without --vocal, and --vocal without --beat."""
+    if args.vocal is not None and args.beat is None:
+        parser.error("--vocal needs --beat")
+    if args.vocal is None and args.beat is not None:
+        parser.error("--beat goes with --vocal")
+    if args.vocal is None and args.offset is not None:
+        parser.error("--offset goes with --vocal")

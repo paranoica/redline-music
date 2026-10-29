@@ -106,6 +106,35 @@ uv run redline run --preset "my preset" --track input/takes/ --ref input/refs
 
 A take that fails is reported and the rest still run.
 
+## Your own vocal
+
+Recorded the vocal yourself? Give Redline the vocal and the beat as two files instead of a
+Suno take. Nothing of yours is separated: both go into the chain as they are, and only the
+references are split.
+
+```sh
+uv run redline voice --vocal input/vocal.wav --beat input/beat.wav --ref input/refs
+```
+
+The vocal should be dry, recorded over this beat and exported from the same session, so the
+two files start together. If they do not, `--offset 0.25` delays the vocal by a quarter of a
+second; a negative offset drops the vocal's start.
+
+Without `--settings` or `--preset`, `voice` searches for the settings itself: it renders the
+loudest 30 seconds at several vocal levels, compressor thresholds and drives, and keeps the
+ones whose vocal measures closest to the references. It prints what it chose and the distance
+to the references before and after. That is closest to the references by measurement; whether
+it sounds better is yours to judge. `--no-auto` renders the picks instead.
+
+The result is the same folder `run` writes, named after the vocal; `chain.json` also holds the
+search's result. To tune it by ear, open the studio on the pair:
+
+```sh
+uv run redline studio --vocal input/vocal.wav --beat input/beat.wav --ref input/refs
+```
+
+The first time it starts from the settings the search found; after that, from what is saved.
+
 ## Lyrics
 
 The lyrics module works from a private base of texts you collect yourself. It is never part
@@ -152,6 +181,7 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline master` | blind round on the master, timbre, voice or 808 |
 | `redline studio` | the live page |
 | `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
+| `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
 | `redline lyrics index` | build style profiles and copy-check digests from the base |
 | `redline lyrics write` | write a new text by seed, optionally for a beat |
 | `redline lyrics edit` | change a saved text by an instruction |

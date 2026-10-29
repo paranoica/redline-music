@@ -7,6 +7,7 @@ import secrets
 import statistics
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -322,17 +323,40 @@ def run_track(
     settings: Settings | None = None,
 ) -> Path:
     """The spec's run: the chain at the given settings (the picks by default), as a folder."""
-    settings = settings or Settings()
     check_folders(work_dir, out_dir)
     inputs = measure_inputs(track, refs, work_dir, separator)
-    engine = track_engine(inputs)
+    return write_result(inputs, track_engine(inputs), out_dir, track.stem, settings)
+
+
+def write_result(
+    inputs: Inputs,
+    engine: Engine,
+    out_dir: Path,
+    label: str,
+    settings: Settings | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Render a measured track and write the result folder.
+
+    Args:
+        inputs: The track's and the references' measurements, with the track's stems.
+        engine: The track's engine, from track_engine.
+        out_dir: Where the result folder is made.
+        label: The folder's name after the time.
+        settings: The settings to render at; the picks when None.
+        extra: More entries for chain.json, after the usual ones.
+
+    Returns:
+        The folder with final.wav, original.wav, stems/, compare/, chain.json and report.md.
+    """
+    settings = settings or Settings()
     rate = engine.context.rate
     original = inputs.track_stems.vocal + inputs.track_stems.beat
     rendered = engine.render(settings)
     vocal, beat, final = rendered.vocal, rendered.beat, rendered.final
     chain, master = rendered.chain, rendered.master
     final_lufs = integrated_lufs(final, rate)
-    folder = new_run_dir(out_dir, track.stem)
+    folder = new_run_dir(out_dir, label)
     keep_out_of_git(folder)
     (folder / "stems").mkdir()
     sf.write(folder / "final.wav", final, rate, subtype="PCM_24")
@@ -355,6 +379,7 @@ def run_track(
         "tuning_cents": engine.context.tuning_cents,
         "vocal": asdict(chain),
         "master": None if master is None else {**asdict(master), "final_lufs": final_lufs},
+        **(extra or {}),
     }
     (folder / "chain.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
     after = {
