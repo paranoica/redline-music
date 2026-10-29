@@ -571,3 +571,15 @@ def test_voice_up_and_nightcore_move_the_whole_voice_an_octave(monkeypatch):
     vocal = np.zeros((100, 2), dtype=np.float32)
     final_run._with_timbre("voice up + nightcore", vocal, 44100)
     assert calls == [("up", 1), ("nc", 12.0)]
+
+
+def test_the_run_renders_what_it_rendered_before_the_engine(inputs, tmp_path):
+    import hashlib
+
+    track, refs = inputs
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator()
+    )
+    digest = hashlib.sha256((folder / "final.wav").read_bytes()).hexdigest()
+    # taken from the run before it moved onto the engine
+    assert digest == "e30b1b72e40d7f7d8d5371f3ff1934a44b1ab9c5590553a1cd8ffa6a20f1381b"
