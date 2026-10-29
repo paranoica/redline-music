@@ -232,16 +232,38 @@ def _fit_eq(
 
 
 def process_vocal(
-    vocal: Samples, rate: int, level: DirtLevel, target: Target, upper_hz: float
+    vocal: Samples,
+    rate: int,
+    level: DirtLevel,
+    target: Target,
+    upper_hz: float,
+    eq_fit: bool = True,
+    eq_offsets_db: tuple[float, ...] | None = None,
 ) -> tuple[Samples, ChainResult]:
-    """Run the chain at one dirt level; the result keeps the vocal's loudness."""
+    """Run the chain at one dirt level; the result keeps the vocal's loudness.
+
+    Args:
+        vocal: The vocal stem.
+        rate: Its sample rate.
+        level: Compression, drive and clip.
+        target: The references' vocal curve the EQ is fitted to.
+        upper_hz: The highest frequency both sides of the comparison hold.
+        eq_fit: Fit the EQ to the target; off leaves the EQ flat before the offsets.
+        eq_offsets_db: Manual gains per EQ band, added to the fitted ones.
+    """
     loudness = integrated_lufs(vocal, rate)
     if not math.isfinite(loudness):
         raise ValueError("no vocal to process: the vocal stem is silent")
     staged = vocal * np.float32(10 ** ((PRE_GAIN_LUFS - loudness) / 20))
     gate = gate_level_db(staged, rate) if level.compressor is not None else None
     dirty, clip = render_dirt(staged, rate, level)
-    out, gains, errors = _fit_eq(dirty, rate, target, upper_hz)
+    if eq_fit:
+        out, gains, errors = _fit_eq(dirty, rate, target, upper_hz)
+    else:
+        out, gains, errors = dirty, np.zeros(len(EQ_BANDS)), []
+    if eq_offsets_db is not None and any(eq_offsets_db):
+        gains = np.clip(gains + np.asarray(eq_offsets_db), -2 * GAIN_LIMIT_DB, 2 * GAIN_LIMIT_DB)
+        out = apply_sos(dirty, _eq_sos(gains, rate))
     log.info("%s: EQ fit error per pass %s dB", level.name, ", ".join(f"{e:.2f}" for e in errors))
     out = out * np.float32(10 ** ((loudness - integrated_lufs(out, rate)) / 20))
     result = ChainResult(

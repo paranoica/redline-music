@@ -276,9 +276,19 @@ def test_report_says_what_was_done_in_words(hot_inputs, tmp_path):
     assert f"{final_lufs:.1f} LUFS" in text
 
 
-def test_report_says_the_beat_was_left_alone_without_drive(hot_inputs, tmp_path, monkeypatch):
-    monkeypatch.setattr("redline.final_run.BASS_DRIVE_DB", 0.0)
-    text = (make_track(hot_inputs, tmp_path) / "report.md").read_text(encoding="utf-8")
+def test_report_says_the_beat_was_left_alone_without_drive(hot_inputs, tmp_path):
+    from redline.settings import from_dict
+
+    track, refs = hot_inputs
+    folder = run_track(
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w",
+        tmp_path / "o",
+        HalfSeparator(),
+        from_dict({"bass_drive_db": 0.0}),
+    )
+    text = (folder / "report.md").read_text(encoding="utf-8")
     assert "**Бит:** не трогал." in text
     assert "808" not in text
 
@@ -583,3 +593,54 @@ def test_the_run_renders_what_it_rendered_before_the_engine(inputs, tmp_path):
     digest = hashlib.sha256((folder / "final.wav").read_bytes()).hexdigest()
     # taken from the run before it moved onto the engine
     assert digest == "e30b1b72e40d7f7d8d5371f3ff1934a44b1ab9c5590553a1cd8ffa6a20f1381b"
+
+
+def test_run_with_settings_uses_them_and_the_tracks_tuning(inputs, tmp_path, monkeypatch):
+    from redline import engine
+    from redline.settings import from_dict
+
+    seen = []
+    monkeypatch.setattr(
+        engine, "formant_shift", lambda x, rate, r: seen.append(("formant", r)) or x
+    )
+    monkeypatch.setattr(
+        engine, "hard_tune", lambda x, rate, cents, s: seen.append(("tune", cents, s)) or x
+    )
+    track, refs = inputs
+    settings = from_dict({"formant": 1.35, "hard_tune": 100, "master_on": False})
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), settings
+    )
+    assert ("formant", 1.35) in seen
+    tune = [s for s in seen if s[0] == "tune"]
+    assert len(tune) == 1 and tune[0][2] == 1.0
+    record = json.loads((folder / "chain.json").read_text())
+    assert record["settings"]["formant"] == 1.35 and record["master"] is None
+    assert tune[0][1] == record["tuning_cents"]
+    assert "мастер" in (folder / "report.md").read_text(encoding="utf-8").lower()
+
+
+def test_cli_run_takes_a_settings_file_and_refuses_a_bad_one(inputs, tmp_path):
+    track, refs = inputs
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"doubles_on": False}), encoding="utf-8")
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"volume": 3}), encoding="utf-8")
+    args = ["run", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    assert (
+        main(
+            [*args, "--out", str(tmp_path / "o"), "--settings", str(good)],
+            separator=HalfSeparator(),
+        )
+        == 0
+    )
+    record = json.loads(next((tmp_path / "o").glob("*/chain.json")).read_text())
+    assert record["settings"]["doubles_on"] is False
+    assert (
+        main(
+            [*args, "--out", str(tmp_path / "o2"), "--settings", str(bad)],
+            separator=HalfSeparator(),
+        )
+        == 2
+    )
+    assert not (tmp_path / "o2").exists()

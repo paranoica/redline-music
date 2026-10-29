@@ -51,21 +51,29 @@ def octave_layer(samples: Samples, rate: int, octaves: int, level_db: float) -> 
     return (samples + layer * np.float32(10 ** (level_db / 20))).astype(np.float32)
 
 
-def _modulated_delay(mono: Samples, rate: int, delay_ms: float, lfo_hz: float) -> Samples:
+def _modulated_delay(
+    mono: Samples, rate: int, delay_ms: float, lfo_hz: float, depth_ms: float = DOUBLE_DEPTH_MS
+) -> Samples:
     n = np.arange(len(mono))
-    delay = (delay_ms + DOUBLE_DEPTH_MS * np.sin(2 * np.pi * lfo_hz * n / rate)) * rate / 1000
+    delay = (delay_ms + depth_ms * np.sin(2 * np.pi * lfo_hz * n / rate)) * rate / 1000
     return np.interp(n - delay, n, mono, left=0.0).astype(np.float32)
 
 
-def double(samples: Samples, rate: int) -> Samples:
+def double(
+    samples: Samples,
+    rate: int,
+    level_db: float = DOUBLE_LEVEL_DB,
+    delays_ms: tuple[float, float] = DOUBLE_DELAY_MS,
+    depth_ms: float = DOUBLE_DEPTH_MS,
+) -> Samples:
     """Two slowly wandering delayed copies of the voice, one per side, under the dry voice.
 
     The wandering delay detunes each copy by a few cents, as a second take would be.
     """
     mono = samples.mean(axis=1)
-    level = np.float32(10 ** (DOUBLE_LEVEL_DB / 20))
-    left = _modulated_delay(mono, rate, DOUBLE_DELAY_MS[0], DOUBLE_LFO_HZ[0])
-    right = _modulated_delay(mono, rate, DOUBLE_DELAY_MS[1], DOUBLE_LFO_HZ[1])
+    level = np.float32(10 ** (level_db / 20))
+    left = _modulated_delay(mono, rate, delays_ms[0], DOUBLE_LFO_HZ[0], depth_ms)
+    right = _modulated_delay(mono, rate, delays_ms[1], DOUBLE_LFO_HZ[1], depth_ms)
     return (samples + level * np.column_stack([left, right])).astype(np.float32)
 
 
@@ -96,16 +104,21 @@ def formant_shift(samples: Samples, rate: int, ratio: float) -> Samples:
     )
 
 
-def hard_tune(samples: Samples, rate: int, tuning_cents: float) -> Samples:
-    """Snap every pitch point to the nearest semitone of the voice's own tuning, no glide."""
+def hard_tune(samples: Samples, rate: int, tuning_cents: float, strength: float = 1.0) -> Samples:
+    """Pull every pitch point toward the nearest semitone of the voice's own tuning.
+
+    Strength 1 snaps with no glide; 0.5 goes half the way in cents.
+    """
     reference = 440.0 * 2 ** (tuning_cents / 1200)
+    snapped = f"{reference} * 2 ^ (round(12 * log2(self / {reference})) / 12)"
+    formula = snapped if strength >= 1 else f"self * (({snapped}) / self) ^ {strength}"
 
     def change(sound: parselmouth.Sound) -> parselmouth.Sound:
         manipulation = call(
             sound, "To Manipulation", PITCH_STEP_S, PITCH_FLOOR_HZ, PITCH_CEILING_HZ
         )
         tier = call(manipulation, "Extract pitch tier")
-        call(tier, "Formula", f"{reference} * 2 ^ (round(12 * log2(self / {reference})) / 12)")
+        call(tier, "Formula", formula)
         call([tier, manipulation], "Replace pitch tier")
         return call(manipulation, "Get resynthesis (overlap-add)")
 

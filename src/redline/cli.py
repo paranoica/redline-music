@@ -78,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="process a track with the chosen settings and write the result folder"
     )
     _inputs(run, "result folder")
+    run.add_argument(
+        "--settings", type=Path, help="settings saved from the studio (default: the picks)"
+    )
     lyrics = commands.add_parser("lyrics", help="lyrics: copy check and line form")
     lyrics_commands = lyrics.add_subparsers(dest="lyrics_command", metavar="command")
     check = lyrics_commands.add_parser(
@@ -239,6 +242,7 @@ def _master(args: argparse.Namespace, separator: "Separator | None") -> int:
 
 
 def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
+    from redline import settings as chain_settings
     from redline.final_run import run_track
     from redline.separate import RoformerSeparator, SeparationError
 
@@ -247,7 +251,10 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
         print("redline: no reference audio files given", file=sys.stderr)
         return 2
     try:
-        folder = run_track(args.track, refs, args.work, args.out, separator or RoformerSeparator())
+        chosen = chain_settings.load(args.settings) if args.settings else None
+        folder = run_track(
+            args.track, refs, args.work, args.out, separator or RoformerSeparator(), chosen
+        )
     except (AudioError, SeparationError, ValueError, OSError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2

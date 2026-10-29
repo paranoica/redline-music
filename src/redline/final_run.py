@@ -14,12 +14,14 @@ import soundfile as sf
 
 from redline.audio import true_peak_db
 from redline.chain import ALL_LEVELS, ChainResult, check_vocal, process_vocal
+from redline.engine import Context, Engine, timbre_of
 from redline.final_report import write_final_report
 from redline.listen import common_lufs, write_listen_set
 from redline.loudness import gated_crest_db, integrated_lufs
 from redline.master import master_clip, saturate_low
 from redline.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.separate import Separator
+from redline.settings import Settings
 from redline.spectrum import low_end
 from redline.timbre import (
     bitcrush,
@@ -295,16 +297,40 @@ def bass_round(
     return _write_round(work_dir, out_dir, "808", variants, rate, seed, record)
 
 
+def track_engine(inputs: Inputs) -> Engine:
+    """The engine of a measured track: its stems, EQ target, tuning and loudness target."""
+    stems = inputs.track_stems
+    rate = stems.rate
+    original = stems.vocal + stems.beat
+    check_vocal(integrated_lufs(stems.vocal, rate), integrated_lufs(original, rate))
+    context = Context(
+        rate,
+        reference_target(inputs.refs),
+        inputs.upper,
+        float(inputs.track.info.get("vocal.tuning_cents") or 0.0),
+        round(statistics.median(_reference_loudness(inputs.refs)), 1),
+    )
+    return Engine(stems.vocal, stems.beat, context)
+
+
 def run_track(
-    track: Path, refs: list[Path], work_dir: Path, out_dir: Path, separator: Separator
+    track: Path,
+    refs: list[Path],
+    work_dir: Path,
+    out_dir: Path,
+    separator: Separator,
+    settings: Settings | None = None,
 ) -> Path:
-    """The spec's run: the chosen vocal and master, written as the spec's result folder."""
+    """The spec's run: the chain at the given settings (the picks by default), as a folder."""
+    settings = settings or Settings()
     check_folders(work_dir, out_dir)
-    inputs, original, vocal, chain = _chosen_mix(track, refs, work_dir, separator)
-    beat, rate = inputs.track_stems.beat, inputs.track_stems.rate
-    vocal, beat = _chosen_sound(vocal, beat, rate)
-    target = round(statistics.median(_reference_loudness(inputs.refs)), 1)
-    final, master = master_clip(vocal + beat, rate, target)
+    inputs = measure_inputs(track, refs, work_dir, separator)
+    engine = track_engine(inputs)
+    rate = engine.context.rate
+    original = inputs.track_stems.vocal + inputs.track_stems.beat
+    rendered = engine.render(settings)
+    vocal, beat, final = rendered.vocal, rendered.beat, rendered.final
+    chain, master = rendered.chain, rendered.master
     final_lufs = integrated_lufs(final, rate)
     folder = new_run_dir(out_dir)
     keep_out_of_git(folder)
@@ -321,12 +347,14 @@ def run_track(
         gain = 10 ** ((level - integrated_lufs(samples, rate)) / 20)
         sf.write(folder / "compare" / f"{name}.wav", samples * gain, rate, subtype="PCM_24")
     record = {
-        "vocal_level": VOCAL_LEVEL,
-        "vocal_db": VOCAL_DB,
-        "timbre": TIMBRE,
-        "bass_drive_db": BASS_DRIVE_DB,
+        "vocal_level": chain.level,
+        "vocal_db": settings.vocal_db,
+        "timbre": timbre_of(settings),
+        "bass_drive_db": settings.bass_drive_db,
+        "settings": asdict(settings),
+        "tuning_cents": engine.context.tuning_cents,
         "vocal": asdict(chain),
-        "master": {**asdict(master), "final_lufs": final_lufs},
+        "master": None if master is None else {**asdict(master), "final_lufs": final_lufs},
     }
     (folder / "chain.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
     after = {
@@ -338,10 +366,10 @@ def run_track(
     write_final_report(
         folder / "report.md",
         chain,
-        VOCAL_LEVEL,
-        VOCAL_DB,
-        TIMBRE,
-        BASS_DRIVE_DB,
+        chain.level,
+        settings.vocal_db,
+        timbre_of(settings),
+        settings.bass_drive_db,
         master,
         final_lufs,
         inputs.track.values,

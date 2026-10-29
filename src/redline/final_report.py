@@ -23,12 +23,27 @@ def _number(value: float | None) -> str:
 
 TIMBRE_WORDS = {
     "octave down": "подложил под голос его же копию на октаву ниже",
+    "octave up": "подложил под голос его же копию на октаву выше",
     "doubles": "добавил два «плавающих» дубля по бокам",
     "bitcrush": "пропустил голос через бит-крашер",
+    "voice up": "поднял весь голос на октаву",
+    "voice down": "опустил весь голос на октаву",
+    "nightcore": "поднял голос на октаву вместе с тембром, как найткор",
 }
 
 
-def _master_line(master: MasterResult, before_lufs: float | None, final_lufs: float) -> str:
+def _timbre_words(part: str) -> str:
+    if part.startswith("formant x"):
+        ratio = float(part.removeprefix("formant x"))
+        return f"сдвинул форманты в {ratio:g} раза ({'моложе' if ratio > 1 else 'грубее'})"
+    if part.startswith("hard tune"):
+        return f"притянул к нотам хард-тюном ({part.removeprefix('hard tune').strip()})"
+    return TIMBRE_WORDS[part]
+
+
+def _master_line(master: MasterResult | None, before_lufs: float | None, final_lufs: float) -> str:
+    if master is None:
+        return "- **Мастер:** выключен, громкость не поднимал."
     direction = "поднял" if before_lufs is None or final_lufs > before_lufs else "опустил"
     line = (
         f"- **Мастер:** {direction} громкость до {final_lufs:.1f} LUFS "
@@ -55,7 +70,7 @@ def write_final_report(
     vocal_db: float,
     timbre: str,
     bass_drive_db: float,
-    master: MasterResult,
+    master: MasterResult | None,
     final_lufs: float,
     before: Mapping[str, float | None],
     after: Mapping[str, float | None],
@@ -63,13 +78,14 @@ def write_final_report(
 ) -> None:
     """Write the run's report in Russian; numbers say closer or further, never which is good."""
     eq = ", ".join(f"{g:+.1f}" for g in chain.eq_gains_db)
-    timbre_words = " и ".join(TIMBRE_WORDS[p.strip()] for p in timbre.split("+"))
+    timbre_words = "".join(f"{_timbre_words(p.strip())}, " for p in timbre.split("+") if p.strip())
     lines = [
         "# Что сделано с треком",
         "",
         f"- **Вокал:** сжал и перегрузил (уровень `{vocal_level}`), подогнал окраску под вокал "
-        f"референсов (эквалайзер, дБ по полосам 200 Гц … 8 кГц: {eq}), {timbre_words}, "
-        f"утопил на {abs(vocal_db):.0f} дБ под бит.",
+        f"референсов (эквалайзер, дБ по полосам 200 Гц … 8 кГц: {eq}), {timbre_words}"
+        f"{'утопил' if vocal_db < 0 else 'поднял'} на {abs(vocal_db):.0f} дБ "
+        f"{'под бит' if vocal_db < 0 else 'против бита'}.",
         _beat_line(bass_drive_db),
         _master_line(master, before.get("mix.lufs"), final_lufs),
         "",
