@@ -128,7 +128,7 @@ def title_of(track: Track) -> str:
     if not said:
         return "Без названия"
     top = max(said.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
-    first = " ".join(top.split()[:TITLE_WORDS])
+    first = " ".join(top.split()[:TITLE_WORDS]).rstrip(" ,.;:-\u2013\u2014")
     return first[:1].upper() + first[1:]
 
 

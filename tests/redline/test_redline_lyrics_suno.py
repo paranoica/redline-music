@@ -143,3 +143,9 @@ def test_a_flow_used_twice_is_named_once_and_a_plain_recipe_keeps_the_trap_style
 def test_the_owners_style_wins_on_a_beat_seed_too():
     text = card(parse_text(TEXT), style="свой стиль", recipe=beat_recipe("triplets"))
     assert field(text, "Style") == "свой стиль"
+
+
+def test_a_title_cut_at_a_comma_or_dash_loses_it():
+    text = "[Припев]\nдым в клубе, и дым в голове\nдым в клубе, и дым в голове\n"
+    assert title_of(parse_text(text)) == "Дым в клубе"
+    assert title_of(parse_text("[Припев]\nночь — и я снова тут\n")) == "Ночь — и"
