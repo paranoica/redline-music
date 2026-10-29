@@ -64,7 +64,7 @@ def set_mark(folder: Path, version: int, line: str, mark: str | None) -> dict[st
     entries.pop(line, None)
     if mark is not None:
         entries[line] = {"mark": mark, "at": time.time_ns()}
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as out:
         out.write(json.dumps(entries, ensure_ascii=False, indent=1))

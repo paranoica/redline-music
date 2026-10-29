@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import math
+import os
 import threading
 import time
 from collections.abc import Sequence
@@ -113,7 +114,7 @@ class Studio:
             raise BadRequest(HTTPStatus.CONFLICT, "render these settings exactly before saving")
         path = self.folder / self.track_key / "settings.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(asdict(settings), indent=1), encoding="utf-8")
+        _replace(path, json.dumps(asdict(settings), indent=1))
         return path
 
     def presets(self) -> dict[str, dict]:
@@ -138,7 +139,14 @@ class Studio:
         changed = {k: v for k, v in asdict(settings).items() if defaults[k] != v}
         folder = self.folder / "presets"
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"{name}.json").write_text(json.dumps(changed, ensure_ascii=False), "utf-8")
+        _replace(folder / f"{name}.json", json.dumps(changed, ensure_ascii=False))
+
+
+def _replace(path: Path, text: str) -> None:
+    # two saves at once, or a crash mid-write, must not leave half a file behind
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
 
 
 def _settings(body: dict) -> Settings:

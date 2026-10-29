@@ -99,7 +99,10 @@ class Handler(LocalHandler):
                 marks = set_mark(folder, version, line, mark)
             except DamagedMarks as error:
                 raise BadRequest(HTTPStatus.CONFLICT, str(error)) from error
-        return self.json(HTTPStatus.OK, {"marks": marks})
+            # the order the writes happened in, which the page cannot see from its side
+            self.server.revision += 1
+            revision = self.server.revision
+        return self.json(HTTPStatus.OK, {"marks": marks, "rev": revision})
 
 
 class MarksServer(LocalServer):
@@ -112,6 +115,7 @@ class MarksServer(LocalServer):
         super().__init__(address, Handler, token, files)
         self.generated = generated
         self.writing = threading.Lock()
+        self.revision = 0
 
 
 def make_server(generated: Path, token: str, port: int = 0) -> MarksServer:

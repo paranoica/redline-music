@@ -279,3 +279,10 @@ def test_marks_sent_at_once_from_two_tabs_are_all_kept(tmp_path):
         httpd.server_close()
     assert statuses == [200] * len(lines)
     assert len(read_marks(tmp_path / "4", 1)) == len(lines)
+
+
+def test_each_written_mark_comes_back_with_a_rising_number(server):
+    body = {"seed": 3, "version": 1, "line": "первая строка", "mark": "cringe"}
+    first = call(server, "POST", "/api/mark", body)[1]["rev"]
+    second = call(server, "POST", "/api/mark", {**body, "seed": 12})[1]["rev"]
+    assert isinstance(first, int) and second > first

@@ -8,9 +8,7 @@ const LABELS = { cringe: "кринж", good: "норм" };
 const KEYS = { c: "cringe", с: "cringe", n: "good", т: "good", 0: null };
 
 const $ = (id) => document.getElementById(id);
-// sent counts requests, shown is the newest one whose answer is on screen: quick clicks
-// can be answered out of order, and an older answer must not paint over a newer one
-const state = { texts: [], current: null, marks: {}, rows: [], sent: 0, shown: 0 };
+const state = { texts: [], current: null, marks: {}, rows: [] };
 
 async function call(method, path, body) {
   const response = await fetch(path, {
@@ -89,7 +87,6 @@ async function mark(line, value) {
   const text = state.current;
   const before = state.marks[line] || null;
   const next = before === value ? null : value;
-  const seq = ++state.sent;
   try {
     const answer = await call("POST", "/api/mark", {
       seed: text.seed,
@@ -97,8 +94,10 @@ async function mark(line, value) {
       line,
       mark: next,
     });
-    if (seq < state.shown) return;
-    state.shown = seq;
+    // quick clicks are written and answered in any order; each answer holds the whole
+    // text as of its write, and rev says which write came last
+    if (answer.rev <= (text.rev || 0)) return;
+    text.rev = answer.rev;
     text.marked = Object.keys(answer.marks).length;
     if (text === state.current) {
       state.marks = answer.marks;
