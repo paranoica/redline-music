@@ -22,7 +22,8 @@ def bar_features(mono: np.ndarray, rate: int, bar_starts_s: Sequence[float]) -> 
     ends = np.append(starts[1:], max(len(signal) / rate, starts[-1] + 1e-3))
     rows = []
     for begin, end in zip(starts, ends, strict=True):
-        a = min(round(begin * rate / HOP), frames - 1)
+        # a first bar may start before the file
+        a = min(max(round(begin * rate / HOP), 0), frames - 1)
         b = min(max(round(end * rate / HOP), a + 1), frames)
         rows.append(np.concatenate([chroma[:, a:b].mean(axis=1), mfcc[:, a:b].mean(axis=1)]))
     out = np.asarray(rows)

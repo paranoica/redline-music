@@ -87,3 +87,11 @@ def test_bar_features_put_equal_chords_closer_than_different_ones() -> None:
     same = np.linalg.norm(features[0] - features[2])
     different = np.linalg.norm(features[0] - features[1])
     assert same < different / 3
+
+
+def test_bar_features_of_a_first_bar_before_the_file_are_finite():
+    rate = 22050
+    t = np.arange(int(20 * rate)) / rate
+    mono = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    starts = [-0.015 + 2.0 * k for k in range(10)]
+    assert np.isfinite(bar_features(mono, rate, starts)).all()
