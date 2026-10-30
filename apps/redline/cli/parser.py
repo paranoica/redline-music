@@ -127,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     takes.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     _record(commands)
+    _beat(commands)
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
     )
@@ -250,6 +251,23 @@ def _record(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> 
         "--takes", type=Path, default=Path("input/takes"), help="the folder of the songs' takes"
     )
     record.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+
+
+def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """Register `redline beat` and its subcommands."""
+    beat = commands.add_parser("beat", help="the beat studio: sample library")
+    beat_commands = beat.add_subparsers(dest="beat_command", metavar="command")
+    sounds = beat_commands.add_parser("sounds", help="the sample instruments: list, fetch")
+    sounds_commands = sounds.add_subparsers(dest="sounds_command", metavar="command")
+    listed = sounds_commands.add_parser(
+        "list", help="every instrument with its licence, size and whether it is fetched"
+    )
+    fetch = sounds_commands.add_parser(
+        "fetch", help="download an instrument into <work>/sounds/<name>/, checking every file"
+    )
+    fetch.add_argument("name", help="the instrument's name, as listed")
+    for command in (listed, fetch):
+        command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
 
 
 def check_record(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

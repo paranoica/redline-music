@@ -1,0 +1,2134 @@
+{
+ "sources": [
+  {
+   "name": "vcsl-glock",
+   "source": "https://github.com/sgossner/VCSL",
+   "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+   "licence": "CC0-1.0",
+   "licence_quote": "and for any purposes, including without limitation commercial purposes.",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G4_01.wav",
+     "git_sha1": "a7d9ca6c68e4c56327d83f0653ee3e16e4810265",
+     "size": 1271310,
+     "note": 67,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C5_01.wav",
+     "git_sha1": "db079c70946137f543820b6a6ac023d0afaac47c",
+     "size": 1271310,
+     "note": 72,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G5_01.wav",
+     "git_sha1": "dbaf80bc3975016095de3a611a202b581931311c",
+     "size": 1226714,
+     "note": 79,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C6_01.wav",
+     "git_sha1": "c02ff721d10eb3551372806653368f45ea5dc367",
+     "size": 1271310,
+     "note": 84,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_G6_01.wav",
+     "git_sha1": "e95738492bdc207b11ad32891a9a1ea090b6719e",
+     "size": 843122,
+     "note": 91,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_medium_C7_01.wav",
+     "git_sha1": "a0f4aff9ef7d73e49a16f4054ead1369a78572b0",
+     "size": 492418,
+     "note": 96,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_G4_01.wav",
+     "git_sha1": "741d607d19f0b9ca9c449391d332946bd89d4fa5",
+     "size": 1323482,
+     "note": 67,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C5_01.wav",
+     "git_sha1": "25185183d6a23973dcb245843b86c33108098381",
+     "size": 1323482,
+     "note": 72,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_G5_01.wav",
+     "git_sha1": "5a74c7a1c297fc67ddd6f1ba3e829f59478ce05a",
+     "size": 1323482,
+     "note": 79,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C6_01.wav",
+     "git_sha1": "f15847a111ce01f6d1bf285c835c941a22c9a38b",
+     "size": 1323482,
+     "note": 84,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_G#6_01.wav",
+     "git_sha1": "c0da4e02db0fb6a394223dc3b6cb2d25d402499c",
+     "size": 931630,
+     "note": 92,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Glockenspiel/glock_loud_C7_01.wav",
+     "git_sha1": "7e4bc7ee61184e7d3171eeca26d1f95c2f8de3c2",
+     "size": 464710,
+     "note": 96,
+     "vel": [
+      64,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vsco-harp",
+   "source": "https://github.com/sgossner/VSCO-2-CE",
+   "commit": "440300901dfe9275fd84e0b7763af1f8443ae62e",
+   "licence": "CC0-1.0",
+   "licence_quote": "purposes, including without limitation commercial purposes. These owners may",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Strings/Harp/KSHarp_E1_f.wav",
+     "git_sha1": "483714bd64ecf4947fe70d0ae0da6f2292c958f2",
+     "size": 4001190,
+     "note": 28,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_G1_mp.wav",
+     "git_sha1": "b7935d0f8828a40be189f960960d4cb8d3235328",
+     "size": 1189890,
+     "note": 31,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_B1_mf.wav",
+     "git_sha1": "bb26292fd8b4d4d7f95703c69667c8f2234eebc8",
+     "size": 2284022,
+     "note": 35,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_D2_mf.wav",
+     "git_sha1": "2a9d5a18ceb32459a29995a4e68e06c8f78dff5d",
+     "size": 1741118,
+     "note": 38,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_F2_mf.wav",
+     "git_sha1": "03c3ce65453dc79a0b36805126b57574ff7dc654",
+     "size": 3086590,
+     "note": 41,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_A2_mf.wav",
+     "git_sha1": "265383d75cb23b2882ca297e6c50908e3ec8247a",
+     "size": 2007670,
+     "note": 45,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_C3_mf.wav",
+     "git_sha1": "20e91e167e86132bb16601f682c90444779d8a23",
+     "size": 1586172,
+     "note": 48,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_E3_mf.wav",
+     "git_sha1": "5c6c7410ae0ff7800214931f9db9a7f52db5987e",
+     "size": 2461138,
+     "note": 52,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_G3_mf.wav",
+     "git_sha1": "a2f7fcc2bce81d039d9c0c529a94159f589f36e1",
+     "size": 1806874,
+     "note": 55,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_B3_mf.wav",
+     "git_sha1": "8d06cd55bc871d19f25a2bb1b56c7a567aabbc6b",
+     "size": 1981130,
+     "note": 59,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_D4_mf.wav",
+     "git_sha1": "342eec5072e2c0a7fb7cb03b6f5b46d84ed6ac69",
+     "size": 1921690,
+     "note": 62,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_F4_mf.wav",
+     "git_sha1": "a1966639b165b623ac533270d616814cbc5389ef",
+     "size": 1913498,
+     "note": 65,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_A4_mf.wav",
+     "git_sha1": "acbece38a84e886cb5516e0f29d6ff5d38900fe1",
+     "size": 2143618,
+     "note": 69,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_C5_mf.wav",
+     "git_sha1": "748b4b1366616972c2a22e81fc48a86178801c45",
+     "size": 1237142,
+     "note": 72,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_E5_mf.wav",
+     "git_sha1": "20675907d698db011d0c8bc72cf9af4e7a1ac971",
+     "size": 1171586,
+     "note": 76,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_G5_mf.wav",
+     "git_sha1": "8e3593345c95368ae9d74591c1046d21de6a8e60",
+     "size": 1049778,
+     "note": 79,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_B5_mf.wav",
+     "git_sha1": "2d2689e8ca023cd685ed5a29161f3d641f109da9",
+     "size": 779058,
+     "note": 83,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_D6_mf.wav",
+     "git_sha1": "f66e88f651740695e4971c3197e6a1d61d6380c1",
+     "size": 687750,
+     "note": 86,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_F6_mf.wav",
+     "git_sha1": "5d80932f790a28c088fab5dc2727c01ef2a130fc",
+     "size": 413126,
+     "note": 89,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_A6_mf.wav",
+     "git_sha1": "9fc9959804954e24e6837c426d702031fd2a3b7f",
+     "size": 636870,
+     "note": 93,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_B6_mf.wav",
+     "git_sha1": "d350ad472b663c9c239802f10228cd0073cf698d",
+     "size": 483966,
+     "note": 95,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_D7_f.wav",
+     "git_sha1": "096a6d12f2a4e01c952d85100d11030b8ab2fdf9",
+     "size": 396134,
+     "note": 98,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Harp/KSHarp_F7_f.wav",
+     "git_sha1": "2451907b2acc4cdf9b371111c760abc9bb866926",
+     "size": 332482,
+     "note": 101,
+     "vel": [
+      0,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vsco-violin-pizz",
+   "source": "https://github.com/sgossner/VSCO-2-CE",
+   "commit": "440300901dfe9275fd84e0b7763af1f8443ae62e",
+   "licence": "CC0-1.0",
+   "licence_quote": "purposes, including without limitation commercial purposes. These owners may",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_G2_v1_rr1.wav",
+     "git_sha1": "4078199c3a83b088af2374801bf02a69a34e2692",
+     "size": 409242,
+     "note": 43,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_A2_v1_rr1.wav",
+     "git_sha1": "93b98c5260e23178abca15764e43b2d61f0ee86a",
+     "size": 220926,
+     "note": 45,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_B2_v1_rr1.wav",
+     "git_sha1": "3c5e8e9cc23e4832f7cd6e3b467e05edc8375761",
+     "size": 124886,
+     "note": 47,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_D3_v1_rr1.wav",
+     "git_sha1": "81edb847a315aaab80bcb96b0531554e5dcd7683",
+     "size": 280306,
+     "note": 50,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_F#3_v1_rr1.wav",
+     "git_sha1": "d8da392b5c5b778897eb9bc4e1e3ccb9cef06941",
+     "size": 197422,
+     "note": 54,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_A3_v1_rr1.wav",
+     "git_sha1": "06793268b9279f7cac16e997732515851e619173",
+     "size": 163490,
+     "note": 57,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_C4_v1_rr1.wav",
+     "git_sha1": "435b07a8821b1ce9bc2c3347faa2304e0075b4c7",
+     "size": 105914,
+     "note": 60,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_E4_v1_rr1.wav",
+     "git_sha1": "c365d0d634fe675af05e97a90f427c8ed2152d26",
+     "size": 109318,
+     "note": 64,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_G4_v1_rr1.wav",
+     "git_sha1": "6854ee3feb04c2ad33290768f4704dee8d73edc1",
+     "size": 148766,
+     "note": 67,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_B4_v1_rr1.wav",
+     "git_sha1": "a05d57ce0a3cf310aed9d9349c122a89e5394a0f",
+     "size": 88054,
+     "note": 71,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_D5_v1_rr1.wav",
+     "git_sha1": "c5757bfbc85366ee0fb73137a51f36bedbdb3503",
+     "size": 122870,
+     "note": 74,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_G2_v2_rr1.wav",
+     "git_sha1": "3ec99d0f2abd24e4fc18cf5ce5db320d7974b0ba",
+     "size": 532010,
+     "note": 43,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_A2_v2_rr1.wav",
+     "git_sha1": "67424af2bfc19cbac72eee6a8fdba6acebbf735e",
+     "size": 187354,
+     "note": 45,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_B2_v2_rr1.wav",
+     "git_sha1": "13603a872baf1c825d6f1adea446033872b3995e",
+     "size": 180134,
+     "note": 47,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_D3_v2_rr1.wav",
+     "git_sha1": "72d0589858c7bcd1e8c616c9ae5e384dd53851be",
+     "size": 391226,
+     "note": 50,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_F#3_v2_rr1.wav",
+     "git_sha1": "db2ec270d423f9c4ef156bb11ad96c9d23a36883",
+     "size": 157066,
+     "note": 54,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_A3_v2_rr1.wav",
+     "git_sha1": "251db5f874e4d431601a5f76b7a780cc1e5ef489",
+     "size": 194010,
+     "note": 57,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_C4_v2_rr1.wav",
+     "git_sha1": "2321eac4b4d5b26823a89e56a98e232fc143e121",
+     "size": 184590,
+     "note": 60,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_E4_v2_rr1.wav",
+     "git_sha1": "34adeb666686974d1a7c2eab5ff6109014b96908",
+     "size": 146742,
+     "note": 64,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_G4_v2_rr1.wav",
+     "git_sha1": "9a723d81746d3241c1adcea38fc925fed558c735",
+     "size": 184102,
+     "note": 67,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_B4_v2_rr1.wav",
+     "git_sha1": "521e295e499f4b578c6f31f5a26968b03beb77d5",
+     "size": 106362,
+     "note": 71,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Violin Section/Pizz/VlnEns_Pizz_D5_v2_rr1.wav",
+     "git_sha1": "85833b67611f3bb3e1c082721d62269f305e0afa",
+     "size": 113286,
+     "note": 74,
+     "vel": [
+      64,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vsco-cello-pizz",
+   "source": "https://github.com/sgossner/VSCO-2-CE",
+   "commit": "440300901dfe9275fd84e0b7763af1f8443ae62e",
+   "licence": "CC0-1.0",
+   "licence_quote": "purposes, including without limitation commercial purposes. These owners may",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_C1_v1_RR1.wav",
+     "git_sha1": "c075a85b166054bbb9d1f900393a76f05f10a8b1",
+     "size": 829634,
+     "note": 24,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_E1_v1_RR1.wav",
+     "git_sha1": "9678586affff8ef2973ef9da03259ba0132d1b67",
+     "size": 842720,
+     "note": 28,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_G1_v1_RR1.wav",
+     "git_sha1": "7a2e62d4053cf9d0260ededbe1b97b1963cdd1e0",
+     "size": 852008,
+     "note": 31,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_B1_v1_RR1.wav",
+     "git_sha1": "a77d940699042d211e6e329d2331d95ca76842c8",
+     "size": 890366,
+     "note": 35,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_D2_v1_RR1.wav",
+     "git_sha1": "602ef076ef3e60774a7a9d99450fbceaa7f4d24b",
+     "size": 723014,
+     "note": 38,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_F2_v1_RR1.wav",
+     "git_sha1": "65b06f53a4d2c449f38b30a22aeea6bf1ce814af",
+     "size": 662600,
+     "note": 41,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_A2_v1_RR1.wav",
+     "git_sha1": "3e1fec71b531697030215d70a51889260324a225",
+     "size": 763418,
+     "note": 45,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_C3_v1_RR1.wav",
+     "git_sha1": "0e8a8a7eadd8ea2b5f009f70fd4b1c2e325ec137",
+     "size": 704396,
+     "note": 48,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_E3_v1_RR1.wav",
+     "git_sha1": "e25e4b7b69df776d59a8e66ce3c3203f02ca3b59",
+     "size": 512792,
+     "note": 52,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_G3_v1_RR1.wav",
+     "git_sha1": "3e51a603e5395b476a41ebdcf91e2b6902fe5bfd",
+     "size": 746396,
+     "note": 55,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_B3_v1_RR1.wav",
+     "git_sha1": "9beeb61bac3f90a6031fc44df73203dca0128518",
+     "size": 637034,
+     "note": 59,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_D4_v1_RR1.wav",
+     "git_sha1": "d431933dfc477cab274a7ba5e17bbad5ab68f768",
+     "size": 246806,
+     "note": 62,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_F4_v1_RR1.wav",
+     "git_sha1": "24895de3e0d59db4ba2f2905777d1d4cb1f3242f",
+     "size": 231038,
+     "note": 65,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_C1_v2_RR1.wav",
+     "git_sha1": "e863415fcc1daf43bb56c7ad2990774f66c1cb98",
+     "size": 981176,
+     "note": 24,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_E1_v2_RR1.wav",
+     "git_sha1": "7e8f2ebee318b74e00763e877c7da474511e3341",
+     "size": 826130,
+     "note": 28,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_G1_v2_RR1.wav",
+     "git_sha1": "9e6b7510899020e0deffdf7cd84ebc207057ec27",
+     "size": 884180,
+     "note": 31,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_B1_v2_RR1.wav",
+     "git_sha1": "4a241c20bb2cb76be13837019363537e85851f40",
+     "size": 1058144,
+     "note": 35,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_D2_v2_RR1.wav",
+     "git_sha1": "55891f1ec98c1742b27e0b7565c0ef2f027e9bbc",
+     "size": 770222,
+     "note": 38,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_F2_v2_RR1.wav",
+     "git_sha1": "20c6e50e4f6e6d4e677a66989de22ebe44af9707",
+     "size": 479312,
+     "note": 41,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_A2_v2_RR1.wav",
+     "git_sha1": "72e0f0d5d328ff59c7b0227a451c1a226b892265",
+     "size": 748484,
+     "note": 45,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_C3_v2_RR1.wav",
+     "git_sha1": "a0a21bf7abdff541715f3c49df50ca0a3b5ef0f7",
+     "size": 762122,
+     "note": 48,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_E3_v2_RR1.wav",
+     "git_sha1": "81e7e715c82c068767246b948aa5720bdacd61ba",
+     "size": 613436,
+     "note": 52,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_G3_v2_RR1.wav",
+     "git_sha1": "2aee48b5212697b6c897260d25c3ad31f6b8e8aa",
+     "size": 720596,
+     "note": 55,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_B3_v2_RR1.wav",
+     "git_sha1": "37e30848e2c86eeb1a7fd6f704fc33b23c4afa4b",
+     "size": 528038,
+     "note": 59,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_D4_v2_RR1.wav",
+     "git_sha1": "d8b97e0669415235b2d28ed65f247430264cc847",
+     "size": 345608,
+     "note": 62,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Strings/Cello Section/pizzT/pizzT_F4_v2_RR1.wav",
+     "git_sha1": "5a5d41fbab07b45e1c15f8332ad3a9be98d9087c",
+     "size": 267632,
+     "note": 65,
+     "vel": [
+      64,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vcsl-kalimba",
+   "source": "https://github.com/sgossner/VCSL",
+   "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+   "licence": "CC0-1.0",
+   "licence_quote": "and for any purposes, including without limitation commercial purposes.",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G1_k12_50_100_rr2.wav",
+     "git_sha1": "25a2f3ecd4903a02ae0de586dab851fe3c65d2c1",
+     "size": 1281556,
+     "note": 31,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G#1_k11_50_100_rr2.wav",
+     "git_sha1": "f7fc23788c2866b00e1d7b65eb3a62b22b6de277",
+     "size": 2159638,
+     "note": 32,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_B1_k13_50_100_rr2.wav",
+     "git_sha1": "1a3bea0fa7ba9a8d2390f45fcc8c10081f5c95d7",
+     "size": 1567306,
+     "note": 35,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#2_k10_50_100_rr2.wav",
+     "git_sha1": "3d3582a2ac15ad9e7386e3d6a079e92c93ae43a4",
+     "size": 1720294,
+     "note": 37,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#2_k14_50_100_rr2.wav",
+     "git_sha1": "e8f675d22789818c60c6c4606de7e72300537c18",
+     "size": 1285486,
+     "note": 39,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F2_k9alt_50_100_rr2.wav",
+     "git_sha1": "5a6025b16973ceeec511e7da85993e7068d509f0",
+     "size": 1038820,
+     "note": 41,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G2_k15_50_100_rr2.wav",
+     "git_sha1": "1cdcb20c88f8dada72cc63fa0513851499a0c342",
+     "size": 1562464,
+     "note": 43,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#2_k8_50_100_rr2.wav",
+     "git_sha1": "8b9b4129e30bb2d5dc5eb622141cbdf8c44548af",
+     "size": 1519282,
+     "note": 46,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#3_k16_50_100_rr2.wav",
+     "git_sha1": "2f54d3673ff420cf68a3e033852794cc4198d938",
+     "size": 925192,
+     "note": 49,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#3_k7_50_100_rr2.wav",
+     "git_sha1": "624a4f6c77b36bc1d2acce60c251f08ea9d139ac",
+     "size": 1234402,
+     "note": 51,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F3_k17_50_100_rr2.wav",
+     "git_sha1": "2921df361d187efbfbac9fe19ef0bc57d9ddeef5",
+     "size": 927430,
+     "note": 53,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G3_k6_50_100_rr2.wav",
+     "git_sha1": "d6d1dcfda468ee43bd403160401102c634929c81",
+     "size": 962998,
+     "note": 55,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#3_k18_50_100_rr2.wav",
+     "git_sha1": "3a75aef8c53eb1cc305d8ef7a3712822b64d8b1f",
+     "size": 675160,
+     "note": 58,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#4_k5_50_100_rr2.wav",
+     "git_sha1": "d5609bd3ca8d16fff82e4c380c189122a0d00484",
+     "size": 716518,
+     "note": 61,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D4_k19_50_100_rr2.wav",
+     "git_sha1": "244fccedb259602964ebfaef12477c6fc3692922",
+     "size": 605566,
+     "note": 62,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_D#4_k20_50_100_rr2.wav",
+     "git_sha1": "311b202242d5c9cc873a93fa911672600900f701",
+     "size": 488326,
+     "note": 63,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F4_k21_50_100_rr2.wav",
+     "git_sha1": "6d8ff6b6bc8f9096e95a3a301798aeb7423d3b5a",
+     "size": 481162,
+     "note": 65,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G4_k22_50_100_rr2.wav",
+     "git_sha1": "d24779b58dcdb149b750dd82535087a0ab194248",
+     "size": 554566,
+     "note": 67,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_A#4_k2_50_100_rr2.wav",
+     "git_sha1": "45be8dfa5dff17d049a9878a16dc8f9130430ba8",
+     "size": 401296,
+     "note": 70,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_B4_k23_50_100_rr2.wav",
+     "git_sha1": "746cf96eda13dc2a35a423bd254c6720ba33d816",
+     "size": 318232,
+     "note": 71,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#5_k24_50_100_rr2.wav",
+     "git_sha1": "af397239194031376122e9115b184336e6820709",
+     "size": 566284,
+     "note": 73,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_E5_k25_50_100_rr2.wav",
+     "git_sha1": "3a322a3a34ba264a6cc9b8fb956d251d38edc471",
+     "size": 600946,
+     "note": 76,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_F#5_k1_50_100_rr2.wav",
+     "git_sha1": "e3412a5fe3e0a6019fba477d144b00fbb223a8a7",
+     "size": 508924,
+     "note": 78,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_G#5_k26_50_100_rr2.wav",
+     "git_sha1": "282be6a47cfac2222c9b2d5731c4c3eaf1eea57e",
+     "size": 487948,
+     "note": 80,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Plucked Idiophones/Kalimba, Tanzania/MBira3_pluck_Main_C#6_k27_50_100_rr2.wav",
+     "git_sha1": "0fb035cdae41a655ce50f2207fce100f4629ddff",
+     "size": 543886,
+     "note": 85,
+     "vel": [
+      0,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vcsl-fm-piano",
+   "source": "https://github.com/sgossner/VCSL",
+   "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+   "licence": "CC0-1.0",
+   "licence_quote": "and for any purposes, including without limitation commercial purposes.",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C1_vl1.wav",
+     "git_sha1": "42cabc2bbb561b1b15ddf654a7a275e7bccddf34",
+     "size": 1590859,
+     "note": 24,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E1_vl1.wav",
+     "git_sha1": "c5c97339113f503595e63000d66c02abd005ecab",
+     "size": 1468783,
+     "note": 28,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#1_vl1.wav",
+     "git_sha1": "5839fd560b6ab2ff985d5dc2d4591fdd07130a0c",
+     "size": 1315942,
+     "note": 32,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C2_vl1.wav",
+     "git_sha1": "949e7e4f11fdaa536be9d12b304c434c5713cc9a",
+     "size": 1499146,
+     "note": 36,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E2_vl1.wav",
+     "git_sha1": "73d00d583a14d01880cc2dc638a98d26a5e2e2be",
+     "size": 1341298,
+     "note": 40,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#2_vl1.wav",
+     "git_sha1": "620dfcd2fe08612418495100659a727fbb70ea84",
+     "size": 1148443,
+     "note": 44,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C3_vl1.wav",
+     "git_sha1": "f9d91bed8818e1327bed910423b82542ed344c63",
+     "size": 1202527,
+     "note": 48,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E3_vl1.wav",
+     "git_sha1": "f99d3e9f6582ba88fb6071e355adf1982fd65e64",
+     "size": 1001554,
+     "note": 52,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#3_vl1.wav",
+     "git_sha1": "2ccc5c0d40d5eb563ac71fcc9c741292dfaf59f1",
+     "size": 822241,
+     "note": 56,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C4_vl1.wav",
+     "git_sha1": "b3d755f581ee6c5fbb601dd94d8778b8670cd694",
+     "size": 864409,
+     "note": 60,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E4_vl1.wav",
+     "git_sha1": "36e84ff3a898c22833403aff491f4b83d3284517",
+     "size": 761719,
+     "note": 64,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#4_vl1.wav",
+     "git_sha1": "1425b1e6938c3e10e2c56afa1ec681d66331def2",
+     "size": 604192,
+     "note": 68,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C5_vl1.wav",
+     "git_sha1": "de3a8aaa700d7a368bdad067c529413bff5fe28c",
+     "size": 607390,
+     "note": 72,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E5_vl1.wav",
+     "git_sha1": "8afab4fb5e1d5b87108348836f52c92a06b4d01b",
+     "size": 518710,
+     "note": 76,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#5_vl1.wav",
+     "git_sha1": "30e1261d396a1e704cfd4571375053fd66ca70b4",
+     "size": 433639,
+     "note": 80,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C6_vl1.wav",
+     "git_sha1": "b94ad210a180081a6d826f9e6fc6769f75f67262",
+     "size": 430888,
+     "note": 84,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E6_vl1.wav",
+     "git_sha1": "537f5ac4e2f2e10dea9078304115948b1b45d97a",
+     "size": 380194,
+     "note": 88,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#6_vl1.wav",
+     "git_sha1": "6a081fe3850f043cd47ed986c068c7635d0745a7",
+     "size": 307339,
+     "note": 92,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C7_vl1.wav",
+     "git_sha1": "6b2748108e4be13aa50c9546fba7782868bac536",
+     "size": 309346,
+     "note": 96,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C1_vl3.wav",
+     "git_sha1": "e70ef68e3c726239f9e5a95ebec3d7551618daad",
+     "size": 1598971,
+     "note": 24,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E1_vl3.wav",
+     "git_sha1": "190e632ebc8b9f82697bdf34014cc2b3a0b18dd1",
+     "size": 1602199,
+     "note": 28,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#1_vl3.wav",
+     "git_sha1": "8de4539b3ef9c9d099550f5c7f93c713459d6ce1",
+     "size": 1568437,
+     "note": 32,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C2_vl3.wav",
+     "git_sha1": "449f0e557518c369737615ccba492a7b166f74e1",
+     "size": 1596223,
+     "note": 36,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E2_vl3.wav",
+     "git_sha1": "8a161d1b0f0b0ce9c7d18abc4e9f7b779d6d5a16",
+     "size": 1550965,
+     "note": 40,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#2_vl3.wav",
+     "git_sha1": "d4aa990cd8287e09ee82ca7a634378b7097eb6a5",
+     "size": 1323085,
+     "note": 44,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C3_vl3.wav",
+     "git_sha1": "0ba427c9ed2322dde1967b4cc7be643f629c609f",
+     "size": 1340008,
+     "note": 48,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E3_vl3.wav",
+     "git_sha1": "ba1aa49252368240f1a5f851dfb5e4ef56406b75",
+     "size": 1132285,
+     "note": 52,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#3_vl3.wav",
+     "git_sha1": "ff27dfa22e01f0d0f7ad4c939bb5a19100e0012c",
+     "size": 971362,
+     "note": 56,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C4_vl3.wav",
+     "git_sha1": "b899a97dcea495f77dcddf28395938bb79b3aaed",
+     "size": 981337,
+     "note": 60,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E4_vl3.wav",
+     "git_sha1": "918a27d526bc8311c50c347f111436c0ea947ff3",
+     "size": 860629,
+     "note": 64,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#4_vl3.wav",
+     "git_sha1": "e2d6c67297f5ff4d42515a124cbc9547a11a8a32",
+     "size": 683539,
+     "note": 68,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C5_vl3.wav",
+     "git_sha1": "209dea8f2d7d37f660e87593d074723923d2035e",
+     "size": 701536,
+     "note": 72,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E5_vl3.wav",
+     "git_sha1": "34b278e19615e67768fbfaad623b0c4bf4a8fc77",
+     "size": 578173,
+     "note": 76,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#5_vl3.wav",
+     "git_sha1": "4f6e7af44cb8e62041141f9d41528b608fa441f3",
+     "size": 498331,
+     "note": 80,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C6_vl3.wav",
+     "git_sha1": "cbb90441d2634e931eb52e792b5990d4a330760c",
+     "size": 499042,
+     "note": 84,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_E6_vl3.wav",
+     "git_sha1": "cd0e9fbd4806bcd6f5a8c003fce1f85e076550aa",
+     "size": 446260,
+     "note": 88,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_G#6_vl3.wav",
+     "git_sha1": "4a4b711f42536c9ccb7d54c3d3048fe42e1647a0",
+     "size": 348253,
+     "note": 92,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Electrophones/TX81Z/FM Piano/FMPiano_C7_vl3.wav",
+     "git_sha1": "3dacb34f89f4181652753b0701a4871c85a23b71",
+     "size": 355021,
+     "note": 96,
+     "vel": [
+      64,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vcsl-tubular-bells",
+   "source": "https://github.com/sgossner/VCSL",
+   "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+   "licence": "CC0-1.0",
+   "licence_quote": "and for any purposes, including without limitation commercial purposes.",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_C3_f_rr1.wav",
+     "git_sha1": "b88add55c3bbb52b671651071ae2ffde21f32a44",
+     "size": 3010736,
+     "note": 48,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_D3_ff_rr1.wav",
+     "git_sha1": "7cfbede0a2abbe545ce48e3ca700b69a455cf2ba",
+     "size": 5195162,
+     "note": 50,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_E3_ff_rr2.wav",
+     "git_sha1": "edd28f850293acbde7b697073d7a6212ec60a970",
+     "size": 4721192,
+     "note": 52,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_F#3_fff_rr1.wav",
+     "git_sha1": "f2f97b542792e4225350c58e8eaa7776f944cc0c",
+     "size": 3494870,
+     "note": 54,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_G#3_ff_rr1.wav",
+     "git_sha1": "bc1f1990fa79ddb453c3ef435e6c32697a0744b2",
+     "size": 3895904,
+     "note": 56,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_A#3_ff_rr1.wav",
+     "git_sha1": "c59166e7c74629b1e33180ce67e608a2b59ed0f0",
+     "size": 3331184,
+     "note": 58,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_C4_ff_rr2.wav",
+     "git_sha1": "0e10a434a4530988bf665129fe334014763b4c8b",
+     "size": 4882730,
+     "note": 60,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_D4_ff_rr2.wav",
+     "git_sha1": "2860290a2608b1d0a0ab71904beee5829ce13084",
+     "size": 3639584,
+     "note": 62,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Tubular Bells 1/chimes_E4_ff_rr2.wav",
+     "git_sha1": "614f602dd4ca5e3b91a80176c25ffbee6b4dce5e",
+     "size": 3407718,
+     "note": 64,
+     "vel": [
+      0,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vcsl-vibes-hard",
+   "source": "https://github.com/sgossner/VCSL",
+   "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+   "licence": "CC0-1.0",
+   "licence_quote": "and for any purposes, including without limitation commercial purposes.",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_F2_v3_rr1_Main.wav",
+     "git_sha1": "558f4b08c190d7bc5cf840c9bd16ec73c9e4a44c",
+     "size": 675036,
+     "note": 41,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_A2_v3_rr1_Main.wav",
+     "git_sha1": "7f8529ecef7ee0312fb6a6ab7b241713f422f7e0",
+     "size": 1907772,
+     "note": 45,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_C3_v3_rr1_Main.wav",
+     "git_sha1": "c0bf3bfd82cd11fef750afa196ba5ebc5cbd1555",
+     "size": 2187612,
+     "note": 48,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_E3_v3_rr1_Main.wav",
+     "git_sha1": "c51af967d6e8280af24ebef85c5b22f5f946e064",
+     "size": 2517268,
+     "note": 52,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_G3_v3_rr1_Main.wav",
+     "git_sha1": "c910dbbe31aea0c8814282540fc768e797253a90",
+     "size": 2973368,
+     "note": 55,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_B3_v3_rr1_Main.wav",
+     "git_sha1": "8e2272023d22b03b7f298be7e75c2aecd1988e37",
+     "size": 2518540,
+     "note": 59,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_D4_v3_rr1_Main.wav",
+     "git_sha1": "6c33156a02b4a32120c18e7b43be19e40baa90ef",
+     "size": 2575552,
+     "note": 62,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_F4_v3_rr1_Main.wav",
+     "git_sha1": "982b71de422a3c34063ef404ce7b6c86a81426e3",
+     "size": 2024512,
+     "note": 65,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_A4_v3_rr1_Main.wav",
+     "git_sha1": "03df33e36d6a4b4ff168573ae21efa639b0c56d5",
+     "size": 1939448,
+     "note": 69,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_C5_v3_rr1_Main.wav",
+     "git_sha1": "24bff822ab08e812380f637778cc9ee1b625399a",
+     "size": 1094952,
+     "note": 72,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Vibraphone/Hard Mallets/Vibes_hard_E5_v3_rr1_Main.wav",
+     "git_sha1": "98872b68e3b016420faa71d8c3f117a898c9ae1e",
+     "size": 1467172,
+     "note": 76,
+     "vel": [
+      0,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vcsl-marimba",
+   "source": "https://github.com/sgossner/VCSL",
+   "commit": "c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e",
+   "licence": "CC0-1.0",
+   "licence_quote": "and for any purposes, including without limitation commercial purposes.",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F1_med_01.wav",
+     "git_sha1": "21df93be7915e72dabe9189001262c62b436355f",
+     "size": 1027292,
+     "note": 29,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C2_med_01.wav",
+     "git_sha1": "8d18c94d5945941574e44563a60908d9f8c11430",
+     "size": 1785050,
+     "note": 36,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G2_med_01.wav",
+     "git_sha1": "f27193e84ff36d8c16ddc4a59bc89acc79d426ae",
+     "size": 1513244,
+     "note": 43,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_B2_med_01.wav",
+     "git_sha1": "c936311bb0a094e7a6625f3c8a4914754242583d",
+     "size": 1495616,
+     "note": 47,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F3_med_01.wav",
+     "git_sha1": "2c74c56eba169268ec3e74bc2de31fb282716a58",
+     "size": 1382924,
+     "note": 53,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C4_med_01.wav",
+     "git_sha1": "85c657dd0a8f58808efad5e9184d5b9124285512",
+     "size": 655244,
+     "note": 60,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G4_med_01.wav",
+     "git_sha1": "be84c27de4fea671b78c82591aa6d6f98c06619e",
+     "size": 580262,
+     "note": 67,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_B4_med_01.wav",
+     "git_sha1": "9393bece679f9d698a8b8acf81be463c07247576",
+     "size": 433802,
+     "note": 71,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F5_med_01.wav",
+     "git_sha1": "215d4dfb83636c70a5997ac65cb3acf201c53dc5",
+     "size": 566924,
+     "note": 77,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C6_med_01.wav",
+     "git_sha1": "f5c95434f42f07fecdbd4f3e3a6a737d81cdd45a",
+     "size": 451844,
+     "note": 84,
+     "vel": [
+      0,
+      63
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F1_loud_01.wav",
+     "git_sha1": "cc5b73c4c0b50ca64a0c484f17d37e825957de50",
+     "size": 972392,
+     "note": 29,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C2_loud_01.wav",
+     "git_sha1": "155e036d3aa04fba9d3389e2cdf3accec9842e01",
+     "size": 2236004,
+     "note": 36,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G2_loud_01.wav",
+     "git_sha1": "b73a4b8febfdeb8e86ab13edabd1e663caebd378",
+     "size": 1855448,
+     "note": 43,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_B2_loud_01.wav",
+     "git_sha1": "e3b63f301191c679cea1eaa61a99d3baa9c3fbfe",
+     "size": 1585778,
+     "note": 47,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F3_loud_01.wav",
+     "git_sha1": "646d1490ead56eaf0db10c96ac352c80d3275736",
+     "size": 1589876,
+     "note": 53,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C4_loud_01.wav",
+     "git_sha1": "fe3ec22b99ed4afdd007d0107d925669e7e1d4c9",
+     "size": 1016564,
+     "note": 60,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_G4_loud_01.wav",
+     "git_sha1": "3c6ea81532f6924112581140e8f530e6cc45739d",
+     "size": 800102,
+     "note": 67,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_B4_loud_01.wav",
+     "git_sha1": "cf36d9cae6614613c17069accbaa46594846c113",
+     "size": 694454,
+     "note": 71,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_F5_loud_01.wav",
+     "git_sha1": "fadca10c6d332115fa9f586cc37245a008a8a859",
+     "size": 551306,
+     "note": 77,
+     "vel": [
+      64,
+      127
+     ]
+    },
+    {
+     "path": "Idiophones/Struck Idiophones/Marimba/Marimba_hit_Outrigger_C6_loud_01.wav",
+     "git_sha1": "aa3b9670477cf7d6825cb9e6e3c9446acffa95ee",
+     "size": 472142,
+     "note": 84,
+     "vel": [
+      64,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "vsco-upright-piano",
+   "source": "https://github.com/sgossner/VSCO-2-CE",
+   "commit": "440300901dfe9275fd84e0b7763af1f8443ae62e",
+   "licence": "CC0-1.0",
+   "licence_quote": "purposes, including without limitation commercial purposes. These owners may",
+   "kind": "fetch",
+   "commercial": true,
+   "files": [
+    {
+     "path": "Keys/Upright Nr1/UR1_C1_mf_RR2.wav",
+     "git_sha1": "d61c9698c4c1cf306b7e440ead630a6f3495680e",
+     "size": 3392398,
+     "note": 24,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G1_mf_RR1.wav",
+     "git_sha1": "1aca0fb64ba6c1bb477f4c46bb3a6dddf84d09f3",
+     "size": 3191510,
+     "note": 31,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_C2_mf_RR1.wav",
+     "git_sha1": "67c55237469793ee90fa9dd6457fd51a714f9fe1",
+     "size": 2384234,
+     "note": 36,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G2_mf_RR1.wav",
+     "git_sha1": "7afcc4d73739bbc52ed313a0f21dae36970039b2",
+     "size": 2429878,
+     "note": 43,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_C3_mf_RR1.wav",
+     "git_sha1": "622047ce32400cd99c0193f245955e3572d85a1b",
+     "size": 2150126,
+     "note": 48,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G3_mf_RR1.wav",
+     "git_sha1": "85581601bc6c00f010fdffc7ac24ea53c4a19147",
+     "size": 2602206,
+     "note": 55,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_C4_mf_RR1.wav",
+     "git_sha1": "99c511c4d2d3fd91b68cdf530fa043e2b03f076f",
+     "size": 2495426,
+     "note": 60,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G4_mf_RR1.wav",
+     "git_sha1": "b6727511ac816dd81e2e4f2dcc4d1c7b3349efcd",
+     "size": 2240934,
+     "note": 67,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_C5_mf_RR1.wav",
+     "git_sha1": "b0079bd7ec568998e65df839d5387fb56e264b7d",
+     "size": 1905930,
+     "note": 72,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G5_mf_RR1.wav",
+     "git_sha1": "b6e139fb26fa6b67ca931c5db8ad60d8beb075a8",
+     "size": 1665486,
+     "note": 79,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_C6_mf_RR1.wav",
+     "git_sha1": "2c3af039f8bcf9ead897dbb46f158fe6330088dd",
+     "size": 1018802,
+     "note": 84,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G6_mf_RR1.wav",
+     "git_sha1": "81108c59a76bee0a6e890e0e110e42edd1d29aa2",
+     "size": 860698,
+     "note": 91,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_C7_mf_RR1.wav",
+     "git_sha1": "bdadd24805e085c03f6f6323dd03b464dc5a9181",
+     "size": 469466,
+     "note": 96,
+     "vel": [
+      0,
+      127
+     ]
+    },
+    {
+     "path": "Keys/Upright Nr1/UR1_G7_mf_RR1.wav",
+     "git_sha1": "ccd334879367a96ef88f239a05a6b14167055eb1",
+     "size": 369990,
+     "note": 103,
+     "vel": [
+      0,
+      127
+     ]
+    }
+   ]
+  },
+  {
+   "name": "philharmonia",
+   "source": "https://philharmonia.co.uk/resources/sound-samples/",
+   "licence": "Philharmonia sound samples terms",
+   "licence_quote": "must not be sold or made available 'as is'",
+   "kind": "local_only",
+   "commercial": false,
+   "note": "placed by hand into work/sounds/philharmonia/, never redistributed",
+   "files": []
+  },
+  {
+   "name": "iowa-mis",
+   "source": "https://theremin.music.uiowa.edu/MIS.html",
+   "licence": "University of Iowa MIS terms",
+   "licence_quote": "may be downloaded and used for any projects, without restrictions.",
+   "kind": "local_only",
+   "commercial": false,
+   "note": "placed by hand into work/sounds/iowa-mis/, never redistributed",
+   "files": []
+  }
+ ]
+}

@@ -4,6 +4,7 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from redline.cli.beat import _beat
 from redline.cli.lyrics import (
     _lyrics_check,
     _lyrics_edit,
@@ -63,6 +64,10 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
     }
     if args.command in sound:
         return sound[args.command](args, separator)
+    if args.command == "beat":
+        done = _beat(args)
+        if done is not None:
+            return done
     if args.command == "lyrics" and args.lyrics_command in lyrics:
         return lyrics[args.lyrics_command](args)
     parser.print_help()

@@ -71,13 +71,16 @@ def test_every_module_imports_first_in_a_fresh_interpreter():
 
 def test_core_imports_nothing_above_it():
     above = tuple(
-        f"redline.{p}" for p in ("vocal", "master", "engine", "studio", "cli", "lyrics", "measure")
+        f"redline.{p}"
+        for p in ("vocal", "master", "engine", "studio", "cli", "lyrics", "measure", "beat")
     )
     assert violations("core", above) == []
 
 
 def test_the_engine_imports_no_app_module():
-    apps = tuple(f"redline.{p}" for p in ("studio", "cli", "vocal.rounds", "master.run", "output"))
+    apps = tuple(
+        f"redline.{p}" for p in ("studio", "cli", "vocal.rounds", "master.run", "output", "beat")
+    )
     assert violations("engine", apps) == []
 
 
