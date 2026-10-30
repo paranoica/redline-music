@@ -21,7 +21,7 @@ cargo build --release --locked --manifest-path "$workspace/Cargo.toml" \
 mkdir -p "$out"
 # A fixed heap, so the worklet's views of memory never go stale. At 48 kHz a usual rack takes
 # a few MB, the heaviest effect (unison) 10 MB, a rack of the 32 heaviest about 55 MB; at
-# 192 kHz four times that. 128 MB holds the studio's racks plus one rebuilt beside its old
+# 192 kHz four times that. 256 MB holds the studio's racks plus one rebuilt beside its old
 # self. Running out aborts the module (Rust cannot fail an allocation softly), so the page
 # must keep within it. Rust's std unwinds with wasm exceptions, hence -fwasm-exceptions.
 em++ "$workspace/target/wasm32-unknown-emscripten/release/libredline_dsp_wasm.a" \
@@ -29,7 +29,7 @@ em++ "$workspace/target/wasm32-unknown-emscripten/release/libredline_dsp_wasm.a"
     -O3 -fwasm-exceptions \
     -sMODULARIZE -sEXPORT_ES6 -sEXPORT_NAME=createRedlineDsp \
     -sENVIRONMENT=web,worker,node \
-    -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=128MB -sSTACK_SIZE=1MB \
+    -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=256MB -sSTACK_SIZE=1MB \
     -sFILESYSTEM=0 \
     -sEXPORTED_FUNCTIONS=_rack_new,_rack_free,_rack_latency,_rack_process,_rack_set,_effects_json,_rack_error,_malloc,_free \
     -sEXPORTED_RUNTIME_METHODS=HEAPF32,HEAPU8,UTF8ToString
