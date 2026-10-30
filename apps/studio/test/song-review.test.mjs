@@ -224,3 +224,15 @@ test("the host says whether the live surface holds unsaved work, whatever its ki
   dirty = true;
   assert.equal(host.dirty(), true);
 });
+
+test("turning the page's keyboard on leaves a parked surface out of it until placed", async () => {
+  globalThis.document = fakeDocument();
+  const states = [];
+  const host = new SurfaceHost(document.createElement("div"));
+  await host.show("beat", async () => ({ dispose() {}, setActive: (on) => states.push(on), hold() {} }), document.createElement("div"), "/b", "t");
+  host.park();
+  host.setActive(true);
+  assert.equal(states.at(-1), false);
+  host.place("beat", document.createElement("div"));
+  assert.equal(states.at(-1), true);
+});

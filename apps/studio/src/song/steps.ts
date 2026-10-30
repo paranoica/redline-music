@@ -284,7 +284,8 @@ export class SurfaceHost {
 
   setActive(on: boolean): void {
     this.#active = on;
-    this.#current?.mounted.setActive?.(on);
+    // a parked surface gets the keyboard back when it is placed
+    if (!this.#parked) this.#current?.mounted.setActive?.(on);
   }
 
   async dispose(): Promise<void> {
