@@ -662,3 +662,45 @@ for (const [what, from, to, want] of [
     for (const i of [400, 4000]) assert.ok(Math.abs(left(out, i) - want) < want * 0.02, `${left(out, i)} at ${i}`);
   });
 }
+
+const lookahead = (ms) => rack({ effect: "limiter", params: { ceiling: 0, lookahead: ms } });
+// masters of no latency, of 130 frames and of 240 frames
+const LATENCIES = [
+  [0, rack()],
+  [130, lookahead(130 / 48)],
+  [240, lookahead(5)],
+];
+const masterOf = (latency) => LATENCIES.find(([l]) => l === latency)[1];
+
+test("near the track's start the first frame heard after a seek is the frame sought, for any latency", () => {
+  const frames = 4 * RATE;
+  for (const [latency, master] of LATENCIES) {
+    for (const to of [0, 50, 1000]) {
+      const stopped = setup({ frames, vocal: indexed(frames), racks: { master } });
+      assert.ok(stopped.posted.some((m) => m.type === "rack" && m.track === "master" && m.latency === latency));
+      stopped.engine.handle({ type: "seek", frame: to });
+      stopped.engine.handle({ type: "play", playing: true });
+      assert.equal(firstHeard(stopped.engine, frames), to, `latency ${latency}, stopped, seek to ${to}`);
+      const playing = setup({ frames, vocal: indexed(frames), racks: { master } });
+      playing.engine.handle({ type: "play", playing: true });
+      run(playing.engine, 4096);
+      playing.engine.handle({ type: "seek", frame: to });
+      assert.equal(firstHeard(playing.engine, frames, true), to, `latency ${latency}, playing, seek to ${to}`);
+    }
+  }
+});
+
+test("a rack of another latency built between a paused seek and the play keeps the frame sought", () => {
+  const frames = 4 * RATE;
+  for (const [from] of LATENCIES) {
+    for (const [to, master] of LATENCIES) {
+      if (from === to) continue;
+      const { engine, posted } = setup({ frames, vocal: indexed(frames), racks: { master: masterOf(from) } });
+      engine.handle({ type: "seek", frame: 30000 });
+      engine.handle({ type: "rack", track: "master", version: 2, json: master, lanes: [] });
+      assert.ok(posted.some((m) => m.type === "rack" && m.version === 2 && m.latency === to));
+      engine.handle({ type: "play", playing: true });
+      assert.equal(firstHeard(engine, frames), 30000, `latency ${from} -> ${to}`);
+    }
+  }
+});

@@ -416,9 +416,7 @@ export class Engine {
     const frames = this.#stems?.frames ?? 0;
     const to = intoLoop(Math.round(frame), this.#loop.on, this.#loop);
     const at = Math.max(0, Math.min(to, Math.max(0, frames - 1)));
-    // the hold is let go a whole block at a time, so it ends on a block's edge
-    const want = Math.min(WARM_MAX, this.#total + WARM_EXTRA);
-    const preroll = Math.min(at, Math.ceil((this.#total + want) / BLOCK) * BLOCK - this.#total);
+    const preroll = Math.min(at, WARM_MAX, this.#total + WARM_EXTRA);
     this.#read = at - preroll;
     for (const d of [this.#pad.vocal, this.#pad.beat, this.#late.original, this.#late.render]) {
       const keep = d.delay;
@@ -647,14 +645,14 @@ export class Engine {
     this.#pad.vocal.process(views.vocal, n);
     this.#pad.beat.process(views.beat, n);
     const L = this.#levels;
-    // a pre-roll is not heard, so it is not metered either
-    const metered = this.#hold <= 0;
+    // the first frame of the block past the hold: a pre-roll is not heard, so it is not metered either
+    const heardFrom = Math.min(n, this.#hold);
     for (let i = 0; i < 2 * n; i++) {
       const a = heap[v + i] as number;
       const c = heap[b + i] as number;
       const s = a + c;
       heap[x + i] = s;
-      if (!metered) continue;
+      if (i < 2 * heardFrom) continue;
       L.vocal.peak = Math.max(L.vocal.peak, Math.abs(a));
       L.vocal.sum += a * a;
       L.beat.peak = Math.max(L.beat.peak, Math.abs(c));
@@ -665,7 +663,8 @@ export class Engine {
     this.#track(this.#racks.master, mix, 0, n, start);
     heap = this.#heap();
     const result = this.#blockViews(heap, n, v, b, x).mix;
-    if (metered) this.#meter.push(result, n);
+    if (heardFrom === 0) this.#meter.push(result, n);
+    else if (heardFrom < n) this.#meter.push(result.subarray(2 * heardFrom), n - heardFrom);
     this.#late.original.process(this.#original, n);
     this.#late.render.process(this.#renderBlock, n);
 
@@ -673,10 +672,10 @@ export class Engine {
     let refAt = ref ? ref.start + mod(this.#heard(start) - (this.#loop.on ? this.#loop.start : 0), ref.length) : 0;
     const envStep = 1 / DIP;
     const gainStep = 1 / (AB_RAMP_S * this.#rate);
-    const target = this.#want && this.#jobs.length === 0 && this.#hold <= 0 ? 1 : 0;
+    const openFrom = this.#want && this.#jobs.length === 0 ? heardFrom : n;
     this.#hold = Math.max(0, this.#hold - n);
     for (let i = 0; i < n; i++) {
-      this.#env = approach(this.#env, target, envStep);
+      this.#env = approach(this.#env, i >= openFrom ? 1 : 0, envStep);
       for (let k = 0; k < SOURCES.length; k++) {
         const s = SOURCES[k] as Source;
         this.#gain[s] = approach(this.#gain[s], this.#target[s], gainStep);
@@ -684,7 +683,7 @@ export class Engine {
       const g = this.#gain;
       for (let c = 0; c < 2; c++) {
         const r = result[2 * i + c] as number;
-        if (metered) {
+        if (i >= heardFrom) {
           L.master.peak = Math.max(L.master.peak, Math.abs(r));
           L.master.sum += r * r;
         }
@@ -700,7 +699,7 @@ export class Engine {
       if (ref && ++refAt >= ref.start + ref.length) refAt = ref.start;
     }
 
-    if (metered) this.#window += n;
+    this.#window += n - heardFrom;
     if (this.#window >= this.#rate / LEVELS_PER_S) this.#report();
     // the fade out starts on the next block, which is silent: this one still has the end in it
     if (!this.#loop.on && this.#read >= last && !this.#ending && this.#seeks === 0) {
