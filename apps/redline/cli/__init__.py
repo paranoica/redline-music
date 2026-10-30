@@ -13,7 +13,8 @@ from redline.cli.lyrics import (
     _lyrics_suno,
     _lyrics_write,
 )
-from redline.cli.parser import build_parser, check_studio
+from redline.cli.parser import build_parser, check_record, check_studio
+from redline.cli.record import _record
 from redline.cli.sound import (
     _effects,
     _master,
@@ -37,6 +38,8 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
     args = parser.parse_args(argv)
     if args.command == "studio":
         check_studio(parser, args)
+    if args.command == "record":
+        check_record(parser, args)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     sound = {
         "measure": _measure,
@@ -46,6 +49,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         "studio": _studio,
         "voice": _voice,
         "takes": _takes,
+        "record": _record,
         "effects": _effects,
     }
     lyrics = {

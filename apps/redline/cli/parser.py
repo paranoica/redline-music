@@ -126,6 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="add each take's distance to the references after the auto search (~40 s a take)",
     )
     takes.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+    _record(commands)
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
     )
@@ -220,6 +221,50 @@ def build_parser() -> argparse.ArgumentParser:
         "--stress", action="store_true", help="find rhymes by stress (needs the stress extra)"
     )
     return parser
+
+
+def _record(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    record = commands.add_parser(
+        "record",
+        help="record takes over a beat, hearing yourself through the vocal rack (needs JACK)",
+    )
+    record.add_argument("--beat", type=Path, help="the beat to record over")
+    record.add_argument("--song", help="the song's name: takes go to <takes>/<song>/take-NN.wav")
+    record.add_argument(
+        "--ref", type=Path, nargs="+", help="references, to analyse the last take for the monitor"
+    )
+    picked = record.add_mutually_exclusive_group()
+    picked.add_argument("--settings", type=Path, help="settings saved from the studio")
+    picked.add_argument("--preset", help="a preset saved in the studio, by its name")
+    record.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="measure the round trip with a sweep through the singer's path instead",
+    )
+    record.add_argument(
+        "--mode",
+        choices=("cup", "loopback", "speakers"),
+        help="with --calibrate: a headphone cup at the mic (default), a cable, or speakers",
+    )
+    record.add_argument(
+        "--takes", type=Path, default=Path("input/takes"), help="the folder of the songs' takes"
+    )
+    record.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+
+
+def check_record(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse a session without --beat and --song, and mixing them with --calibrate."""
+    if args.calibrate:
+        if args.beat is not None or args.song is not None:
+            parser.error("--calibrate takes no --beat or --song")
+        return
+    if args.beat is None or args.song is None:
+        parser.error("record needs --beat and --song (or --calibrate)")
+    if args.mode is not None:
+        parser.error("--mode goes with --calibrate")
+    song = args.song
+    if not song.strip() or song in (".", "..") or "/" in song or "\\" in song:
+        parser.error(f"--song is a folder name, not {song!r}")
 
 
 def _classic(command: argparse.ArgumentParser) -> None:

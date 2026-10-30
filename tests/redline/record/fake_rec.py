@@ -4,7 +4,9 @@ Configured through the environment:
 FAKE_REC_RATE      the graph rate it reports (default 48000)
 FAKE_REC_FAIL      "nojack": say JACK is missing and exit 2 before the startup line
 FAKE_REC_DROPOUTS  JSON list of dropouts put in every take report
-FAKE_REC_TONE      "sweep:<frames>": a stopped take holds the beat delayed by that many frames
+FAKE_REC_TONE      "sweep:<frames>": a stopped take holds the beat delayed by that many frames;
+                   "silence": it holds zeros
+FAKE_REC_QUANTUM   the quantum it reports instead of the one asked for
 FAKE_REC_TAKE_S    seconds of the 220 Hz sine at 0.1 a take holds otherwise (default 0.5)
 """
 
@@ -39,6 +41,8 @@ class Fake:
             out[delay : delay + len(played)] = 0.5 * played
             return out
         seconds = float(os.environ.get("FAKE_REC_TAKE_S", "0.5"))
+        if tone == "silence":
+            return np.zeros(int(seconds * self.rate), dtype=np.float32)
         t = np.arange(int(seconds * self.rate)) / self.rate
         return (0.1 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
 
@@ -98,11 +102,12 @@ def main():
         print("redline-rec: cannot connect to JACK: is PipeWire running?", file=sys.stderr)
         sys.exit(2)
     rate = int(os.environ.get("FAKE_REC_RATE", "48000"))
+    quantum = int(os.environ.get("FAKE_REC_QUANTUM", args.quantum))
     reply(
         ready=True,
         rate=rate,
-        quantum=args.quantum,
-        latency={"capture": [args.quantum, args.quantum], "playback": [128, 256]},
+        quantum=quantum,
+        latency={"capture": [quantum, quantum], "playback": [128, 256]},
         devices=["fake:capture_1", "fake:playback_1"],
         beat_rate=sf.info(args.beat).samplerate,
     )

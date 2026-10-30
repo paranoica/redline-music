@@ -118,16 +118,16 @@ def recorded_lufs(path: Path) -> float:
     return integrated_lufs(decoded.samples, decoded.rate)
 
 
-def _record_for(engine: EngineProcess, path: Path, seconds: float, wait: Wait) -> Path:
+def _record_for(engine: EngineProcess, path: Path, seconds: float, wait: Wait | None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     engine.start(path.resolve(), 0)
-    wait(seconds)
+    (wait or time.sleep)(seconds)
     return engine.stop().path
 
 
 def level_check(
-    engine: EngineProcess, folder: Path, seconds: float = LEVEL_CHECK_S, wait: Wait = time.sleep
+    engine: EngineProcess, folder: Path, seconds: float = LEVEL_CHECK_S, wait: Wait | None = None
 ) -> float:
     """Record seconds of the mic over the beat and return its loudness; the file is removed."""
     path = _record_for(engine, folder / "level-check.wav", seconds, wait)
@@ -154,7 +154,7 @@ def monitor_numbers(
     separator: "Separator | None",
     settings: Settings,
     say: Callable[[str], None] = print,
-    wait: Wait = time.sleep,
+    wait: Wait | None = None,
 ) -> tuple[dict[str, Any], str]:
     """The numbers the monitor rack is built with, and where they came from.
 
@@ -193,7 +193,7 @@ def calibrate(
     work: Path,
     mode: str,
     quantum: int = REQUESTED_QUANTUM,
-    wait: Wait = time.sleep,
+    wait: Wait | None = None,
 ) -> tuple[LatencyKey, Delay]:
     """Play a sweep through the singer's path, find the round trip and store it under its key.
 
