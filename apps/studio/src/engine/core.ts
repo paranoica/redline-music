@@ -616,11 +616,14 @@ export class Engine {
     this.#pad.beat.process(heap.subarray(b, b + 2 * n), n);
     const x = mix >> 2;
     const L = this.#levels;
+    // a pre-roll is not heard, so it is not metered either
+    const metered = this.#hold <= 0;
     for (let i = 0; i < 2 * n; i++) {
       const a = heap[v + i] as number;
       const c = heap[b + i] as number;
       const s = a + c;
       heap[x + i] = s;
+      if (!metered) continue;
       L.vocal.peak = Math.max(L.vocal.peak, Math.abs(a));
       L.vocal.sum += a * a;
       L.beat.peak = Math.max(L.beat.peak, Math.abs(c));
@@ -631,7 +634,7 @@ export class Engine {
     this.#track(this.#racks.master, mix, 0, n, start);
     heap = this.#heap();
     const result = heap.subarray(x, x + 2 * n);
-    this.#meter.push(result, n);
+    if (metered) this.#meter.push(result, n);
     this.#late.original.process(this.#original, n);
     this.#late.render.process(this.#renderBlock, n);
 
@@ -649,8 +652,10 @@ export class Engine {
       const g = this.#gain;
       for (let c = 0; c < 2; c++) {
         const r = result[2 * i + c] as number;
-        L.master.peak = Math.max(L.master.peak, Math.abs(r));
-        L.master.sum += r * r;
+        if (metered) {
+          L.master.peak = Math.max(L.master.peak, Math.abs(r));
+          L.master.sum += r * r;
+        }
         const refSample = ref ? (ref.data[2 * refAt + c] ?? 0) : 0;
         const out =
           this.#env *
@@ -663,7 +668,7 @@ export class Engine {
       if (ref && ++refAt >= ref.start + ref.length) refAt = ref.start;
     }
 
-    this.#window += n;
+    if (metered) this.#window += n;
     if (this.#window >= this.#rate / LEVELS_PER_S) this.#report();
     // the fade out starts on the next block, which is silent: this one still has the end in it
     if (!this.#loop.on && this.#read >= last && !this.#ending && this.#seeks === 0) {

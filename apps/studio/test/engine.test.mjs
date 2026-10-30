@@ -611,3 +611,35 @@ test("through the pre-roll after a seek the playhead stays on the frame sought, 
   assert.ok(after.some((f) => f >= 96000), `${after}`);
   assert.ok(after.every((f) => f < 9600 + RATE / 4 || f >= 96000), `${after}`);
 });
+
+test("a pre-roll is not metered: no level, loudness or gain reduction comes from before the spot", () => {
+  const frames = 4 * RATE;
+  // loud everywhere but just after the spot sought
+  const loud = (n) => (n >= RATE && n < RATE + 24000 ? [0, 0] : [0.5 * Math.sin(n / 10), 0.5 * Math.sin(n / 10)]);
+  const played = (racks) => {
+    const { engine, posted } = setup({ frames, vocal: stereo(frames, loud), racks });
+    engine.handle({ type: "seek", frame: RATE });
+    engine.handle({ type: "play", playing: true });
+    run(engine, 9600);
+    const early = posted.filter((m) => m.type === "levels");
+    assert.ok(early.length > 0);
+    run(engine, RATE / 2);
+    return { early, later: posted.filter((m) => m.type === "levels").at(-1) };
+  };
+
+  const bare = played({});
+  for (const m of bare.early) {
+    assert.equal(m.vocal.peak, 0, `vocal at ${m.frame}`);
+    assert.equal(m.master.peak, 0, `master at ${m.frame}`);
+    assert.ok(!Number.isFinite(m.lufs), `loudness ${m.lufs} at ${m.frame}`);
+  }
+  assert.ok(bare.later.vocal.peak > 0.49 && Number.isFinite(bare.later.lufs), JSON.stringify(bare.later));
+
+  // the master's own tail of what came before the spot is heard after it, so only its input is checked
+  const mastered = played({ master: rack({ effect: "master", params: { gain: 12, trim: 0, ceiling: -1 } }) });
+  for (const m of mastered.early) {
+    assert.equal(m.vocal.peak, 0, `vocal at ${m.frame}`);
+    assert.equal(m.master.gr, 0, `gain reduction at ${m.frame}`);
+  }
+  assert.ok(mastered.later.master.gr > 5, JSON.stringify(mastered.later));
+});
