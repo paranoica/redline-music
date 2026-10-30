@@ -6,7 +6,8 @@
 //! - `{"cmd": "stop"}`: finish the take; the reply carries its [`TakeReport`].
 //! - `{"cmd": "set_rack", "rack": {...}, "budget": N}`: a new monitor rack, its effects
 //!   switched off from the end until its latency fits `budget` frames, when given.
-//! - `{"cmd": "meters"}`: peaks since the last call, xruns, overflows, the take's length.
+//! - `{"cmd": "meters"}`: peaks since the last call, xruns, overflows, frames since the take
+//!   started (the round trip included), the monitor rack's latency.
 //! - `{"cmd": "quit"}`.
 
 use serde::{Deserialize, Serialize};

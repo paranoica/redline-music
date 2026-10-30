@@ -3,6 +3,7 @@
 //! writer and the control side live here, so they can be tested with a fake device.
 
 pub mod budget;
+pub mod engine;
 pub mod protocol;
 pub mod ring;
 pub mod wav;
