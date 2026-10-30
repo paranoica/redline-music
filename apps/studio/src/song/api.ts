@@ -169,6 +169,16 @@ export class ApiError extends Error {
   }
 }
 
+// the song a 412 carries: song and stations sit at the top level of its body
+export function staleSong(body: Record<string, unknown>): SongReply | null {
+  const song = body["song"];
+  const stations = body["stations"];
+  if (song && typeof song === "object" && stations && typeof stations === "object") {
+    return { song: song as SongFile, stations: stations as Stations };
+  }
+  return null;
+}
+
 export interface SongApiOptions {
   base?: string | undefined;
   token: string;
@@ -208,7 +218,8 @@ export function createSongApi({ base, token }: SongApiOptions) {
     recCalibrate: (mode: "cup" | "loopback" | "speakers") => json<RecReply>(call("POST", "/rec/calibrate", { mode })),
     recClose: () => json<RecReply>(call("POST", "/rec/close", {})),
     takes: () => json<{ ranking: Ranking | null; job: Job | null }>(call("GET", "/takes")),
-    takeAudio: async (name: string): Promise<Blob> => (await call("GET", `/takes/audio?name=${encodeURIComponent(name)}`)).blob(),
+    takeAudio: async (name: string, withBeat = false): Promise<Blob> =>
+      (await call("GET", `/takes/audio?name=${encodeURIComponent(name)}${withBeat ? "&with=beat" : ""}`)).blob(),
     jobs: async (): Promise<Job[]> => ((await json<{ jobs: Job[] }>(call("GET", "/jobs"))).jobs),
     startJob: (kind: Exclude<JobKind, "beat_render">, seed?: number) =>
       json<unknown>(call("POST", "/jobs/start", seed === undefined ? { kind } : { kind, seed })),

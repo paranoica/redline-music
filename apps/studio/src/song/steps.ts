@@ -1,7 +1,7 @@
 // What the stations share: the page's context, the missing-input card, job words, and the
 // host that keeps one audio surface mounted at a time.
 
-import type { Job, JobKind, SongApi, SongChange, SongReply } from "./api.ts";
+import type { ApiError, Job, JobKind, SongApi, SongChange, SongReply } from "./api.ts";
 import type { StationId } from "./rail.ts";
 import type { Scope } from "../core/lifecycle.ts";
 import type { Mount, Mounted } from "../core/mount.ts";
@@ -63,6 +63,33 @@ export function jobOf(jobs: readonly Job[], kind: JobKind): Job | undefined {
 export function runningText(jobs: readonly Job[]): string {
   const live = jobs.filter(jobActive).map((j) => `${JOB_NAMES[j.kind]} · ${JOB_STATE[j.state]}`);
   return live.length ? live.join(", ") : "ничего не идёт";
+}
+
+// the kinds whose job has finished between two reads of the job list
+export function finishedKinds(before: readonly Job[], next: readonly Job[]): JobKind[] {
+  const done: JobKind[] = [];
+  for (const job of next) {
+    if (jobActive(job) || job.finished === null) continue;
+    const was = before.find((j) => j.kind === job.kind);
+    if (!was || jobActive(was) || was.finished !== job.finished) done.push(job.kind);
+  }
+  return done;
+}
+
+const REFUSALS: Record<string, string> = {
+  take_running: "Идёт дубль: дождись конца.",
+  no_voice: "Голос песни не выбран: выбери дубль на шаге «Дубли».",
+  no_takes: "Дублей нет: сначала запиши хотя бы один.",
+  no_beat_seed: "Бит взят из файла, у него нет seed: редактировать его здесь нельзя.",
+  not_ready: "Движок записи ещё не готов.",
+  out_of_sync: "Движок записи не отвечает: перезапусти его на шаге «Запись».",
+  closed: "Движок записи закрыт: открой его на шаге «Запись».",
+};
+
+// what a refusal from the server says to the person, by its code
+export function refusalText(error: Pick<ApiError, "code" | "message">, jobs: readonly Job[]): string {
+  if (error.code === "busy") return `Сейчас занято: ${runningText(jobs)}. Подожди, пока закончится.`;
+  return REFUSALS[error.code] ?? (error.message || "Не получилось.");
 }
 
 export function copyButton(text: () => string, label = "Скопировать"): HTMLButtonElement {
@@ -148,15 +175,22 @@ export function deskNote(what: string, tail: string): HTMLElement {
   return h("p", { class: "desk-note" }, h("b", {}, `${what} — на компьютере.`), ` Поверхности нужно от ${DESK_MIN} пикселей по ширине. ${tail}`);
 }
 
-// one audio surface at a time: mounting one disposes the other
+// one audio surface at a time: mounting one disposes the other. A surface the page leaves is
+// parked, still mounted, and comes back with place(); only the other kind replaces it.
 export class SurfaceHost {
   #current: { kind: string; mounted: Mounted; root: HTMLElement } | null = null;
   #pending: { kind: string; root: HTMLElement } | null = null;
   #token = 0;
   #active = true;
+  #chain: Promise<void> = Promise.resolve();
+  #holder: HTMLElement | null;
+
+  constructor(holder?: HTMLElement) {
+    this.#holder = holder ?? null;
+  }
 
   get kind(): string | null {
-    return this.#current?.kind ?? null;
+    return this.#current?.kind ?? this.#pending?.kind ?? null;
   }
 
   // a station redraws into a new slot: the surface mounted (or mounting) for it moves there
@@ -167,6 +201,22 @@ export class SurfaceHost {
     return true;
   }
 
+  // the station is left: the surface stays alive out of sight and out of the keyboard
+  park(): void {
+    const live = this.#current ?? this.#pending;
+    if (!live) return;
+    this.#current?.mounted.setActive?.(false);
+    this.#holder ??= h("div", { hidden: true });
+    this.#holder.append(live.root);
+  }
+
+  // the kind of the live surface when it would be lost by mounting `kind` and holds unsaved work
+  unsavedFor(kind: string): string | null {
+    const live = this.#current;
+    if (!live || live.kind === kind) return null;
+    return live.mounted.dirty?.() ? live.kind : null;
+  }
+
   async show(kind: string, mount: Mount, slot: HTMLElement, base: string, token: string): Promise<void> {
     const mine = ++this.#token;
     const previous = this.#current;
@@ -175,26 +225,34 @@ export class SurfaceHost {
     slot.replaceChildren(root);
     // known before any wait, so a redraw meanwhile places it instead of mounting a second
     this.#pending = { kind, root };
-    if (previous) {
-      await previous.mounted.dispose();
-      previous.root.remove();
-    }
-    if (mine !== this.#token) {
-      root.remove();
-      return;
-    }
-    let mounted: Mounted;
-    try {
-      mounted = await mount(root, { base, token, active: this.#active });
-    } finally {
-      if (mine === this.#token) this.#pending = null;
-    }
-    if (mine !== this.#token) {
-      await mounted.dispose();
-      root.remove();
-      return;
-    }
-    this.#current = { kind, mounted, root };
+    const before = this.#chain;
+    const work = (async (): Promise<void> => {
+      // the surface before this one, mounting or mounted, is gone before the next one starts
+      await before;
+      if (previous) {
+        await previous.mounted.dispose();
+        previous.root.remove();
+      }
+      if (mine !== this.#token) {
+        root.remove();
+        return;
+      }
+      let mounted: Mounted;
+      try {
+        mounted = await mount(root, { base, token, active: this.#active });
+      } finally {
+        if (mine === this.#token) this.#pending = null;
+      }
+      if (mine !== this.#token) {
+        await mounted.dispose();
+        root.remove();
+        return;
+      }
+      this.#current = { kind, mounted, root };
+      mounted.setActive?.(this.#active);
+    })();
+    this.#chain = work.catch(() => {});
+    return work;
   }
 
   load(kind: string, settings: Record<string, unknown>, label: string): void {
@@ -211,8 +269,10 @@ export class SurfaceHost {
     this.#pending = null;
     const current = this.#current;
     this.#current = null;
-    if (!current) return;
-    await current.mounted.dispose();
-    current.root.remove();
+    if (current) {
+      await current.mounted.dispose();
+      current.root.remove();
+    }
+    await this.#chain;
   }
 }

@@ -152,7 +152,7 @@ export function createTakesStation(ctx: Ctx, lyric: StationView): StationView {
   let lastJob = "";
   let wait = 0;
   const player = new TakePlayer(
-    (name) => ctx.api.takeAudio(name),
+    (name) => ctx.api.takeAudio(name, true),
     () => {
       if (!closed) mark();
     },

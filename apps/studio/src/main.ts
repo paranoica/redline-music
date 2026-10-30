@@ -101,6 +101,8 @@ class Studio {
   readonly #undo: HTMLButtonElement;
   readonly #redo: HTMLButtonElement;
   #settings: Settings;
+  // the settings as last saved or loaded; the edits since are what leaving would lose
+  #savedKey: string;
   #numbers: Analysis;
   #presetList: Record<string, Settings>;
   #analysing: AbortController | null = null;
@@ -138,6 +140,7 @@ class Studio {
     this.#defaults = { version: 2, ...scalars, rack: [] };
     this.#settings = { ...this.#defaults, ...session.settings };
     this.#stale = staleKeys(session.stale);
+    this.#savedKey = JSON.stringify(this.#settings);
     this.#history = new History(this.#settings);
 
     this.#ui.track.textContent = session.track.name;
@@ -350,8 +353,13 @@ class Studio {
     }
   }
 
+  get dirty(): boolean {
+    return JSON.stringify(this.#settings) !== this.#savedKey;
+  }
+
   load(settings: Record<string, unknown>, label: string): void {
     this.#change({ ...structuredClone(this.#defaults), ...(structuredClone(settings) as Partial<Settings>) }, true);
+    this.#savedKey = JSON.stringify(this.#settings);
     this.#status(`Звучит ${label}.`, "done");
   }
 
@@ -651,8 +659,10 @@ class Studio {
   }
 
   async #save(): Promise<void> {
+    const saving = JSON.stringify(this.#settings);
     try {
       const { path } = await this.#api.save(this.#settings);
+      this.#savedKey = saving;
       this.#status(`Сохранено: ${path}`, "done");
     } catch (error) {
       this.#status(error instanceof Superseded ? "Сначала точный рендер с этими настройками, потом сохранение." : `Не сохранилось: ${message(error)}`, "error");
@@ -736,6 +746,7 @@ export const mount: Mount = async (root, options) => {
 
   return {
     setActive: (on) => keys.setActive(on && !scope.closed),
+    dirty: () => studio?.dirty ?? false,
     load: (settings, label) => {
       if (scope.closed) return;
       if (studio) studio.load(settings, label);

@@ -117,7 +117,7 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
     },
     dispose() {
       slot?.dispose();
-      void host.dispose();
+      host.park();
     },
   };
 }
@@ -271,7 +271,7 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
     dispose() {
       closed = true;
       slot?.dispose();
-      void host.dispose();
+      host.park();
     },
   };
 }
@@ -367,7 +367,7 @@ export function createRecStation(ctx: Ctx, lyric: StationView, hooks: RecHooks):
       latest = await ctx.api.recState();
       view.update(latest, performance.now());
       hooks.snapshot(latest);
-      void ctx.reload();
+      ctx.reload().catch(() => {});
     } catch {
       // the poll tries again
     }

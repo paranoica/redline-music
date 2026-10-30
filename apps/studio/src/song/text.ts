@@ -167,7 +167,13 @@ export function createTextStation(ctx: Ctx): StationView {
       }
     } finally {
       saving = false;
-      if (!closed) draw();
+      if (!closed) {
+        draw();
+        if (!editing) {
+          last = JSON.stringify(t());
+          load();
+        }
+      }
     }
   }
 

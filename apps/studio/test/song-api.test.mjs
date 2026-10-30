@@ -74,9 +74,9 @@ test("a custom base prefixes every path", async () => {
 });
 
 test("errors keep the status, code and body; 412 carries the song", async () => {
-  fake(412, { error: "stale", code: "stale", song: { song: { rev: 9 } } });
+  fake(412, { error: "stale", code: "stale", song: { name: "s", rev: 9 }, stations: {} });
   const api = createSongApi({ token: "t" });
-  await assert.rejects(api.setSong(1, { mix_variant: null }), (e) => e instanceof ApiError && e.status === 412 && e.code === "stale" && e.body.song.song.rev === 9);
+  await assert.rejects(api.setSong(1, { mix_variant: null }), (e) => e instanceof ApiError && e.status === 412 && e.code === "stale" && e.body.song.rev === 9);
 });
 
 test("variants: 404 before the first run is null; mix probe reads 409 no_voice", async () => {

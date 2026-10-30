@@ -71,6 +71,7 @@ test("a slot redrawn while the surface is still mounting gets it when it lands",
     const shown = host.show("mix", mount, first, "/api/mix", "t");
     const second = document.createElement("div");
     assert.equal(host.place("mix", second), true);
+    await new Promise((r) => setImmediate(r));
     release();
     await shown;
     assert.equal(second.children.length, 1);

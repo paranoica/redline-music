@@ -12,6 +12,8 @@ export interface Mounted {
   dispose(): Promise<void> | void;
   setActive?(on: boolean): void;
   // settings from outside the app (a mix variant), applied as a preset is
+  // edits that would be lost by disposing the app
+  dirty?(): boolean;
   load?(settings: Record<string, unknown>, label: string): void;
 }
 

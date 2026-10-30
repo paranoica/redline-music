@@ -220,6 +220,10 @@ class Editor {
     this.#wire();
   }
 
+  get dirty(): boolean {
+    return serialize(this.#score) !== this.#savedKey;
+  }
+
   dispose(): void {
     if (this.#renderUrl) URL.revokeObjectURL(this.#renderUrl);
     this.#renderUrl = null;
@@ -921,6 +925,7 @@ export const mount: Mount = async (root, options) => {
 
   return {
     setActive: (on) => keys.setActive(on && !scope.closed),
+    dirty: () => editor?.dirty ?? false,
     dispose: async () => {
       if (scope.closed) return;
       keys.setActive(false);

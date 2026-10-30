@@ -6,7 +6,7 @@ import { clock, takeLabel } from "./rail.ts";
 import { decimal } from "./variants.ts";
 import { h } from "../ui/dom.ts";
 
-export type RecPhase = "closed" | "opening" | "ready" | "live" | "stopping" | "failed" | "out_of_sync";
+export type RecPhase = "closed" | "opening" | "calibrating" | "ready" | "live" | "stopping" | "failed" | "out_of_sync";
 
 export const OPEN_STAGES = ["building", "launching", "relaunching", "analysing", "level_check", "ready"] as const;
 export type OpenStage = (typeof OPEN_STAGES)[number];
@@ -33,6 +33,7 @@ export function recPhase(s: RecSnapshot | null): RecPhase {
   if (s.recording) return "live";
   if (s.stage === "failed") return "failed";
   if (s.stage === "closed") return "closed";
+  if (s.stage === "calibrating") return "calibrating";
   return s.stage === "ready" ? "ready" : "opening";
 }
 
@@ -175,6 +176,18 @@ export function createRecView({ actions, beatLine }: RecOptions): RecView {
           ),
           h("p", {}, choice),
           h("div", { class: "state__acts" }, go, cancel),
+        ),
+      );
+      return;
+    }
+    if (phase === "calibrating") {
+      card.append(
+        head(["движок ", h("b", {}, "калибруется")]),
+        h(
+          "div",
+          { class: "card__body" },
+          h("p", { class: "state__say busy" }, "Калибровка: идёт свип"),
+          h("p", { class: "state__why" }, "Сессия закрыта на время калибровки; когда свип кончится, движок откроется сам."),
         ),
       );
       return;
