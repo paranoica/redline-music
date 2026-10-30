@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from redline.core.private import write_private
+
 QUEUED = "queued"
 RUNNING = "running"
 CANCELLING = "cancelling"
@@ -68,6 +70,35 @@ def _log_of(result: Path) -> Path:
 
 def _tmp_of(result: Path) -> Path:
     return result.with_name(result.name + ".tmp")
+
+
+def _pid_of(result: Path) -> Path:
+    return result.with_name(result.name + ".pid")
+
+
+def reap_orphans(folder: Path) -> list[int]:
+    """Kill the jobs a server that died hard left behind, by the pid files in folder.
+
+    A job paused while a take recorded stays stopped forever once its server is gone, since its
+    own session gets no hangup. Only a process whose command line is a `song job` writing that
+    pid file's result is killed; every pid file is removed.
+
+    Returns:
+        The pids killed.
+    """
+    killed = []
+    for pid_file in sorted(folder.glob("*.pid")) if folder.is_dir() else []:
+        result = pid_file.with_name(pid_file.name.removesuffix(".pid"))
+        with contextlib.suppress(ValueError, OSError):
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            ours = b"song" in args and b"job" in args and str(result).encode() in args
+            if ours and os.getpgid(pid) == pid:
+                os.killpg(pid, signal.SIGCONT)
+                os.killpg(pid, signal.SIGKILL)
+                killed.append(pid)
+        pid_file.unlink(missing_ok=True)
+    return killed
 
 
 def _renice() -> None:
@@ -269,6 +300,9 @@ class JobRunner:
         except (OSError, ValueError) as error:
             job.state, job.reason, job.finished = FAILED, f"cannot start: {error}", time.time()
             return
+        # without it only a hard death of the server leaves the job behind
+        with contextlib.suppress(OSError):
+            write_private(_pid_of(result), f"{job.process.pid}\n")
         job.state, job.started = RUNNING, time.time()
         job.thread = threading.Thread(target=self._wait, args=(job,), daemon=True)
         job.thread.start()
@@ -278,6 +312,7 @@ class JobRunner:
         assert process is not None
         code = process.wait()
         result = job.request.result
+        _pid_of(result).unlink(missing_ok=True)
         with self._lock:
             cancelled = job.state == CANCELLING
             job.paused = False

@@ -13,7 +13,7 @@ import soundfile as sf
 from redline.cli import main
 from redline.engine.render import Engine
 from redline.record.session import Outcome
-from redline.song import model
+from redline.song import model, rec
 from redline.song.rec import NotReady, TakeRunning
 from redline.song.server import SongApp, close_all, job_argv, make_server
 from redline.studio.server import Studio
@@ -42,6 +42,7 @@ class FakeRec:
         self.down = False
         self.reason = None
         self.open_error = None
+        self.attempts = 0
 
     def snapshot(self):
         from redline.song.rec import RecSnapshot
@@ -73,6 +74,7 @@ class FakeRec:
         return self.is_taking
 
     def open(self, request):
+        self.attempts += 1
         if self.open_error is not None:
             raise self.open_error
         if self.is_taking:
@@ -764,3 +766,37 @@ def test_a_take_plays_over_the_beat_from_its_first_frame(made, root):
     alone = sf.read(io.BytesIO(call(made, "GET", "/api/takes/audio?name=take-01.wav")[2]))[0]
     assert np.flatnonzero(np.abs(np.atleast_2d(alone.T)[0]) > 0.05).tolist() == [100]
     assert call(made, "GET", "/api/takes/audio?name=take-01.wav&with=other")[0] == 400
+
+
+def test_a_beat_change_while_the_engine_opens_is_saved_and_followed_later(made, root):
+    render_beat(root, 4)
+    api(made, "POST", "/api/rec/open", {})
+    made.app.rec.open_error = rec.Busy("the engine is opening or calibrating")
+    status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
+    assert status == 200 and data["song"]["beat"] == {"own": 4}
+    made.app.rec.open_error = None
+    api(made, "GET", "/api/rec/state")
+    assert opens(made)[-1].beat.parent.name == "4" and len(opens(made)) == 2
+
+
+def test_no_open_is_even_tried_while_a_take_runs_over_a_changed_beat(made, root):
+    render_beat(root, 4)
+    api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
+    api(made, "POST", "/api/rec/open", {})
+    tried = made.app.rec.attempts
+    render_beat(root, 4, 2.0)
+    made.app.rec.is_taking = True
+    for _ in range(3):
+        api(made, "GET", "/api/rec/state")
+    assert made.app.rec.attempts == tried
+
+
+def test_a_new_server_reaps_the_jobs_its_dead_predecessor_left(root, monkeypatch):
+    model.save(model.new_song(NAME, {"file": "input/beat.wav"}, None, ("input/ref.wav",)), 0)
+    reaped = []
+    monkeypatch.setattr("redline.song.server.reap_orphans", lambda folder: reaped.append(folder))
+    app = SongApp(NAME, make_rec=FakeRec, assets=lambda: (None, None, str))
+    try:
+        assert reaped == [root / "work" / "songs" / NAME / "jobs"]
+    finally:
+        app.jobs.close(timeout=5)

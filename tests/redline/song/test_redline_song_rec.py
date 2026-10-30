@@ -568,3 +568,11 @@ def test_close_with_a_reason_keeps_it_in_the_snapshot(ready, fix):
     ready.close(reason="the beat changed")
     snap = ready.snapshot()
     assert snap.stage == "closed" and snap.error == "the beat changed"
+
+
+def test_an_open_during_a_take_is_refused_at_once_and_never_blocks_the_stop(ready, fix):
+    assert ready.toggle().code == "recording"
+    with pytest.raises(rec.TakeRunning):
+        ready.open(fix.request())
+    assert not ready._state.opening
+    assert ready.toggle().code != "recording"

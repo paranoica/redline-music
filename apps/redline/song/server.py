@@ -30,7 +30,7 @@ from redline.engine.settings import Settings, from_dict, to_dict
 from redline.record.process import EngineError
 from redline.record.sweep import CalibrationError
 from redline.song import model, rec
-from redline.song.jobs import Busy, JobRunner
+from redline.song.jobs import Busy, JobRunner, reap_orphans
 from redline.song.rec import OpenRequest, RecOwner
 from redline.studio.server import (
     PAGE_KINDS,
@@ -67,6 +67,13 @@ REC_ERRORS = (
 )
 
 AssetsLoader = Callable[[], tuple[Any, Any, Any]]
+
+
+def _rec_api_error(error: Exception) -> "ApiError":
+    for kind, status, code in REC_ERRORS:
+        if isinstance(error, kind):
+            return ApiError(status, str(error), code)
+    return ApiError(HTTPStatus.BAD_GATEWAY, str(error), "engine")
 
 
 class ApiError(BadRequest):
@@ -229,12 +236,14 @@ class SongApp:
         self._engine_lock = threading.Lock()
         self._engine_sig: tuple[str, int, int] | None = None
         self._take_gate = threading.Lock()
+        self._save_lock = threading.Lock()
         self._grids: dict[tuple[str, int, int], float | None] = {}
         self._snap: tuple[float, dict[str, Any]] | None = None
         self._snap_lock = threading.Lock()
         make = make_rec or (lambda logged, work: RecOwner(on_take_logged=logged, work=work))
         self.rec = make(self.take_logged, self.work)
         self.jobs = JobRunner(hold=self.rec.taking, kill_after=kill_after)
+        reap_orphans(self._jobs_dir())
 
     # song
 
@@ -430,6 +439,9 @@ class SongApp:
             song, kept = self._new_variant(song, changes["mix_variant"])
         if not moved_beat:
             return self._save(song, expected, kept)
+        return self._save_beat_change(song, expected, kept)
+
+    def _save_beat_change(self, song: model.Song, expected: int, kept: str | None) -> Reply:
         with self._take_gate:
             if self.rec.taking():
                 raise ApiError(HTTPStatus.CONFLICT, "a take is running", "take_running")
@@ -437,8 +449,13 @@ class SongApp:
                 raise self._stale()
             try:
                 self._sync_engine(song)
-            except rec.TakeRunning:
-                raise ApiError(HTTPStatus.CONFLICT, "a take is running", "take_running") from None
+            except rec.Busy:
+                # opening or calibrating: the next poll points the engine at the saved beat
+                pass
+            except rec.RecError as error:
+                raise _rec_api_error(error) from None
+            except model.SongError as error:
+                raise ApiError(HTTPStatus.CONFLICT, str(error), "bad_song") from None
             return self._save(song, expected, kept)
 
     def _stale(self) -> ApiError:
@@ -450,6 +467,11 @@ class SongApp:
         )
 
     def _save(self, song: model.Song, expected: int, kept: str | None) -> Reply:
+        # the song and the settings files of a kept variant change together, never interleaved
+        with self._save_lock:
+            return self._save_locked(song, expected, kept)
+
+    def _save_locked(self, song: model.Song, expected: int, kept: str | None) -> Reply:
         try:
             saved = model.save(song, expected, self.root)
         except model.StaleRev:
@@ -653,8 +675,11 @@ class SongApp:
         self.rec.open(request)
         self._engine_sig = sig
 
-    def _sync_engine(self, song: model.Song) -> None:
+    def _sync_engine(self, song: model.Song | None = None) -> None:
         """Point an open engine at the song's beat as it is now; close it when it is not rendered.
+
+        Args:
+            song: The song about to be saved; None reads the saved one, under the lock.
 
         Raises:
             rec.TakeRunning: A take runs, so the engine stays where it is.
@@ -662,12 +687,14 @@ class SongApp:
         if self.rec.snapshot().stage in ("idle", "closed", "failed"):
             return
         with self._engine_lock:
+            song = self.song() if song is None else song
             sig = self._beat_sig(song)
             if sig == self._engine_sig:
                 return
+            # checked before any open is tried: a refused open still blocks the stop meanwhile
+            if self.rec.taking():
+                raise rec.TakeRunning("a take is running")
             if sig is None:
-                if self.rec.taking():
-                    raise rec.TakeRunning("a take is running")
                 self.rec.close(reason=BEAT_GONE)
                 self._engine_sig = None
                 return
@@ -675,7 +702,7 @@ class SongApp:
 
     def _follow_beat(self) -> None:
         with contextlib.suppress(rec.RecError, ApiError, model.SongError):
-            self._sync_engine(self.song())
+            self._sync_engine()
 
     def rec_command(self, name: str, body: dict) -> Reply:
         """open, toggle, discard, calibrate or close; the errors are 409 with a code."""
@@ -688,10 +715,7 @@ class SongApp:
                     return self._rec_run(name, body)
             return self._rec_run(name, body)
         except rec.RecError as error:
-            for kind, status, code in REC_ERRORS:
-                if isinstance(error, kind):
-                    raise ApiError(status, str(error), code) from None
-            raise
+            raise _rec_api_error(error) from None
         except (EngineError, CalibrationError) as error:
             raise ApiError(HTTPStatus.BAD_GATEWAY, str(error), "engine") from None
 

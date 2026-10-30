@@ -1,5 +1,7 @@
 import json
 import os
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -311,16 +313,58 @@ def test_a_light_job_is_not_stopped_by_the_hold(tmp_path):
 
 def test_cancelling_a_paused_job_lets_it_exit(tmp_path):
     held = threading.Event()
-    runner = JobRunner(hold=held.is_set, tick=0.02, kill_after=0.5)
+    # long enough that only a woken job, not the SIGKILL, can end it within the wait below
+    runner = JobRunner(hold=held.is_set, tick=0.02, kill_after=30)
+    marker = tmp_path / "terminated"
+    graceful = (
+        "import pathlib, signal, sys, time\n"
+        f"def done(*_): pathlib.Path({str(marker)!r}).write_text('x'); sys.exit(1)\n"
+        "signal.signal(signal.SIGTERM, done)\n"
+        "print('up', flush=True)\n"
+        "time.sleep(60)\n"
+    )
     try:
         result = tmp_path / "r.json"
-        runner.start("s", "sep", job(SLEEP, result), result, heavy=True)
+        runner.start("s", "sep", job(graceful, result), result, heavy=True)
         pid = wait_for(runner, "s", "sep", ("running",))["pid"]
+        end = time.monotonic() + 5
+        while "up" not in (tmp_path / "r.json.log").read_text() and time.monotonic() < end:
+            time.sleep(0.02)
         held.set()
         assert stopped(pid)
         runner.cancel("s", "sep")
         info = wait_for(runner, "s", "sep", ("cancelled",), timeout=3.0)
         assert info["paused"] is False
+        assert marker.is_file()
         assert not Path(f"/proc/{pid}").exists()
     finally:
         runner.close(timeout=5)
+
+
+def test_a_job_left_paused_by_a_dead_server_is_reaped_at_the_next_start(tmp_path):
+    from redline.song.jobs import reap_orphans
+
+    result = tmp_path / "auto.json"
+    argv = [sys.executable, "-c", "import time; time.sleep(30)", "song", "job", "--result"]
+    orphan = subprocess.Popen([*argv, str(result)], start_new_session=True)
+    try:
+        os.kill(orphan.pid, signal.SIGSTOP)
+        (tmp_path / "auto.json.pid").write_text(f"{orphan.pid}\n")
+        # a pid file naming a process that is not one of ours is dropped, the process kept
+        (tmp_path / "rank.json.pid").write_text(f"{os.getpid()}\n")
+        assert reap_orphans(tmp_path) == [orphan.pid]
+        assert orphan.wait(timeout=5) == -signal.SIGKILL
+        assert not list(tmp_path.glob("*.pid"))
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+
+
+def test_a_running_job_has_a_pid_file_and_a_finished_one_none(runner, tmp_path):
+    result = tmp_path / "out.json"
+    runner.start("s", "rank", job("import time; time.sleep(0.5); " + WRITE, result), result)
+    pid_file = tmp_path / "out.json.pid"
+    wait_for(runner, "s", "rank", ("running",))
+    assert pid_file.is_file() and pid_file.stat().st_mode & 0o777 == 0o600
+    wait_for(runner, "s", "rank", ("done",))
+    assert not pid_file.exists()

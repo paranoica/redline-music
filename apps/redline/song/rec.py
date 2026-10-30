@@ -362,6 +362,11 @@ class RecOwner:
             if opening:
                 if state.opening:
                     raise Busy("the engine is opening or calibrating")
+                # refused here, before `opening` is set, so a stop meanwhile still goes through;
+                # out of sync, the take state is unknown and reopening is the way back
+                taking = state.stopping or state.take or (state.latest and state.latest.recording)
+                if taking and not state.out_of_sync:
+                    raise TakeRunning("a take is running")
                 state.opening = True
             self._queue.put(command)
         return command.wait(self._timeout_s if timeout is None else timeout)

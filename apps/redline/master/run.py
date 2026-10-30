@@ -1,7 +1,9 @@
 """Stage 3: the blind rounds on the master, the timbre and the 808, and the run itself."""
 
+import ctypes
 import errno
 import json
+import os
 import re
 import shutil
 import statistics
@@ -269,6 +271,25 @@ def claim_tmp_dir(out_dir: Path, stamp: str) -> Path:
     raise RuntimeError(f"cannot create a build folder under {out_dir}")
 
 
+AT_FDCWD = -100
+RENAME_NOREPLACE = 1
+
+
+def _rename_new(source: Path, target: Path) -> None:
+    """Rename, refusing an existing target, an empty folder too (which rename takes over)."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        if target.exists():
+            raise FileExistsError(errno.EEXIST, "exists", str(target))
+        source.replace(target)
+        return
+    done = renameat2(AT_FDCWD, os.fsencode(source), AT_FDCWD, os.fsencode(target), RENAME_NOREPLACE)
+    if done != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(target))
+
+
 def publish(folder: Path, out_dir: Path, stamp: str) -> Path:
     """Rename the built folder to a result name that does not exist yet."""
     for attempt in range(100):
@@ -276,7 +297,7 @@ def publish(folder: Path, out_dir: Path, stamp: str) -> Path:
         if target.exists():
             continue
         try:
-            folder.replace(target)
+            _rename_new(folder, target)
         except OSError as error:
             if error.errno in (errno.EEXIST, errno.ENOTEMPTY):
                 continue

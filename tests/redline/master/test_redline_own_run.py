@@ -1,6 +1,7 @@
 import json
 import re
 from dataclasses import asdict, replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -497,17 +498,17 @@ def test_a_failure_while_writing_leaves_no_result_folder_and_no_tmp_one(
 
 
 def test_the_result_folder_appears_whole_in_one_rename(own, tmp_path, no_auto, monkeypatch):
-    from pathlib import Path
+    from redline.master import run as run_module
 
     seen = []
-    real = Path.replace
+    real = run_module._rename_new
 
-    def spy(self, target):
-        if self.name.startswith(".tmp-"):
-            seen.append(sorted(p.name for p in self.iterdir()))
-        return real(self, target)
+    def spy(source, target):
+        if source.name.startswith(".tmp-"):
+            seen.append(sorted(p.name for p in source.iterdir()))
+        return real(source, target)
 
-    monkeypatch.setattr(Path, "replace", spy)
+    monkeypatch.setattr(run_module, "_rename_new", spy)
     assert main(voice_args(own, tmp_path, "--no-auto"), separator=CountingSeparator()) == 0
     assert seen and "report.md" in seen[0] and "final.wav" in seen[0]
 
@@ -550,3 +551,26 @@ def test_the_result_takes_a_name_that_does_not_exist_yet(own, tmp_path, no_auto,
     others = [p for p in (tmp_path / "o").iterdir() if p != kept]
     assert len(others) == 1 and (others[0] / "final.wav").is_file()
     assert not others[0].name.startswith(".")
+
+
+def test_a_result_never_takes_over_a_folder_another_run_made_meanwhile(tmp_path, monkeypatch):
+    from redline.master import run as master_run
+
+    out = tmp_path / "out"
+    built = out / ".tmp-x"
+    built.mkdir(parents=True)
+    (built / "final.wav").write_bytes(b"x")
+    real_exists = Path.exists
+
+    def late(path):
+        # another writer makes the empty folder just after the free-name check
+        if path == out / "stamp" and not path.is_dir():
+            path.mkdir()
+            return False
+        return real_exists(path)
+
+    monkeypatch.setattr(Path, "exists", late)
+    target = master_run.publish(built, out, "stamp")
+    assert target == out / "stamp-1"
+    assert (target / "final.wav").is_file()
+    assert list((out / "stamp").iterdir()) == []
