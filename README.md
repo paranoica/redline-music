@@ -28,6 +28,7 @@ it sounds better is for you to decide by ear.
 | **Measure** | Splits the track and each reference into vocal and beat, measures loudness, dynamics, spectral tilt, stereo width, the low end, vocal tuning and reverb tails, and writes a report on where the track stands against the references. |
 | **Process** | Runs the vocal through a chain built from those measurements: EQ toward the references, compression, saturation, hard tune, formant shift, octave layers, doubles. Then delay throws, reverb and stutter at phrase ends, drive on the 808, and a clip master to the references' loudness. |
 | **Studio** | A local page that plays the track through the chain in real time: move a control and you hear it at once. The vocal, beat and master run in the browser on the same Rust code as the render. A/B against the original and a reference at equal loudness, automation lanes, undo, presets. |
+| **Record** | Records your vocal over a beat while you hear yourself through the vocal rack with under 10 ms of delay, lines every take up with the beat, and ranks the takes of a song by timing, clipping, noise, dropouts and beat in the mic. |
 | **Batch** | Runs a saved studio preset over a whole folder of Suno takes in one command. |
 | **Lyrics** | Writes a new text from a style profile of the scene, measures your beat for tempo, bars and hardness so the lines fit it, checks every draft for copied lines, and prints a card ready to paste into Suno. You mark lines as cringe or good, and the next text takes those marks into account. |
 
@@ -55,7 +56,8 @@ are cached by content, so the second run on the same files starts at once.
 Linux, Python 3.12, [uv](https://docs.astral.sh/uv/), a Rust toolchain (`cargo`) and Node 22.18
 or newer. The sound core is Rust: `uv sync` builds it for Python, and its WebAssembly build for
 the studio is committed, so emscripten is needed only to change the core. A CUDA GPU speeds up
-separation; on a CPU it is slower but works.
+separation; on a CPU it is slower but works. Recording needs JACK; PipeWire's `pipewire-jack`
+is enough.
 
 ```sh
 git clone https://github.com/paranoica/redline-music.git
@@ -149,6 +151,52 @@ uv run redline studio --vocal input/vocal.wav --beat input/beat.wav --ref input/
 ```
 
 The first time it starts from the settings the search found; after that, from what is saved.
+
+## Recording takes
+
+`redline record` plays a beat and records the mic, and you hear yourself through the vocal
+rack while you sing. It runs on JACK, which on most Linux desktops is PipeWire with
+`pipewire-jack`. The engine is a small Rust program, built on first use with
+`cargo build --release -p redline-rec --features jack`.
+
+Calibrate once per setup. Hold a headphone cup to the mic (or run a cable from the output to
+the input) and run:
+
+```sh
+uv run redline record --calibrate
+```
+
+It plays a sweep, finds how late it comes back and stores that per ports, rate and buffer
+size in `work/record/latency.json`. Every take is shifted by this round trip, so frame 0 of a
+take is frame 0 of the beat. Without a calibration the ports' own latency is used and called an
+estimate wherever it is shown. A calibration made for other ports, rate or buffer size is
+refused, not applied.
+
+Then record:
+
+```sh
+uv run redline record --beat input/beat.wav --song my-song --ref input/refs
+```
+
+Space starts and stops a take, `r` throws the last one away, `q` quits. The status line shows
+the take number, the level, the rate and buffer size the system gave, the monitor's delay and
+dropouts. The engine asks for a 64-frame buffer; above 128 it says the 10 ms target is not met.
+If the rack is too slow for the budget, effects are switched off from the end of the rack for
+monitoring only, and the terminal names them. The takes are dry: the rack is only for your ears.
+
+Takes land in `input/takes/<song>/take-NN.wav`, each with a `take-NN.json` that logs any gap
+the engine had to fill. Then rank them:
+
+```sh
+uv run redline takes --beat input/beat.wav --dir input/takes/my-song
+```
+
+Timing is judged against the other takes, not a grid, so a laid-back flow is not punished.
+Clipping, noise between phrases, dropouts and beat bleeding into the mic count against a take.
+`--deep --ref input/refs` also measures how close each take gets to the references after the
+automatic settings, about 40 s a take. The report and `ranking.json` go to
+`work/takes/<song>/`, with the `redline voice` line for the best take. Whether it is the best
+performance is still for you to judge.
 
 ## Voice lab
 
@@ -250,6 +298,7 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline studio` | the live page |
 | `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
 | `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
+| `redline record` | record takes over a beat, hearing yourself through the vocal rack; `--calibrate` measures the round trip |
 | `redline takes` | rank recorded takes of a song: timing against the other takes, clipping, noise, dropouts, beat in the mic |
 | `redline effects` | the rack's effects with their params and ranges (`--json` for the raw list) |
 | `redline lyrics index` | build style profiles and copy-check digests from the base |
@@ -272,11 +321,14 @@ apps/
     vocal/          the vocal chain, timbre, effects, blind rounds
     master/         clip master, the final run
     engine/         settings, the staged render with its cache, the racks the studio plays
+    record/         the recording session: engine driver, calibration, takes
+    takes/          measuring and ranking takes
     studio/         the studio's server
     lyrics/         text parsing, style profiles, the writer, Suno cards, marks
     web/            what the local pages share: token, host check, headers
     cli/            the command line
-  redline-dsp/      the Rust sound core: effects, rack, master; built for Python and the browser
+  redline-dsp/      the Rust sound core: effects, rack, master; built for Python and the browser;
+                    rec/ is the recording engine
   studio/           the studio page, TypeScript
   lyrics-web/       the marks page
 tests/redline/      tests, on synthetic audio and invented texts

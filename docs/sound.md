@@ -170,6 +170,54 @@ pair has no `settings.json` yet and writes its result there, so the studio start
 never replaces what was saved. The pair's key comes from the two files' paths, not the
 offset.
 
+## Recording
+
+`redline record` drives `redline-rec` (`apps/redline-dsp/rec`), a Rust program that is one JACK
+client with a mic input and two outputs. Capture and playback run in one process callback, so
+they share one frame counter: frame 0 of the beat is the first frame played after a start, and
+every mic frame has its index on the same counter. PipeWire is asked for a 64-frame quantum
+through `PIPEWIRE_LATENCY`; the rate and quantum it grants are reported, and the beat is
+resampled to the granted rate before playing. There is no ALSA fallback: separate input and
+output devices run on two clocks that drift apart by milliseconds a minute.
+
+Python talks to the engine in JSON lines over stdin and stdout: start, stop, set the rack, read
+the meters. A take is shifted by the round trip, so it lines up with the beat. Nothing in the
+callback allocates or locks: the dry mic goes through a lock-free ring to a writer thread, and a
+rack built for a new setting is handed in through another ring and the old one handed back to
+be dropped outside the callback. When the callback misses cycles or the ring overflows, the
+writer puts in silence of exactly the missing length and logs the frame range in the take's
+`take-NN.json`, so the rest of the take stays in time.
+
+**The monitor.** You hear the mic through the vocal rack `live.py` makes, without automation and
+with `chain_compressor`'s lookahead at 0 (the render keeps its 4 ms). The budget is 10 ms minus
+the round trip; when the rack is slower, effects are switched off from its end until it fits,
+for monitoring only. The rack's numbers come from `live.analysis` on the song's last take with
+the references. Before the first take a 5-second level check sets the input gain and the rest
+are neutral (`live.NEUTRAL_NUMBERS`): no gate, no makeup gain, a flat EQ, no tuning offset, so
+until there is a take you hear yourself quieter and cleaner than the render will be.
+
+**Calibration.** `redline record --calibrate` plays an exponential sine sweep with the monitor
+muted, records it through the singer's path and convolves the recording with the sweep's
+inverse filter. The peak is the round trip; a peak less than 30 dB over the median of the rest
+is refused (noise alone reaches about 23 dB). The result is stored in `work/record/latency.json`
+under the connected ports, the rate and the quantum, with the mode: a headphone cup at the mic,
+a cable, or speakers, which adds the time sound takes through the air and is named every time
+it is applied. If the quantum changes during a session, the next take is refused until
+`redline record` restarts, because the stored round trip no longer holds. A calibration for another
+key is refused with a note, never applied; without one the ports' reported latency is used and
+labelled an estimate.
+
+**Ranking.** `redline takes` measures each take against the beat and the other takes. Timing is
+the onsets' offset from the median of all the takes, so a flow that sits behind the beat in
+every take is not punished; a penalty starts 10 ms out. Clipping counts runs at full scale,
+noise is the floor between phrases, dropouts come from the engine's log, and bleed is the
+take's correlation with the beat (above 0.1 means headphones are leaking). Level steadiness is
+a note, not a score. `--deep` adds the distance to the references after the automatic settings
+of `redline voice`. A take that is empty or almost silent is skipped. A take shorter than half
+the beat is measured over the part it covers and ranked below every full take, since fewer
+seconds leave fewer chances to clip or drop out. A take without its log, or one whose stop
+failed, counts as the worst for dropouts: unknown is not clean.
+
 ## What numbers can and cannot say
 
 Every comparison is made at equal loudness: louder always sounds better, and would hide
