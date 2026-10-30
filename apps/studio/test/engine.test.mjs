@@ -755,3 +755,40 @@ for (const when of ["stopped", "playing"]) {
     assert.ok(last.heard && last.held === false && last.frame > 96000 && last.frame <= 96000 + BLOCK, JSON.stringify(last));
   });
 }
+
+// a reference whose frame p is heard as p by firstHeard
+const REF = 10000;
+const refSource = { type: "source", name: "reference", data: stereo(REF, (p) => [(0.5 * p) / REF, 0.5]), start: 0, length: REF };
+
+test("the reference is heard from its own frame for the frame sought, with the loop on or off, for any latency", () => {
+  const frames = 4 * RATE;
+  const cases = [
+    [{ start: 48000, end: 72000 }, 48000, 0],
+    [{ start: 48000, end: 72000 }, 50005, 2005],
+    [null, 0, 0],
+    [null, 30000, 0],
+    [null, 30005, 5],
+  ];
+  const got = [];
+  const wanted = [];
+  for (const [latency, master] of LATENCIES) {
+    for (const [loop, to, want] of cases) {
+      for (const playing of [false, true]) {
+        const { engine } = setup({ frames, racks: { master } });
+        engine.handle(refSource);
+        engine.handle({ type: "listen", gains: { result: 0, original: 0, reference: 1, render: 0 } });
+        if (loop) engine.handle({ type: "loop", on: true, ...loop, seq: 1 });
+        if (playing) {
+          engine.handle({ type: "play", playing: true });
+          run(engine, 4096 + 37);
+        }
+        engine.handle({ type: "seek", frame: to, seq: 2 });
+        if (!playing) engine.handle({ type: "play", playing: true });
+        const at = `latency ${latency}, loop ${loop ? "on" : "off"}, ${playing ? "playing" : "stopped"}, seek to ${to}`;
+        got.push(`${at}: ${firstHeard(engine, REF, playing)}`);
+        wanted.push(`${at}: ${want}`);
+      }
+    }
+  }
+  assert.deepEqual(got, wanted);
+});

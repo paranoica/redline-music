@@ -693,7 +693,10 @@ export class Engine {
     this.#late.render.process(this.#renderBlock, n);
 
     const ref = this.#reference;
-    let refAt = ref ? ref.start + mod(this.#heard(start) - (this.#loop.on ? this.#loop.start : 0), ref.length) : 0;
+    // counted back from the first frame heard: a seek leaves the block's start before the track's or the loop's
+    const f = Math.min(heardFrom, n - 1);
+    const refFrom = this.#heard(this.#pos[f] as number) - (this.#loop.on ? this.#loop.start : 0) - f;
+    let refAt = ref ? ref.start + mod(refFrom, ref.length) : 0;
     const envStep = 1 / DIP;
     const gainStep = 1 / (AB_RAMP_S * this.#rate);
     const openFrom = this.#want && this.#jobs.length === 0 ? heardFrom : n;
