@@ -151,6 +151,7 @@ export function deskNote(what: string, tail: string): HTMLElement {
 // one audio surface at a time: mounting one disposes the other
 export class SurfaceHost {
   #current: { kind: string; mounted: Mounted; root: HTMLElement } | null = null;
+  #pending: { kind: string; root: HTMLElement } | null = null;
   #token = 0;
   #active = true;
 
@@ -158,12 +159,36 @@ export class SurfaceHost {
     return this.#current?.kind ?? null;
   }
 
+  // a station redraws into a new slot: the surface mounted (or mounting) for it moves there
+  place(kind: string, slot: HTMLElement): boolean {
+    const live = this.#current?.kind === kind ? this.#current : this.#pending?.kind === kind ? this.#pending : null;
+    if (!live) return false;
+    slot.replaceChildren(live.root);
+    return true;
+  }
+
   async show(kind: string, mount: Mount, slot: HTMLElement, base: string, token: string): Promise<void> {
-    await this.dispose();
     const mine = ++this.#token;
+    const previous = this.#current;
+    this.#current = null;
     const root = h("div", { class: "surface" });
     slot.replaceChildren(root);
-    const mounted = await mount(root, { base, token, active: this.#active });
+    // known before any wait, so a redraw meanwhile places it instead of mounting a second
+    this.#pending = { kind, root };
+    if (previous) {
+      await previous.mounted.dispose();
+      previous.root.remove();
+    }
+    if (mine !== this.#token) {
+      root.remove();
+      return;
+    }
+    let mounted: Mounted;
+    try {
+      mounted = await mount(root, { base, token, active: this.#active });
+    } finally {
+      if (mine === this.#token) this.#pending = null;
+    }
     if (mine !== this.#token) {
       await mounted.dispose();
       root.remove();
@@ -183,6 +208,7 @@ export class SurfaceHost {
 
   async dispose(): Promise<void> {
     this.#token += 1;
+    this.#pending = null;
     const current = this.#current;
     this.#current = null;
     if (!current) return;

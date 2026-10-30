@@ -41,7 +41,7 @@ function surfaceSlot(
       void host.dispose();
       return;
     }
-    if (host.kind === kind) return;
+    if (host.place(kind, slot)) return;
     const mount = kind === "beat" ? mountBeat : mountMix;
     const base = kind === "beat" ? ctx.api.beatBase : ctx.api.mixBase;
     void host.show(kind, mount, slot, base, ctx.token).catch(() => {
@@ -177,7 +177,10 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
           what: need.what,
           how: need.how,
           ...(need.command ? { command: need.command } : {}),
-          actions: need.go ? [goButton(need.go === "takes" ? "К дублям" : "К биту", () => ctx.go(need.go ?? "takes"))] : [],
+          actions: [
+            ...(need.job ? [jobBar(ctx, need.job, "Разделить")] : []),
+            ...(need.go ? [goButton(need.go === "takes" ? "К дублям" : "К биту", () => ctx.go(need.go ?? "takes"))] : []),
+          ],
         }),
       );
       return;
@@ -227,21 +230,29 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
 
   function signature(): string {
     const { song, jobs } = ctx.state();
-    return JSON.stringify([song.stations.mix, song.stations.voice.chosen, jobs.find((j) => j.kind === "auto"), blocked]);
+    const watched = jobs.filter((j) => j.kind === "auto" || j.kind === "separate");
+    return JSON.stringify([song.stations.mix, song.stations.voice.chosen, watched, blocked]);
   }
 
-  void ctx.api.mixReady().then(
-    (r) => {
-      if (closed) return;
-      blocked = r === "no_voice";
-      draw();
-    },
-    (error: unknown) => {
-      if (closed) return;
-      if (!(error instanceof ApiError)) return;
-      draw();
-    },
-  );
+  // the server says when the mix can be built; the probe is asked again whenever it says so
+  let probed = false;
+  function probe(): void {
+    probed = ctx.state().song.stations.mix.ready;
+    void ctx.api.mixReady().then(
+      (r) => {
+        if (closed) return;
+        blocked = r === "no_voice";
+        draw();
+      },
+      (error: unknown) => {
+        if (closed) return;
+        if (!(error instanceof ApiError)) return;
+        draw();
+      },
+    );
+  }
+
+  probe();
   draw();
   loadVariants();
   return {
@@ -253,7 +264,8 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
         lastAuto = done;
         if (done) loadVariants();
       }
-      if (signature() !== seen) draw();
+      if (ctx.state().song.stations.mix.ready !== probed) probe();
+      else if (signature() !== seen) draw();
       else paintPads();
     },
     dispose() {
@@ -404,22 +416,26 @@ export interface MixNeed {
   how: string;
   command: string | null;
   go: "takes" | "beat" | null;
+  job: "separate" | null;
 }
 
 // why the mix cannot be built, from the server's reason, and the way out
 export function mixNeed(reason: string, voice: "takes" | "suno", song: string): MixNeed {
   if (reason === "stems not ready")
-    return { what: "Голос ещё не отделён.", how: "Сведение берёт голос и бит из кэша: сначала отдели голос Suno на шаге «Дубли».", command: null, go: "takes" };
+    return voice === "suno"
+      ? { what: "Голос Suno и референсы ещё не разделены.", how: "Сведение берёт голос и бит из кэша. Разделение идёт один раз, несколько минут.", command: null, go: null, job: "separate" }
+      : { what: "Референсы ещё не разделены на голос и бит.", how: "Сведение сравнивает голос с голосом референсов. Разделение идёт один раз, несколько минут.", command: null, go: null, job: "separate" };
   if (reason === "the song has no references")
     return {
       what: "У песни нет референсов.",
       how: "Сведение и варианты подбираются к референсам. Добавь их из терминала:",
       command: `uv run redline song refs ${song} --ref <файлы референсов>`,
       go: null,
+      job: null,
     };
   if (reason === "no voice chosen")
     return voice === "takes"
-      ? { what: "Для сведения нет голоса.", how: "Выбери дубль на шаге «Дубли»: сведение берёт голос оттуда.", command: null, go: "takes" }
-      : { what: "Для сведения нет голоса.", how: "Укажи голос песни.", command: null, go: "beat" };
-  return { what: `Сведение не собрать: ${reason}.`, how: "Проверь файлы песни.", command: null, go: null };
+      ? { what: "Для сведения нет голоса.", how: "Выбери дубль на шаге «Дубли»: сведение берёт голос оттуда.", command: null, go: "takes", job: null }
+      : { what: "Для сведения нет голоса.", how: "Укажи голос песни.", command: null, go: "beat", job: null };
+  return { what: `Сведение не собрать: ${reason}.`, how: "Проверь файлы песни.", command: null, go: null, job: null };
 }
