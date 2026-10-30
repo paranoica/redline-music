@@ -103,3 +103,10 @@ test("recording phases and the opening stages", () => {
   const failed = stageRows(snap({ stage: "failed", error: "x" }), "relaunching");
   assert.deepEqual(failed.map((r) => r.state), ["done", "done", "fail", "wait", "wait", "wait"]);
 });
+
+test("variants made for another voice or beat read as stale, other refusals still throw", async () => {
+  fake(409, { error: "variants of another voice", code: "stale_variants" });
+  assert.equal(await createSongApi({ token: "t" }).variants(), "stale");
+  fake(409, { code: "busy" });
+  await assert.rejects(createSongApi({ token: "t" }).variants());
+});

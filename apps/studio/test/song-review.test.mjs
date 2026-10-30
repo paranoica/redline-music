@@ -162,3 +162,18 @@ test("a parked surface stays mounted, silent, and comes back to a slot; unsaved 
   assert.equal(again.children.length, 1);
   assert.equal(holder.children.length, 0);
 });
+
+test("a parked surface holds its sound and lets it go when it comes back", async () => {
+  globalThis.document = fakeDocument();
+  const held = [];
+  const mount = async () => ({ dispose() {}, hold: (on) => held.push(on) });
+  const host = new SurfaceHost(document.createElement("div"));
+  await host.show("mix", mount, document.createElement("div"), "/m", "t");
+  assert.deepEqual(held, []);
+  host.park();
+  assert.deepEqual(held, [true]);
+  host.place("mix", document.createElement("div"));
+  assert.deepEqual(held, [true, false]);
+  host.place("mix", document.createElement("div"));
+  assert.deepEqual(held, [true, false]);
+});

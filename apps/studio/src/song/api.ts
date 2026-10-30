@@ -225,11 +225,13 @@ export function createSongApi({ base, token }: SongApiOptions) {
       json<unknown>(call("POST", "/jobs/start", seed === undefined ? { kind } : { kind, seed })),
     cancelJob: (kind: JobKind) => json<unknown>(call("POST", "/jobs/cancel", { kind })),
     // null before the first auto run
-    variants: async (): Promise<VariantsReply | null> => {
+    // null before the first auto run; "stale" when they were made for another voice or beat
+    variants: async (): Promise<VariantsReply | null | "stale"> => {
       try {
         return await json<VariantsReply>(call("GET", "/mix/variants"));
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) return null;
+        if (error instanceof ApiError && error.code === "stale_variants") return "stale";
         throw error;
       }
     },

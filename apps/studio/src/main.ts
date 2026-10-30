@@ -8,7 +8,7 @@ import { clock, formatNumber } from "./core/format.ts";
 import { History } from "./core/history.ts";
 import { keyAction } from "./core/keys.ts";
 import { KeySurface, Scope } from "./core/lifecycle.ts";
-import type { Mount } from "./core/mount.ts";
+import { audioHold, type Mount } from "./core/mount.ts";
 import { intoLoop, type Loop } from "./core/loop.ts";
 import { abGains, dbToGain, integratedLufs, loudestSpan } from "./core/loudness.ts";
 import { buildLanes, buildRacks, parseRack } from "./core/racks.ts";
@@ -746,6 +746,7 @@ export const mount: Mount = async (root, options) => {
 
   return {
     setActive: (on) => keys.setActive(on && !scope.closed),
+    hold: audioHold(() => (scope.closed ? null : host?.ctx)),
     dirty: () => studio?.dirty ?? false,
     load: (settings, label) => {
       if (scope.closed) return;

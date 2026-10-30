@@ -184,6 +184,7 @@ export class SurfaceHost {
   #active = true;
   #chain: Promise<void> = Promise.resolve();
   #holder: HTMLElement | null;
+  #parked = false;
 
   constructor(holder?: HTMLElement) {
     this.#holder = holder ?? null;
@@ -198,6 +199,10 @@ export class SurfaceHost {
     const live = this.#current?.kind === kind ? this.#current : this.#pending?.kind === kind ? this.#pending : null;
     if (!live) return false;
     slot.replaceChildren(live.root);
+    if (this.#parked) {
+      this.#parked = false;
+      this.#current?.mounted.hold?.(false);
+    }
     return true;
   }
 
@@ -206,6 +211,10 @@ export class SurfaceHost {
     const live = this.#current ?? this.#pending;
     if (!live) return;
     this.#current?.mounted.setActive?.(false);
+    if (this.#current && !this.#parked) {
+      this.#parked = true;
+      this.#current.mounted.hold?.(true);
+    }
     this.#holder ??= h("div", { hidden: true });
     this.#holder.append(live.root);
   }
@@ -249,6 +258,7 @@ export class SurfaceHost {
         return;
       }
       this.#current = { kind, mounted, root };
+      this.#parked = false;
       mounted.setActive?.(this.#active);
     })();
     this.#chain = work.catch(() => {});

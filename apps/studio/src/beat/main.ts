@@ -5,7 +5,7 @@
 import { formatNumber } from "../core/format.ts";
 import { History } from "../core/history.ts";
 import { KeySurface, Scope } from "../core/lifecycle.ts";
-import type { Mount } from "../core/mount.ts";
+import { audioHold, type Mount } from "../core/mount.ts";
 import { closeDismissables, h, insertMarkup, refsIn } from "../ui/dom.ts";
 import { Refused, createApi, type Api, type BeatSession, type Caution, type Mark } from "./api.ts";
 import { startBeat, type BeatClient, type BeatHost, type BeatPosition, type BeatResult } from "./client.ts";
@@ -925,6 +925,7 @@ export const mount: Mount = async (root, options) => {
 
   return {
     setActive: (on) => keys.setActive(on && !scope.closed),
+    hold: audioHold(() => (scope.closed ? null : host?.ctx)),
     dirty: () => editor?.dirty ?? false,
     dispose: async () => {
       if (scope.closed) return;

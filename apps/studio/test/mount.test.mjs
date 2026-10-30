@@ -139,3 +139,23 @@ test("refsIn finds data-ref among the inserted nodes only", () => {
   assert.equal(ref("play"), inner);
   assert.throws(() => ref("missing"), /no \[data-ref=missing\]/);
 });
+
+test("holding an app's audio suspends only a running context and resumes only what it suspended", async () => {
+  const { audioHold } = await import("../src/core/mount.ts");
+  const calls = [];
+  const ctx = {
+    state: "running",
+    suspend: async () => { calls.push("suspend"); ctx.state = "suspended"; },
+    resume: async () => { calls.push("resume"); ctx.state = "running"; },
+  };
+  const hold = audioHold(() => ctx);
+  hold(true);
+  hold(true);
+  hold(false);
+  assert.deepEqual(calls, ["suspend", "resume"]);
+  ctx.state = "suspended";
+  hold(true);
+  hold(false);
+  assert.deepEqual(calls, ["suspend", "resume"]);
+  audioHold(() => null)(true);
+});

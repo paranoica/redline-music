@@ -125,6 +125,7 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
 export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
   const el = h("div", { class: "view view--one" });
   let variants: VariantsReply | null = null;
+  let stale = false;
   let selected = 0;
   let seedText = "";
   let seen = "";
@@ -152,8 +153,9 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
     void ctx.api.variants().then(
       (v) => {
         if (closed || mine !== wait) return;
-        variants = v;
-        if (seedText === "" && v) seedText = String(v.seed);
+        stale = v === "stale";
+        variants = v === "stale" ? null : v;
+        if (seedText === "" && variants) seedText = String(variants.seed);
         const kept = ctx.state().song.stations.mix.variant;
         selected = kept ?? 0;
         draw();
@@ -214,7 +216,12 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
         h("div", { class: "mix__under" }, h("span", { class: "mix__keep" }, keep, none)),
       );
     } else {
-      body.append(h("p", { class: "lede" }, jobActive(auto) ? "Авто-сведение считается." : "Авто-сведение ещё не запускалось. Оно подберёт настройки и четыре варианта для прослушивания."));
+      const lede = jobActive(auto)
+        ? "Авто-сведение считается."
+        : stale
+          ? "Варианты считались для другого дубля или бита. Запусти авто заново."
+          : "Авто-сведение ещё не запускалось. Оно подберёт настройки и четыре варианта для прослушивания.";
+      body.append(h("p", { class: "lede" }, lede));
     }
     body.append(h("div", { class: "mix__under" }, h("label", { class: "mix__seed" }, "seed вариантов ", seed), run, jobEnd), slot.el);
     el.replaceChildren(
