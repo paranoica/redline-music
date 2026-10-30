@@ -39,6 +39,7 @@ export interface Levels {
 export type FromEngine =
   | { type: "ready" }
   | { type: "rack"; track: Track; version: number; latency: number }
-  | { type: "error"; track?: Track; version?: number; message: string }
+  // fatal: the engine threw and is stopped for good; the page has to be reloaded
+  | { type: "error"; track?: Track; version?: number; message: string; fatal?: boolean }
   | Levels
   | { type: "ended" };

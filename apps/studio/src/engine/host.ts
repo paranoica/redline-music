@@ -21,10 +21,17 @@ export async function startHost(rate: number, catalogue: Catalogue): Promise<Hos
   const response = await fetch(new URL("redline_dsp.wasm", document.baseURI));
   if (!response.ok) throw new Error(`the engine's wasm did not load (${response.status})`);
   const bytes = await response.arrayBuffer();
+  let client: EngineClient | null = null;
   const ready = new Promise<void>((resolve, reject) => {
     node.port.onmessage = (event: MessageEvent<{ type: string; message?: string }>) => {
       if (event.data.type === "ready") resolve();
       else if (event.data.type === "error") reject(new Error(event.data.message ?? "the engine did not start"));
+    };
+    // the processor threw past its own guard: the browser stops calling it
+    node.onprocessorerror = (event: Event) => {
+      const message = event instanceof ErrorEvent && event.message ? event.message : "the audio processor threw";
+      if (client) client.fail(message);
+      else reject(new Error(message));
     };
   });
   node.port.postMessage({ type: "wasm", bytes }, [bytes]);
@@ -40,5 +47,6 @@ export async function startHost(rate: number, catalogue: Catalogue): Promise<Hos
       node.port.onmessage = f ? (event: MessageEvent) => f({ data: event.data }) : null;
     },
   };
-  return { ctx, client: new EngineClient(port, catalogue) };
+  client = new EngineClient(port, catalogue);
+  return { ctx, client };
 }

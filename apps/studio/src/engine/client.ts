@@ -22,6 +22,8 @@ export class EngineClient {
   onRack: (track: Track, latency: number) => void = () => {};
   onError: (error: { track?: Track; message: string }) => void = () => {};
   onEnded: () => void = () => {};
+  onFatal: (message: string) => void = () => {};
+  #dead = false;
   readonly latency: Record<Track, number> = { vocal: 0, beat: 0, master: 0 };
   readonly #port: PortLike;
   readonly #catalogue: Catalogue;
@@ -49,6 +51,7 @@ export class EngineClient {
         }
         return;
       case "error":
+        if (m.fatal) return this.fail(m.message);
         // the engine kept the rack before; the next change sends this track whole again
         if (m.track && this.#sent[m.track]?.version === m.version) this.#sent[m.track] = null;
         return this.onError(m.track ? { track: m.track, message: m.message } : { message: m.message });
@@ -57,6 +60,13 @@ export class EngineClient {
       case "ready":
         return;
     }
+  }
+
+  // the engine is stopped for good: told once, whether it said so itself or the browser did
+  fail(message: string): void {
+    if (this.#dead) return;
+    this.#dead = true;
+    this.onFatal(message);
   }
 
   // the arrays are handed over to the worklet and are empty here afterwards

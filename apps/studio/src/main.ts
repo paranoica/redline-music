@@ -52,6 +52,8 @@ const ui = {
 type Tone = "plain" | "busy" | "error" | "done";
 
 function status(text: string, tone: Tone = "plain", kind = ""): void {
+  // a stopped engine stays on screen: nothing else matters until the page is reloaded
+  if (ui.status.dataset.kind === "engine") return;
   ui.status.textContent = text;
   ui.status.dataset.tone = tone;
   ui.status.dataset.kind = kind;
@@ -333,6 +335,11 @@ class Studio {
       this.#playing = false;
       this.#anchor = { frame: 0, at: this.#ctx.currentTime };
       this.#showPlay();
+    };
+    c.onFatal = (reason) => {
+      this.#playing = false;
+      this.#showPlay();
+      status(`Движок звука остановился: ${reason}. Убери тяжёлые эффекты и обнови страницу.`, "error", "engine");
     };
     c.onError = (e) => status(`Движок: ${e.track ? `${trackName(e.track)} — ` : ""}${e.message}`, "error");
     ui.play.addEventListener("click", () => void this.#togglePlay());

@@ -10,16 +10,20 @@ type Incoming = ToEngine | { type: "wasm"; bytes: ArrayBuffer };
 class RedlineProcessor extends AudioWorkletProcessor {
   #engine: Engine | null = null;
   #waiting: ToEngine[] = [];
+  // after a throw the engine's state, or the whole wasm module after an abort, is not to be trusted
+  #dead = false;
   readonly #spare = new Float32Array(128);
 
   constructor() {
     super();
     this.port.onmessage = (event: MessageEvent<Incoming>) => {
       const m = event.data;
+      if (this.#dead) return;
       if (m.type === "wasm") {
         void this.#start(m.bytes);
       } else if (this.#engine) {
-        this.#engine.handle(m);
+        const engine = this.#engine;
+        this.#guard(() => engine.handle(m));
       } else {
         this.#waiting.push(m);
       }
@@ -52,13 +56,24 @@ class RedlineProcessor extends AudioWorkletProcessor {
     const left = out?.[0];
     if (!left) return true;
     const right = out[1] ?? this.#spare;
-    if (this.#engine) {
-      this.#engine.render(left, right);
-    } else {
-      left.fill(0);
-      right.fill(0);
-    }
+    const engine = this.#engine;
+    if (engine && !this.#dead && this.#guard(() => engine.render(left, right))) return true;
+    left.fill(0);
+    right.fill(0);
     return true;
+  }
+
+  #guard(f: () => void): boolean {
+    try {
+      f();
+      return true;
+    } catch (error) {
+      this.#dead = true;
+      this.#engine = null;
+      const message = error instanceof Error ? error.message : String(error);
+      this.port.postMessage({ type: "error", fatal: true, message });
+      return false;
+    }
   }
 }
 

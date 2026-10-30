@@ -81,3 +81,17 @@ test("levels and errors reach the page's callbacks", () => {
   assert.equal(errors.length, 1);
   assert.match(errors[0].message, /nope/);
 });
+
+test("a stopped engine is told to the page once, as fatal, not as a rack's error", () => {
+  const port = { onmessage: null, postMessage: () => {} };
+  const client = new EngineClient(port, catalogueOf(effects));
+  const fatal = [];
+  const errors = [];
+  client.onFatal = (message) => fatal.push(message);
+  client.onError = (e) => errors.push(e);
+  port.onmessage({ data: { type: "error", fatal: true, message: "Aborted(OOM)" } });
+  client.fail("the audio processor threw");
+  port.onmessage({ data: { type: "error", fatal: true, message: "again" } });
+  assert.deepEqual(fatal, ["Aborted(OOM)"]);
+  assert.deepEqual(errors, []);
+});
