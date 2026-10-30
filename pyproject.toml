@@ -24,7 +24,7 @@ separation = [
 ]
 stress = [
     "ruaccent>=1.5.8.3",
-    "transformers<5",
+    "transformers>=5.10,<6",
 ]
 
 [project.scripts]
