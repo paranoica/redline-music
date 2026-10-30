@@ -189,3 +189,18 @@ test("a start from inside a running frame keeps a single loop", async () => {
   assert.equal(frames, 3);
   assert.equal(queued.length, 0);
 });
+
+test("a frame that throws ends its loop and a new one can start", async () => {
+  const { FrameLoop } = await import("../src/beat/flow.ts");
+  const queued = [];
+  const loop = new FrameLoop((fn) => queued.push(fn));
+  assert.throws(() =>
+    loop.start(() => {
+      throw new Error("drawing failed");
+    }),
+  );
+  let frames = 0;
+  loop.start(() => ++frames < 2);
+  for (let i = 0; i < 10 && queued.length; i++) queued.shift()();
+  assert.equal(frames, 2);
+});

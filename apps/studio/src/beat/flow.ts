@@ -84,7 +84,12 @@ export class FrameLoop {
     const run = (): void => {
       // held while the frame runs, so a start from inside it does not open a second loop
       this.#id = -1;
-      this.#id = frame() ? this.#raf(run) : null;
+      let more = false;
+      try {
+        more = frame();
+      } finally {
+        this.#id = more ? this.#raf(run) : null;
+      }
     };
     run();
   }
