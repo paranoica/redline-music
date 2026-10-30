@@ -811,7 +811,7 @@ mod tests {
         // a whole number of the 8-block ring, so both read the same smoothed slots
         let ring = 8 * near_wrap.block as u64;
         let start = ((1u64 << 32) - 3000) / ring * ring;
-        near_wrap.now = start.try_into().expect("the counter holds 2^32");
+        near_wrap.now = start;
         let input = bursts(20_000);
         let mut a = input.clone();
         let mut b = input;
