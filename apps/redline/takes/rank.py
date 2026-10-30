@@ -1,7 +1,8 @@
 """Measure the takes recorded over one beat and rank them by how clean and tight they are.
 
 The score is a sum of penalty points; fewer points rank higher, and ties go to the tighter
-timing, then to the name. Each part has a tolerance below which it costs nothing:
+timing, then to the name. A take shorter than SHORTER_SHARE of the beat ranks below every
+full-length one whatever its points. Each part has a tolerance below which it costs nothing:
 
 - timing: 1 point per TIMING_STEP_MS that the take's median onset deviation from the median
   of all takes exceeds TIMING_TOLERANCE_MS. The reference is the other takes, not the beat
@@ -504,7 +505,8 @@ def _ordered(measured: Sequence[tuple[_Take, TakeMetrics]]) -> list[RankedTake]:
         if metrics.deep_distance is None and known:
             part["deep"] = worst_deep
             take.notes.append("no deep distance: counted as the farthest take")
-    scored.sort(key=lambda s: (sum(s[2].values()), s[1].timing_ms or 0.0, s[0].name))
+    # fewer events make a short take look cleaner than it is, so it never beats a full one
+    scored.sort(key=lambda s: (s[1].short, sum(s[2].values()), s[1].timing_ms or 0.0, s[0].name))
     ranked = len(scored) > 1
     return [
         RankedTake(
@@ -524,7 +526,8 @@ def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
 
     A take that cannot be decoded, is at another rate than most, is empty or almost silent,
     or runs well past the beat is left out with the reason. A take shorter than half the beat
-    is kept: it is measured over the range it shares with the beat and the other takes.
+    is kept: it is measured over the range it shares with the beat and the other takes, and
+    ranked below every full-length take.
 
     Args:
         beat: The beat the takes were recorded over; frame 0 of a take is frame 0 of it.

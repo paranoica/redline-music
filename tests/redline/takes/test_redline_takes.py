@@ -219,3 +219,19 @@ def test_an_old_sidecar_without_the_complete_mark_still_reads(tmp_path, beat):
     take = rank_folder(beat, folder).takes[0]
     assert take.metrics.dropouts == 1
     assert take.metrics.dropout_ms == pytest.approx(10.0)
+
+
+def test_a_clean_short_take_ranks_below_a_slightly_worse_full_one(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(2))
+    put(folder, "take-03.wav", vocal(3, seconds=SECONDS / 4))
+    clean_sidecar(folder, "take-01.json", dropouts=[[RATE, RATE + 480]])
+    clean_sidecar(folder, "take-02.json")
+    clean_sidecar(folder, "take-03.json")
+    ranking = rank_folder(beat, folder)
+    takes = by_name(ranking)
+    assert takes["take-03"].total < takes["take-01"].total
+    assert [t.name for t in ranking.takes] == ["take-02", "take-01", "take-03"]
+    text = report_markdown(ranking, "song", None)
+    assert "ниже всех полных дублей" in text

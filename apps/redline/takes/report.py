@@ -221,7 +221,9 @@ def _notes(ranking: Ranking) -> list[str]:
             beat = f", бит {ranking.beat_seconds:.1f} с" if ranking.beat_seconds else ""
             lines.append(
                 f"- {take.name}: дубль короткий, {take.metrics.seconds:.1f} с{beat}. "
-                "Замерен только по участку, где он совпадает с битом и другими дублями."
+                "Замерен только по участку, где он совпадает с битом и другими дублями, и "
+                "стоит ниже всех полных дублей: на коротком куске меньше событий, и он "
+                "выглядит чище, чем есть."
             )
         lines += [f"- {take.name}: {note}" for note in take.metrics.notes]
     lines += [f"- {s.name}: пропущен — {skip_reason_ru(s)}" for s in ranking.skips]
