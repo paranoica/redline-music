@@ -95,3 +95,44 @@ test("a stopped engine is told to the page once, as fatal, not as a rack's error
   assert.deepEqual(fatal, ["Aborted(OOM)"]);
   assert.deepEqual(errors, []);
 });
+
+// a client on an engine that has played `ahead` frames of a four-second track
+function playing(ahead) {
+  const { page, engine } = pair();
+  const client = new EngineClient(page, catalogueOf(effects));
+  const frames = 4 * RATE;
+  const tone = new Float32Array(2 * frames).fill(0.25);
+  client.loadStems(frames, tone.slice(), tone.slice(), tone.slice());
+  client.setRacks({ vocal: [], beat: [], master: [] }, []);
+  client.play(true);
+  render(engine, ahead);
+  const shown = [];
+  client.onLevels = (l) => shown.push(l.frame);
+  return { client, engine, shown };
+}
+
+test("after a seek while playing the page is shown no report of the old spot", () => {
+  // reports come every 1600 frames: for some of these one falls in the fade before the seek
+  for (let k = 0; k < 13; k++) {
+    const { client, engine, shown } = playing(9600 + 128 * k);
+    client.seek(96000);
+    render(engine, RATE / 4);
+    assert.ok(shown.length > 0 && shown.every((f) => f >= 96000), `ahead ${9600 + 128 * k}: ${shown}`);
+  }
+});
+
+test("after a loop that moves the position while playing the page is shown no report of the old spot", () => {
+  for (let k = 0; k < 13; k++) {
+    const { client, engine, shown } = playing(9600 + 128 * k);
+    client.loop(true, 48000, 72000);
+    render(engine, RATE / 4);
+    assert.ok(shown.length > 0 && shown.every((f) => f >= 48000 && f < 72000), `ahead ${9600 + 128 * k}: ${shown}`);
+  }
+});
+
+test("a loop that leaves the position where it is drops no report of it", () => {
+  const { client, engine, shown } = playing(9600);
+  client.loop(true, 0, 96000);
+  render(engine, 9600);
+  assert.ok(shown.length >= 5 && shown.every((f) => f > 9600 - 2000 && f < 2 * 9600), `${shown}`);
+});

@@ -29,6 +29,7 @@ export class EngineClient {
   readonly #catalogue: Catalogue;
   readonly #sent: Record<Track, Sent | null> = { vocal: null, beat: null, master: null };
   readonly #versions: Record<Track, number> = { vocal: 0, beat: 0, master: 0 };
+  #seq = 0;
 
   constructor(port: PortLike, catalogue: Catalogue) {
     this.#port = port;
@@ -47,6 +48,8 @@ export class EngineClient {
   #receive(m: FromEngine): void {
     switch (m.type) {
       case "levels":
+        // the position from before the last seek or loop
+        if (m.seq < this.#seq) return;
         return this.onLevels(m);
       case "rack":
         if (this.#sent[m.track]?.version === m.version) {
@@ -114,12 +117,12 @@ export class EngineClient {
 
   seek(frame: number): void {
     if (this.#dead) return;
-    this.#send({ type: "seek", frame });
+    this.#send({ type: "seek", frame, seq: ++this.#seq });
   }
 
   loop(on: boolean, start: number, end: number): void {
     if (this.#dead) return;
-    this.#send({ type: "loop", on, start, end });
+    this.#send({ type: "loop", on, start, end, seq: ++this.#seq });
   }
 
   listen(gains: Record<Source, number>): void {

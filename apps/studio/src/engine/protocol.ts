@@ -14,8 +14,9 @@ export type ToEngine =
   | { type: "set"; track: Track; version: number; slot: number; param: string; value: number }
   | { type: "lanes"; version: number; lanes: Lane[] }
   | { type: "play"; playing: boolean }
-  | { type: "seek"; frame: number }
-  | { type: "loop"; on: boolean; start: number; end: number }
+  // seeks and loops are numbered by the page, so it can tell the reports of the old spot
+  | { type: "seek"; frame: number; seq: number }
+  | { type: "loop"; on: boolean; start: number; end: number; seq: number }
   | { type: "listen"; gains: Record<Source, number> };
 
 export interface Level {
@@ -27,6 +28,8 @@ export interface Levels {
   type: "levels";
   // the frame of the track heard at the end of the window
   frame: number;
+  // the last seek or loop the frame has caught up with
+  seq: number;
   playing: boolean;
   vocal: Level;
   beat: Level;

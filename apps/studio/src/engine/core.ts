@@ -149,6 +149,9 @@ export class Engine {
   readonly #finishJob = (): void => this.#finish();
   // seeks waiting for silence; the end of the track waits for them
   #seeks = 0;
+  // the page's last seek or loop, and the last one the position has caught up with
+  #asked = 0;
+  #seq = 0;
   readonly #gain: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   #target: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   readonly #pad = { vocal: new DelayLine(DELAY_CAPACITY), beat: new DelayLine(DELAY_CAPACITY) };
@@ -220,13 +223,16 @@ export class Engine {
         if (m.playing) this.#running = true;
         return;
       case "seek":
-        return this.#seek(m.frame);
+        this.#asked = m.seq;
+        this.#seek(m.frame);
+        return this.#caughtUp();
       case "loop": {
+        this.#asked = m.seq;
         const on = m.on && m.end > m.start;
         this.#loop = { on, start: on ? m.start : 0, end: on ? m.end : 0 };
         const at = this.#position();
         if (on && (at < m.start || at >= m.end)) this.#seek(m.start);
-        return;
+        return this.#caughtUp();
       }
       case "listen":
         this.#target = { ...m.gains };
@@ -384,7 +390,12 @@ export class Engine {
     this.#jobs.push(() => {
       this.#seeks--;
       this.#restart(frame);
+      this.#caughtUp();
     });
+  }
+
+  #caughtUp(): void {
+    if (this.#seeks === 0) this.#seq = this.#asked;
   }
 
   // the frame the output will go on from: past the pre-roll when one is under way
@@ -745,6 +756,7 @@ export class Engine {
       type: "levels",
       // through a pre-roll and the latency after it, the frame that will be heard first
       frame: this.#heard(this.#read + this.#hold),
+      seq: this.#seq,
       playing: this.#running,
       vocal: level(L.vocal),
       beat: level(L.beat),
