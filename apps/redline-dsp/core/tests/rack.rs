@@ -385,3 +385,47 @@ fn the_rack_grid_is_the_common_multiple_of_its_offline_windows() {
     let off = r#"{"effects": [{"effect": "reverse", "on": false}]}"#;
     assert_eq!(grid(off), 1);
 }
+
+#[test]
+fn an_effect_turned_off_after_reset_plays_as_one_built_off_and_the_side_follows() {
+    let n = 48000;
+    let side = burst(n, 24000);
+    let x = vec![[0.25f32, 0.25]; n];
+    let built_off = render_with(
+        &format!(r#"{{"effects": [{{"effect": "limiter", "on": false}}, {DUCK}]}}"#),
+        &x,
+        &side,
+        128,
+    );
+    let limiter = r#"{"effect": "limiter", "params": {"lookahead": 5}}"#;
+    let mut rack = Rack::from_json(&format!(r#"{{"effects": [{limiter}, {DUCK}]}}"#)).unwrap();
+    rack.reset(48000.0).unwrap();
+    assert_eq!(rack.latency(), 240);
+    rack.turn_off(0).unwrap();
+    assert_eq!(rack.latency(), 0);
+    assert_eq!(rack.latency_before(1), 0);
+    let mut y = x.clone();
+    for (k, chunk) in y.chunks_mut(128).enumerate() {
+        let from = (k * 128).min(n);
+        rack.process_with(chunk, &side[from..(from + 128).min(n)]);
+    }
+    assert!(built_off[24100][0] < 0.1, "the duck dips at all");
+    for i in 0..n {
+        assert!(
+            (y[i][0] - built_off[i][0]).abs() < 1e-6,
+            "frame {i}: {} against {}",
+            y[i][0],
+            built_off[i][0]
+        );
+    }
+}
+
+#[test]
+fn a_slot_is_named_by_its_effect_and_a_missing_slot_is_an_error() {
+    let mut rack =
+        Rack::from_json(r#"{"effects": [{"effect": "gain"}, {"effect": "limiter"}]}"#).unwrap();
+    assert_eq!(rack.effect_name(0), Some("gain"));
+    assert_eq!(rack.effect_name(1), Some("limiter"));
+    assert_eq!(rack.effect_name(2), None);
+    assert!(rack.turn_off(2).unwrap_err().to_string().contains('2'));
+}

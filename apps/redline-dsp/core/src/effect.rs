@@ -521,6 +521,25 @@ impl Rack {
         Ok(())
     }
 
+    /// Switches the effect in `slot` off between blocks; the side reaches the effects after
+    /// it that much sooner. Switching off only shortens the delays, so nothing is resized.
+    pub fn turn_off(&mut self, slot: usize) -> Result<(), RackError> {
+        let on = self
+            .on
+            .get_mut(slot)
+            .ok_or_else(|| RackError(format!("the rack has no effect at {slot}")))?;
+        *on = false;
+        for k in 0..self.delays.len() {
+            self.delays[k] = self.latency_before(k);
+        }
+        Ok(())
+    }
+
+    /// The name of the effect in `slot`.
+    pub fn effect_name(&self, slot: usize) -> Option<&'static str> {
+        self.effects.get(slot).map(|e| e.name())
+    }
+
     pub fn len(&self) -> usize {
         self.effects.len()
     }
