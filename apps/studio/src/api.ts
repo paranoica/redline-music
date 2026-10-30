@@ -1,16 +1,15 @@
-// Talks to the studio server. The token comes once from the page address and is then
-// dropped from it, so it does not stay in the history or a screenshot.
+// Talks to the studio server. The token comes from core/token.ts.
 
+import { token } from "./core/token.ts";
 import { Superseded } from "./core/analysis.ts";
 import type { Analysis, Lane, Session, Settings, Track } from "./types.ts";
 
-const token = new URLSearchParams(location.search).get("t") ?? "";
-history.replaceState(null, "", location.pathname);
+const pageToken = token();
 
 export { Superseded };
 
 async function call(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
-  const headers: Record<string, string> = { "X-Token": token };
+  const headers: Record<string, string> = { "X-Token": pageToken };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);

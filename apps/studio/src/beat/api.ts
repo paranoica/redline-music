@@ -1,11 +1,10 @@
-// Talks to the beat page's server. The token comes once from the page address and is then
-// dropped from it, as on the studio page.
+// Talks to the beat page's server. The token comes from core/token.ts, as on the studio page.
 
+import { token } from "../core/token.ts";
 import type { EventTable, InstrumentSpec, Score } from "./model.ts";
 import type { EffectSpec } from "../types.ts";
 
-const token = new URLSearchParams(location.search).get("t") ?? "";
-history.replaceState(null, "", location.pathname);
+const pageToken = token();
 
 // the server's answer to a call it refused, with the score's errors when it gave them
 export class Refused extends Error {
@@ -20,7 +19,7 @@ export class Refused extends Error {
 }
 
 async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
-  const headers: Record<string, string> = { "X-Token": token };
+  const headers: Record<string, string> = { "X-Token": pageToken };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
