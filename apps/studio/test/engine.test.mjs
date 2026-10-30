@@ -402,3 +402,130 @@ test("a rebuilt master rack warms up on the mix the racks put out, as the live o
   const out = run(engine, RATE / 2);
   assert.ok(quietest(out) > 0.009, `the new rack limited the mix to ${quietest(out)}`);
 });
+
+const peak = (x, from = 0, to = x.length / 2) => {
+  let m = 0;
+  for (let i = from; i < to; i++) m = Math.max(m, Math.abs(left(x, i)));
+  return m;
+};
+const gainRack = rack({ effect: "gain", params: { db: 0 } });
+// 0.5 at -40 dB
+const AT_LANE = 0.5 * 10 ** (-40 / 20);
+
+test("a lane rules its param from the first frame of a play, without a glide from the slot's value", () => {
+  const { engine } = setup({ vocal: dc(RATE, 0.5) });
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: gainRack, lanes: [{ slot: 0, param: "db", points: [[0, -40]] }] });
+  engine.handle({ type: "play", playing: true });
+  const out = run(engine, 8192);
+  assert.ok(peak(out) < AT_LANE * 1.02, `${peak(out)}`);
+  assert.ok(Math.abs(left(out, 8000) - AT_LANE) < 1e-4, `${left(out, 8000)}`);
+});
+
+test("played again after its end, a lane's param starts at its value at the start, not at the end", () => {
+  const frames = 9600;
+  const { engine, posted } = setup({ frames, vocal: dc(frames, 0.5) });
+  const lanes = [{ slot: 0, param: "db", points: [[0, -40], [0.1, -40], [0.1, 0]] }];
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: gainRack, lanes });
+  engine.handle({ type: "play", playing: true });
+  playToEnd(engine, posted);
+  assert.ok(posted.some((m) => m.type === "ended"));
+  engine.handle({ type: "play", playing: true });
+  const again = run(engine, 4096);
+  assert.ok(peak(again) < AT_LANE * 1.02, `${peak(again)}`);
+});
+
+test("after a seek a lane's param starts at its value at the new spot", () => {
+  const { engine } = setup({ vocal: dc(RATE, 0.5) });
+  const lanes = [{ slot: 0, param: "db", points: [[0, 0], [0.5, 0], [0.5, -40]] }];
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: gainRack, lanes });
+  engine.handle({ type: "play", playing: true });
+  assert.ok(left(run(engine, 4096), 4000) > 0.49);
+  engine.handle({ type: "play", playing: false });
+  run(engine, 2048);
+  engine.handle({ type: "seek", frame: 0.75 * RATE });
+  engine.handle({ type: "play", playing: true });
+  const out = run(engine, 4096);
+  assert.ok(peak(out) < AT_LANE * 1.02, `${peak(out)}`);
+});
+
+// a loud sine over [from, to) seconds, silence elsewhere
+const burst = (frames, from, to) =>
+  stereo(frames, (n) => (n >= from * RATE && n < to * RATE ? [0.5 * Math.sin(n * 0.05), 0.5 * Math.sin(n * 0.05)] : [0, 0]));
+const plate = rack({ effect: "plate", params: { mix: 1, decay: 0.9 } });
+
+test("a seek leaves the reverb's tail of the old spot behind", () => {
+  const frames = 6 * RATE;
+  const { engine } = setup({ frames, vocal: burst(frames, 0, 1), racks: { vocal: plate } });
+  engine.handle({ type: "play", playing: true });
+  assert.ok(peak(run(engine, RATE)) > 0.1);
+  engine.handle({ type: "play", playing: false });
+  run(engine, 2048);
+  engine.handle({ type: "seek", frame: 3 * RATE });
+  engine.handle({ type: "play", playing: true });
+  const out = run(engine, RATE / 2);
+  assert.ok(peak(out) < 1e-5, `the old tail rang at ${peak(out)}`);
+});
+
+test("after a seek the reverb rings with what the track has just before the new spot", () => {
+  const frames = 2 * RATE;
+  const through = setup({ frames, vocal: burst(frames, 0.9, 1), racks: { vocal: plate } });
+  through.engine.handle({ type: "play", playing: true });
+  const whole = run(through.engine, 1.2 * RATE);
+  const heard = peak(whole, RATE + 1000, 1.2 * RATE);
+  assert.ok(heard > 0.02, `${heard}`);
+  const sought = setup({ frames, vocal: burst(frames, 0.9, 1), racks: { vocal: plate } });
+  sought.engine.handle({ type: "seek", frame: RATE });
+  sought.engine.handle({ type: "play", playing: true });
+  const out = run(sought.engine, 0.2 * RATE);
+  assert.ok(peak(out, 1000) > 0.5 * heard, `${peak(out, 1000)} against ${heard} played through`);
+});
+
+test("a rack rebuilt after a seek, before the play, does not let the frames before the spot be heard", () => {
+  const frames = 2 * RATE;
+  const { engine, posted } = setup({ frames, vocal: stereo(frames, (n) => (n < RATE ? [0.5, 0.5] : [0, 0])) });
+  engine.handle({ type: "seek", frame: RATE });
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: gainRack, lanes: [] });
+  engine.handle({ type: "play", playing: true });
+  const out = run(engine, 4096);
+  assert.ok(peak(out) < 1e-6, `${peak(out)}`);
+  assert.ok(posted.filter((m) => m.type === "levels").every((m) => m.frame >= RATE), "the position went back");
+});
+
+test("a pause and a play on the same spot keep the reverb's tail", () => {
+  const frames = 2 * RATE;
+  const { engine } = setup({ frames, vocal: burst(frames, 0, 0.5), racks: { vocal: plate } });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 0.55 * RATE);
+  engine.handle({ type: "play", playing: false });
+  run(engine, 2048);
+  engine.handle({ type: "play", playing: true });
+  const out = run(engine, 0.1 * RATE);
+  assert.ok(peak(out) > 0.02, `${peak(out)}`);
+});
+
+for (const [when, before] of [["after the end was reached", 0], ["just before the end is reached", BLOCK]]) {
+  test(`a seek ${when}, in the fade of the play-out, wins over the end`, () => {
+    const frames = 9600;
+    const { engine, posted } = setup({ frames, vocal: dc(frames, 0.5) });
+    engine.handle({ type: "play", playing: true });
+    run(engine, frames - before);
+    engine.handle({ type: "seek", frame: 2000 });
+    const out = run(engine, 4096);
+    assert.ok(!posted.some((m) => m.type === "ended"), "ended was posted");
+    assert.ok(Math.abs(left(out, 4000) - 0.5) < 1e-6, `${left(out, 4000)}`);
+    const frame = posted.filter((m) => m.type === "levels").at(-1).frame;
+    assert.ok(frame >= 2000 && frame < 2000 + 4096, `${frame}`);
+  });
+}
+
+test("a forward seek while a rebuilt rack warms up does not warm it through the gap", () => {
+  const frames = 20 * RATE;
+  const { engine, posted } = setup({ frames, vocal: dc(frames, 0.5) });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 2048);
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: rack({ effect: "gain", params: { db: -6 } }), lanes: [] });
+  engine.handle({ type: "seek", frame: 15 * RATE });
+  const out = run(engine, RATE / 4);
+  assert.ok(posted.some((m) => m.type === "rack" && m.track === "vocal" && m.version === 2), "the new rack is not in yet");
+  assert.ok(Math.abs(left(out, RATE / 4 - 1) - 0.5 * 10 ** (-6 / 20)) < 1e-3, `${left(out, RATE / 4 - 1)}`);
+});

@@ -18,6 +18,8 @@ const WARM_EXTRA = 4096;
 const WARM_MAX = 65536;
 // frames of warm-up a new rack goes through per block, beside the live ones
 const WARM_CHUNK = 1024;
+// blocks the engine runs per block while it is silent anyway, to get through a pre-roll sooner
+const FAST = 4;
 const CROSSFADE = 1024;
 // the fade to and from silence around a seek, a pause or a change of latency
 const DIP = 384;
@@ -43,6 +45,8 @@ interface Inst {
   handle: number;
   version: number;
   latency: number;
+  // it has processed since it was made or reset
+  heard: boolean;
   lanes: LiveLane[];
   // the slots' own values, for a param a lane lets go of
   slots: Slot[];
@@ -136,6 +140,10 @@ export class Engine {
   // frames the output stays silent after the delay lines were emptied, until they refill
   #hold = 0;
   #ending = false;
+  #wantAtEnd = false;
+  readonly #finishJob = (): void => this.#finish();
+  // seeks waiting for silence; the end of the track waits for them
+  #seeks = 0;
   readonly #gain: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   #target: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   readonly #pad = { vocal: new DelayLine(DELAY_CAPACITY), beat: new DelayLine(DELAY_CAPACITY) };
@@ -143,6 +151,8 @@ export class Engine {
   #total = 0;
   readonly #original = new Float32Array(2 * BLOCK);
   readonly #renderBlock = new Float32Array(2 * BLOCK);
+  readonly #quietLeft = new Float32Array(BLOCK);
+  readonly #quietRight = new Float32Array(BLOCK);
   // the track frame of each frame of the block
   readonly #pos = new Int32Array(BLOCK);
   readonly #heardSide = new History();
@@ -188,15 +198,18 @@ export class Engine {
       }
       case "play":
         if (m.playing && !this.#stems) return;
+        if (m.playing && !this.#running) this.#snapUnheard();
         this.#want = m.playing;
+        this.#wantAtEnd = m.playing;
         if (m.playing) this.#running = true;
         return;
       case "seek":
-        return this.#atSilence(() => this.#jump(m.frame));
+        return this.#seek(m.frame);
       case "loop": {
         const on = m.on && m.end > m.start;
         this.#loop = { on, start: on ? m.start : 0, end: on ? m.end : 0 };
-        if (on && (this.#read < m.start || this.#read >= m.end)) this.#atSilence(() => this.#jump(m.start));
+        const at = this.#position();
+        if (on && (at < m.start || at >= m.end)) this.#seek(m.start);
         return;
       }
       case "listen":
@@ -209,8 +222,21 @@ export class Engine {
   // fills both channels; a block of any length is taken in parts of 128 frames
   render(left: Float32Array, right: Float32Array): void {
     for (let at = 0; at < left.length; at += BLOCK) {
+      this.#skip();
       this.#block(left, right, at, Math.min(BLOCK, left.length - at));
     }
+  }
+
+  // a pre-roll is not heard, so it need not take its own time; the latency still does
+  #skip(): void {
+    for (let k = 1; k < FAST && this.#running && this.#env === 0 && this.#hold - this.#total >= BLOCK && !this.#warming(); k++) {
+      this.#block(this.#quietLeft, this.#quietRight, 0, BLOCK);
+    }
+  }
+
+  #warming(): boolean {
+    const r = this.#racks;
+    return !!(r.vocal.pending || r.beat.pending || r.master.pending);
   }
 
   #error(message: string, track?: Track, version?: number): void {
@@ -230,6 +256,7 @@ export class Engine {
       handle,
       version,
       latency,
+      heard: false,
       lanes: track === "vocal" ? this.#encode(lanes) : [],
       slots,
       master: track === "master" ? masterParams(slots) : null,
@@ -242,7 +269,9 @@ export class Engine {
       this.#install(rack, inst);
       return;
     }
-    rack.pending = { inst, cursor: this.#read - Math.min(WARM_MAX, latency + WARM_EXTRA), ready: false };
+    const cursor = this.#read - Math.min(WARM_MAX, latency + WARM_EXTRA);
+    if (inst.lanes.length) this.#snap(rack, inst, cursor);
+    rack.pending = { inst, cursor, ready: false };
   }
 
   #install(rack: Rack, inst: Inst): void {
@@ -305,8 +334,9 @@ export class Engine {
     this.#pad.beat.setDelay(a.beatPad);
     this.#late.original.setDelay(a.total);
     this.#late.render.setDelay(a.total);
+    const preroll = Math.max(0, this.#hold - this.#total);
     this.#total = a.total;
-    this.#hold = a.total;
+    this.#hold = a.total + preroll;
   }
 
   #set(track: Track, version: number, slot: number, param: string, value: number): void {
@@ -322,38 +352,85 @@ export class Engine {
     if (inst.master && (param === "gain" || param === "trim")) inst.master[param] = value;
   }
 
-  // `job` runs once the output is silent: at once when nothing plays
-  #atSilence(job: () => void): void {
+  // a seek wins over an end of the track that waits for silence
+  #seek(frame: number): void {
+    if (this.#ending) {
+      this.#ending = false;
+      this.#want = this.#wantAtEnd;
+      const i = this.#jobs.indexOf(this.#finishJob);
+      if (i >= 0) this.#jobs.splice(i, 1);
+    }
     if (!this.#running) {
-      job();
+      this.#restart(frame);
       return;
     }
-    this.#jobs.push(job);
+    this.#seeks++;
+    this.#jobs.push(() => {
+      this.#seeks--;
+      this.#restart(frame);
+    });
   }
 
+  // the frame the output will go on from: past the pre-roll when one is under way
+  #position(): number {
+    return this.#read + Math.max(0, this.#hold - this.#total);
+  }
+
+  // at silence: the racks forget the old spot and hear the track again from before `frame`,
+  // a rebuilt rack takes over at once rather than warming up across the jump
+  #restart(frame: number): void {
+    for (const rack of Object.values(this.#racks)) {
+      const pending = rack.pending;
+      rack.pending = null;
+      rack.swapQueued = false;
+      if (pending) this.#install(rack, pending.inst);
+      else if (rack.fading) {
+        this.#free(rack.fading.old);
+        rack.fading = null;
+      }
+    }
+    this.#jump(frame);
+    for (const rack of Object.values(this.#racks)) {
+      if (rack.current) this.#snap(rack, rack.current, this.#read);
+    }
+  }
+
+  // the racks are fed the frames before `frame` while the output stays silent
   #jump(frame: number): void {
     const frames = this.#stems?.frames ?? 0;
-    this.#read = Math.max(0, Math.min(Math.round(frame), Math.max(0, frames - 1)));
+    const at = Math.max(0, Math.min(Math.round(frame), Math.max(0, frames - 1)));
+    const preroll = Math.min(at, WARM_MAX, this.#total + WARM_EXTRA);
+    this.#read = at - preroll;
     for (const d of [this.#pad.vocal, this.#pad.beat, this.#late.original, this.#late.render]) {
       const keep = d.delay;
       d.setDelay(0);
       d.setDelay(keep);
     }
-    this.#hold = this.#total;
+    this.#hold = this.#total + preroll;
+  }
+
+  // a rack that has heard nothing, or is to forget what it heard, starts with its lanes'
+  // values at `frame`: a reset lands its params on what they were set to, without a glide
+  #snap(rack: Rack, inst: Inst, frame: number): void {
+    for (const l of inst.lanes) l.value = Number.NaN;
+    if (inst.lanes.length) this.#lanes(inst, frame / this.#rate);
+    if (this.#dsp._rack_reset(inst.handle, this.#rate) !== 0) this.#error(lastError(this.#dsp), rack.track, inst.version);
+    inst.heard = false;
+  }
+
+  // a play from a stop: a rack made or given lanes since it last played
+  #snapUnheard(): void {
+    for (const rack of Object.values(this.#racks)) {
+      const inst = rack.current;
+      if (inst && !inst.heard && inst.lanes.length) this.#snap(rack, inst, this.#read);
+    }
   }
 
   // the track has played out and faded: back to its start, with nothing of its end left in the racks
   #finish(): void {
     this.#ending = false;
     this.#want = false;
-    this.#jump(0);
-    for (const rack of Object.values(this.#racks)) {
-      for (const inst of [rack.current, rack.pending?.inst, rack.fading?.old]) {
-        if (inst && this.#dsp._rack_reset(inst.handle, this.#rate) !== 0) {
-          this.#error(lastError(this.#dsp), rack.track, inst.version);
-        }
-      }
-    }
+    this.#restart(0);
     this.#post({ type: "ended" });
   }
 
@@ -383,6 +460,7 @@ export class Engine {
 
   #process(rack: Rack, inst: Inst, io: number, side: number, n: number, seconds: number | null): void {
     const dsp = this.#dsp;
+    inst.heard = true;
     if (seconds !== null && inst.lanes.length) this.#lanes(inst, seconds);
     if (dsp._rack_process(inst.handle, io, side, io, n) !== 0) {
       const message = lastError(dsp);
@@ -584,10 +662,11 @@ export class Engine {
     this.#window += n;
     if (this.#window >= this.#rate / LEVELS_PER_S) this.#report();
     // the fade out starts on the next block, which is silent: this one still has the end in it
-    if (!this.#loop.on && this.#read >= last && !this.#ending) {
+    if (!this.#loop.on && this.#read >= last && !this.#ending && this.#seeks === 0) {
       this.#ending = true;
+      this.#wantAtEnd = this.#want;
       this.#want = false;
-      this.#jobs.push(() => this.#finish());
+      this.#jobs.push(this.#finishJob);
     }
     if (this.#env === 0) {
       const jobs = this.#jobs;
@@ -619,7 +698,7 @@ export class Engine {
     const seconds = this.#loop.on ? (this.#loop.end - this.#loop.start) / this.#rate : 10;
     this.#post({
       type: "levels",
-      frame: this.#heard(this.#read),
+      frame: this.#heard(this.#position()),
       playing: this.#running,
       vocal: level(L.vocal),
       beat: level(L.beat),
