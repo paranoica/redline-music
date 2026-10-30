@@ -1,4 +1,5 @@
-// Builds the page into dist/: index.html, app.js, worklet.js, styles.css, redline_dsp.wasm.
+// Builds the pages into dist/: index.html, app.js, worklet.js, beat-worklet.js, styles.css,
+// redline_dsp.wasm.
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import * as esbuild from "esbuild";
 
@@ -19,6 +20,7 @@ const builds = [
   { ...common, entryPoints: ["src/main.ts"], outfile: "dist/app.js", platform: "browser" },
   // the emscripten glue has a node branch that imports node: modules; it never runs in a worklet
   { ...common, entryPoints: ["src/worklet/processor.ts"], outfile: "dist/worklet.js", platform: "browser", external: ["node:*"] },
+  { ...common, entryPoints: ["src/worklet/beat-processor.ts"], outfile: "dist/beat-worklet.js", platform: "browser", external: ["node:*"] },
   { ...common, entryPoints: ["src/styles/main.css"], outfile: "dist/styles.css", format: undefined },
 ];
 
