@@ -502,22 +502,26 @@ def _analysis(studio: Studio, body: dict) -> Reply:
     return reply_json(HTTPStatus.OK, {"analysis": numbers, "racks": racks, "lanes": lanes})
 
 
+def _seconds(value: object) -> float:
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise BadRequest(HTTPStatus.BAD_REQUEST, "start and end are seconds")
+    return float(value)
+
+
 def _preview(studio: Studio, body: dict) -> Reply:
     only(body, "settings", "seq", "start", "end")
     settings, seq = _settings(body), _seq(body)
-    start, end = body.get("start"), body.get("end")
+    start, end = _seconds(body.get("start")), _seconds(body.get("end"))
     total = len(studio.original) / studio.rate
-    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (start, end)):
-        raise BadRequest(HTTPStatus.BAD_REQUEST, "start and end are seconds")
-    if not 0 <= start < end <= total:  # type: ignore[operator]
+    if not 0 <= start < end <= total:
         raise BadRequest(HTTPStatus.BAD_REQUEST, f"the loop lies within 0-{total:.2f} s")
-    first, last = int(start * studio.rate), int(end * studio.rate)  # type: ignore[operator]
+    first, last = int(start * studio.rate), int(end * studio.rate)
     began = time.monotonic()
     samples = studio.preview(settings, seq, first, last)
     if samples is None:
         return _error(HTTPStatus.CONFLICT, "a newer request came in")
     took = (time.monotonic() - began) * 1000
-    print(f"preview {end - start:.1f} s in {took:.0f} ms")  # type: ignore[operator]
+    print(f"preview {end - start:.1f} s in {took:.0f} ms")
     lufs = integrated_lufs(studio.original[first:last], studio.rate)
     return reply_bytes(
         HTTPStatus.OK,

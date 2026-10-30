@@ -21,7 +21,7 @@ from redline.engine.settings import Settings
 from redline.record import driver
 from redline.record.driver import Calibrated, OnStage, Ready, Stage
 from redline.record.protocol import EngineDesync, EngineError, Meters
-from redline.record.session import Outcome, budget_frames, monitor_ms
+from redline.record.session import Outcome, Session, budget_frames, monitor_ms
 
 if TYPE_CHECKING:
     from redline.measure.separate import Separator
@@ -491,8 +491,13 @@ class RecOwner:
         if stage.name in driver.STAGES and stage.name not in ("ready", "failed"):
             self._set(stage=stage.name)
 
+    def _session(self) -> Session:
+        # commands that need a session are refused before they reach the owner while not ready
+        assert self._ready is not None
+        return self._ready.session
+
     def _toggle(self, command: _Command) -> Outcome:
-        session = self._ready.session  # type: ignore[union-attr]
+        session = self._session()
         self._set(stopping=session.current is not None or session.pending is not None)
         try:
             outcome = session.toggle()
@@ -502,7 +507,7 @@ class RecOwner:
         return outcome
 
     def _discard(self, command: _Command) -> Outcome:
-        session = self._ready.session  # type: ignore[union-attr]
+        session = self._session()
         self._set(stopping=session.current is not None)
         try:
             return session.discard_last()

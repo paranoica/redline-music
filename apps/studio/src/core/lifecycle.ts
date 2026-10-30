@@ -1,10 +1,9 @@
 // What a mounted app owns while it lives: listeners, timers and frames, all released by one
 // dispose. After dispose every call is a no-op, so a late callback cannot start something new.
 
-// any: a document's listeners are typed by event name, which a plain string cannot match
 export interface ListenTarget {
-  addEventListener(type: string, listener: (event: any) => void, options?: boolean | AddEventListenerOptions): void;
-  removeEventListener(type: string, listener: (event: any) => void, options?: boolean | EventListenerOptions): void;
+  addEventListener(type: string, listener: (event: Event) => void, options?: boolean | AddEventListenerOptions): void;
+  removeEventListener(type: string, listener: (event: Event) => void, options?: boolean | EventListenerOptions): void;
 }
 
 export interface Clock {
@@ -62,15 +61,17 @@ export class Scope {
     return once;
   }
 
-  listen<E extends string>(
+  // the caller names the event type it listens for; the target hands it that event
+  listen<T extends Event>(
     target: ListenTarget,
-    type: E,
-    listener: (event: any) => void,
+    type: string,
+    listener: (event: T) => void,
     options?: boolean | AddEventListenerOptions,
   ): () => void {
     if (this.#closed) return () => {};
-    target.addEventListener(type, listener, options);
-    return this.add(() => target.removeEventListener(type, listener, options));
+    const handler = listener as (event: Event) => void;
+    target.addEventListener(type, handler, options);
+    return this.add(() => target.removeEventListener(type, handler, options));
   }
 
   setTimeout(fn: () => void, ms: number): number {
@@ -166,7 +167,7 @@ export class KeySurface {
   setActive(on: boolean): void {
     if (on === this.active) return;
     if (on) {
-      const handler = this.#handler;
+      const handler = this.#handler as (event: Event) => void;
       this.#doc.addEventListener("keydown", handler);
       this.#off = () => this.#doc.removeEventListener("keydown", handler);
     } else {
