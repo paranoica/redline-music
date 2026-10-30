@@ -48,7 +48,8 @@ def test_private_material_is_ignored(path):
         "apps/redline/profiles/__init__.py",
         ".env.example",
         "tests/redline/core/test_redline_audio.py",
-        "apps/studio-web/index.html",
+        "apps/studio/src/index.html",
+        "apps/studio/src/engine/redline_dsp.wasm",
     ],
 )
 def test_code_is_not_ignored(path):

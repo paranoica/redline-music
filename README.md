@@ -263,7 +263,7 @@ apps/
     web/            what the local pages share: token, host check, headers
     cli/            the command line
   redline-dsp/      the Rust inner loops: oversampled clip, resampling, filters, loudness
-  studio-web/       the studio page
+  studio/           the studio page, TypeScript
   lyrics-web/       the marks page
 tests/redline/      tests, on synthetic audio and invented texts
 docs/               the sound and lyrics guides

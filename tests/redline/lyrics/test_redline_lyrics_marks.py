@@ -211,7 +211,7 @@ def test_the_marks_page_keeps_the_studios_guards(server):
     assert call(server, "GET", "/../text.txt")[0] == 404
 
 
-def test_the_page_serves_its_own_files_and_the_studios_tokens(server):
+def test_the_page_serves_its_own_files_and_tokens(server):
     files = server.files
     assert "/index.html" in files and "/css/tokens.css" in files
     assert all(path.suffix in (".html", ".css", ".js", ".svg") for path, _ in files.values())

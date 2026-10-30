@@ -10,8 +10,6 @@ from redline.web.local import BadRequest, LocalHandler, LocalServer, only, site_
 
 ROOT = Path(__file__).resolve().parents[3]
 SITE = ROOT / "lyrics-web"
-# one look across the pages: the studio's colours and type
-TOKENS = ROOT / "studio-web" / "css" / "tokens.css"
 
 
 def _kind(line: str) -> str:
@@ -110,9 +108,7 @@ class MarksServer(LocalServer):
 
     def __init__(self, address: tuple[str, int], generated: Path, token: str) -> None:
         """Bind and keep the folder."""
-        files = site_files(SITE)
-        files["/css/tokens.css"] = (TOKENS, "text/css; charset=utf-8")
-        super().__init__(address, Handler, token, files)
+        super().__init__(address, Handler, token, site_files(SITE))
         self.generated = generated
         self.writing = threading.Lock()
         self.revision = 0
