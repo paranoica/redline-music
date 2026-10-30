@@ -371,16 +371,20 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
         ours = {"bass808": parts["bass"], "hats": parts["hat"]}
     if flip.hats_mode != "original":
         stems.update(separate_named(stems["drums"], FLIP_RATE, drumsep or DrumSep(), _work(folder)))
-    mix = mixer.mix_flip(stems, ours, flip)
-    return mixer.write_render(folder, n, mix, FLIP_RATE, _report(flip, notes))
+    mix, lowered_db = mixer.fit_ceiling(mixer.mix_flip(stems, ours, flip))
+    return mixer.write_render(folder, n, mix, FLIP_RATE, _report(flip, notes, lowered_db))
 
 
 def _work(folder: Path) -> Path:
     return folder.resolve().parent.parent
 
 
-def _report(flip: model.Flip, compromises: list[str]) -> str:
+def _report(flip: model.Flip, compromises: list[str], lowered_db: float = 0.0) -> str:
     lines = [f"{flip.play_bars} bars in play order at {flip.bpm:.2f} BPM, swing {flip.swing:g}."]
+    if lowered_db:
+        lines.append(
+            f"The render was lowered by {-lowered_db:.1f} dB to peak at {mixer.CEILING_DB:g} dBFS."
+        )
     if flip.bass_mode == "ours":
         lines.append("The 808 is ours, played from the notes read off the bass stem.")
     if flip.hats_mode != "original":

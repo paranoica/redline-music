@@ -223,7 +223,8 @@ def test_mix_flip_sums_stems_with_gains():
 
 @pytest.mark.parametrize(
     "mode, expected",
-    [("original", 0.1 + 0.2 + 0.41), ("ours", 0.1 + 0.5 + 0.41), ("off", 0.1 + 0.41)],
+    # ours comes in at the original's level
+    [("original", 0.1 + 0.2 + 0.41), ("ours", 0.1 + 0.2 + 0.41), ("off", 0.1 + 0.41)],
 )
 def test_mix_flip_bass_modes(mode, expected):
     out = render.mix_flip(stems(), ours(), flip_for(bass808__mode=mode))
@@ -232,7 +233,7 @@ def test_mix_flip_bass_modes(mode, expected):
 
 @pytest.mark.parametrize(
     "mode, expected",
-    [("original", 0.1), ("removed", 0.07), ("ours", 0.07 + 0.05)],
+    [("original", 0.1), ("removed", 0.07), ("ours", 0.07 + 0.03)],
 )
 def test_mix_flip_hats_modes(mode, expected):
     out = render.mix_flip(stems(), ours(), flip_for(hats__mode=mode))
@@ -317,3 +318,28 @@ def test_clean_keeps_the_newest_and_the_kept(tmp_path):
     )
     assert render.clean(tmp_path, set()) == [2]
     assert render.clean(tmp_path / "none-yet" if False else tmp_path, set()) == []
+
+
+def test_our_808_and_hats_sit_at_the_level_of_what_they_replace():
+    n = 4 * RATE
+    loud = {"bass808": np.full((n, 2), 0.9, np.float32), "hats": np.full((n, 2), 0.6, np.float32)}
+    silent = np.zeros((5 * RATE, 2), np.float32)
+    only_bass = {**stems(), "drums": silent, "other": silent, "vocals": silent, "hh": silent}
+    assert np.allclose(
+        render.mix_flip(only_bass, loud, flip_for(bass808__mode="ours")), 0.2, atol=1e-4
+    )
+    # the drums are only the hats here: removed, ours come in at the level the hats had
+    only_hats = {**only_bass, "bass": silent, "drums": stems()["hh"], "hh": stems()["hh"]}
+    assert np.allclose(
+        render.mix_flip(only_hats, loud, flip_for(hats__mode="ours")), 0.03, atol=1e-4
+    )
+
+
+def test_a_mix_over_the_ceiling_is_lowered_to_it_and_says_by_how_much():
+    hot = np.full((RATE, 2), 2.0, np.float32)
+    lowered, gain_db = render.fit_ceiling(hot)
+    assert float(np.abs(lowered).max()) <= 10 ** (render.CEILING_DB / 20) + 1e-6
+    assert gain_db == pytest.approx(render.CEILING_DB - 20 * np.log10(2.0), abs=1e-3)
+    calm = np.full((RATE, 2), 0.5, np.float32)
+    same, none = render.fit_ceiling(calm)
+    assert none == 0.0 and np.array_equal(same, calm)

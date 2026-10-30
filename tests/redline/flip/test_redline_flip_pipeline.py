@@ -204,10 +204,14 @@ def test_the_flips_grid_overrides_the_analysis_grid(analysed):
 def test_hats_removed_run_drumsep_once_on_the_drums_and_originals_never(analysed):
     folder = folder_of(analysed)
     sep = FakeDrumSep()
-    n = write_version(folder)
+    # well under the ceiling, so neither render is lowered and their energies compare
+    quiet = {"drums": -12, "other": -12, "bass": -12}
+    n = write_version(folder, gains=quiet)
     pipeline.render(folder, n, drumsep=sep)
     assert sep.calls == 0
-    removed = write_version(folder, hats={"mode": "removed", "remove": ["hh"], "patterns": []})
+    removed = write_version(
+        folder, gains=quiet, hats={"mode": "removed", "remove": ["hh"], "patterns": []}
+    )
     out, _ = sf.read(pipeline.render(folder, removed, drumsep=sep), dtype="float32")
     assert sep.calls == 1
     again, _ = sf.read(pipeline.render(folder, removed, drumsep=sep), dtype="float32")
@@ -412,3 +416,11 @@ def test_a_hostile_flip_number_is_refused_by_the_job_parser(bad):
         build_parser().parse_args(
             ["song", "job", "--result", "/r/x.json", "--flip", bad, "flip_render", "s"]
         )
+
+
+def test_a_hot_render_peaks_at_the_ceiling_and_the_report_says_by_how_much(analysed):
+    folder = folder_of(analysed)
+    n = write_version(folder, gains={"drums": 12, "other": 12, "bass": 12})
+    out, _ = sf.read(pipeline.render(folder, n), dtype="float32")
+    assert float(np.abs(out).max()) <= 10 ** (-1.0 / 20) + 1e-4
+    assert "lowered by" in (folder / f"flip-{n}.report.md").read_text(encoding="utf-8")

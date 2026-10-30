@@ -32,6 +32,9 @@ STEM_NOTE = (
 )
 RENDER_FILE = re.compile(r"flip-(\d+)\.(wav|report\.md)")
 
+# the render plays as the beat while recording; it peaks here at most
+CEILING_DB = -1.0
+
 
 def play_bar_starts(bar_starts_frames: Sequence[int], arrangement: Sequence[Block]) -> list[int]:
     """Frame of every play-order bar's start, and the end, from the source bar lengths."""
@@ -254,7 +257,8 @@ def mix_flip(stems48: Mapping[str, Samples], ours48: Mapping[str, Samples], flip
         drums_src = remove_hats(drums_src, stems48, flip.hats_remove)
     drums = splice(drums_src, source, flip.arrangement, RATE)
     if flip.hats_mode == "ours":
-        drums = drums + _fit(_ours(ours48, "hats"), total)
+        removed = splice(stems48["drums"] - drums_src, source, flip.arrangement, RATE)
+        drums = drums + _at_level_of(_fit(_ours(ours48, "hats"), total), removed)
 
     other_src = stems48["other"]
     if "vocals" in stems48:
@@ -264,7 +268,8 @@ def mix_flip(stems48: Mapping[str, Samples], ours48: Mapping[str, Samples], flip
     if flip.bass_mode == "original":
         bass = splice(stems48["bass"], source, flip.arrangement, RATE)
     elif flip.bass_mode == "ours":
-        bass = _fit(_ours(ours48, "bass808"), total)
+        original = splice(stems48["bass"], source, flip.arrangement, RATE)
+        bass = _at_level_of(_fit(_ours(ours48, "bass808"), total), original)
     else:
         bass = np.zeros_like(drums)
 
@@ -273,6 +278,28 @@ def mix_flip(stems48: Mapping[str, Samples], ours48: Mapping[str, Samples], flip
 
     mixed = drums * gain("drums") + other * gain("other") + bass * gain("bass")
     return apply_effects(mixed.astype(np.float32), starts, flip.effects, RATE)
+
+
+def _at_level_of(ours: Samples, replaced: Samples) -> Samples:
+    """Ours scaled to the RMS of what it replaces, so a swap changes the sound, not the level."""
+    have = float(np.sqrt(np.mean(np.square(ours, dtype=np.float64))))
+    want = float(np.sqrt(np.mean(np.square(replaced, dtype=np.float64))))
+    if have <= 0.0 or want <= 0.0:
+        return ours
+    return (ours * np.float32(want / have)).astype(np.float32)
+
+
+def fit_ceiling(mix: Samples, ceiling_db: float = CEILING_DB) -> tuple[Samples, float]:
+    """The mix lowered to peak at the ceiling when it goes over, and the gain in dB (0 if not).
+
+    Stems summed with new parts can exceed full scale; the recording engine plays the render
+    as the beat, so it must not clip there.
+    """
+    peak = float(np.max(np.abs(mix))) if mix.size else 0.0
+    limit = 10.0 ** (ceiling_db / 20.0)
+    if peak <= limit:
+        return mix, 0.0
+    return (mix * np.float32(limit / peak)).astype(np.float32), 20.0 * np.log10(limit / peak)
 
 
 def _ours(ours48: Mapping[str, Samples], name: str) -> Samples:
