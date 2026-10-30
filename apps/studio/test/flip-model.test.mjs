@@ -126,15 +126,17 @@ test("a play-order bar maps to its source bar", () => {
   assert.equal(playToSource(blocks, -1), null);
 });
 
-test("the downbeat nudges by milliseconds and beats and stays at or above zero", () => {
+test("the downbeat nudges by milliseconds and beats and stays within the lead before zero", () => {
   assert.ok(Math.abs(nudgeDownbeat(1, 120, { ms: 10 }) - 1.01) < 1e-9);
   assert.ok(Math.abs(nudgeDownbeat(1, 120, { ms: -10 }) - 0.99) < 1e-9);
   assert.ok(Math.abs(nudgeDownbeat(1, 120, { beats: 1 }) - 1.5) < 1e-9);
   assert.ok(Math.abs(nudgeDownbeat(1, 120, { beats: -1 }) - 0.5) < 1e-9);
-  // before zero it moves a whole bar (2 s at 120 BPM) forward
+  // up to 20 ms before the file it stays (a bar line the file cut off)
+  assert.ok(Math.abs(nudgeDownbeat(0.005, 120, { ms: -10 }) - -0.005) < 1e-9);
+  assert.ok(Math.abs(nudgeDownbeat(0, 120, { ms: -10 }) - -0.01) < 1e-9);
+  // further back it moves a whole bar (2 s at 120 BPM) forward
   assert.ok(Math.abs(nudgeDownbeat(0.2, 120, { beats: -1 }) - 1.7) < 1e-9);
-  assert.ok(Math.abs(nudgeDownbeat(0.005, 120, { ms: -10 }) - 1.995) < 1e-9);
-  assert.ok(nudgeDownbeat(0, 120, { ms: -10 }) >= 0);
+  assert.ok(Math.abs(nudgeDownbeat(-0.015, 120, { ms: -10 }) - 1.975) < 1e-9);
 });
 
 test("half and double time stay inside 30..300", () => {

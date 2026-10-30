@@ -16,6 +16,8 @@ FORMAT = 1
 MAX_BARS = 512
 # a flip renders whole in memory; this many seconds of it at most
 MAX_PLAY_S = 15 * 60
+# the first bar line may sit this far before the file: cut off, or the fit a little early
+DOWNBEAT_LEAD_S = 0.02
 # the beat score's tempo range, which renders our 808 and hats
 SYNTH_BPM = (40, 220)
 BEATS_PER_BAR = 4
@@ -260,7 +262,7 @@ def parse(data: object) -> Flip:
     source = _source(top["source"])
     grid = _fields(top["grid"], "grid", ("bpm", "downbeat_s", "swing"))
     bpm = _number(grid["bpm"], "grid.bpm", 30, 300)
-    downbeat = _number(grid["downbeat_s"], "grid.downbeat_s", 0, 3600)
+    downbeat = _number(grid["downbeat_s"], "grid.downbeat_s", -DOWNBEAT_LEAD_S, 3600)
     swing = _number(grid["swing"], "grid.swing", 50, 75)
     bass = _fields(top["bass808"], "bass808", ("mode", "params"))
     bass_mode = _choice(bass["mode"], "bass808.mode", BASS_MODES)

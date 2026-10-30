@@ -366,7 +366,14 @@ def test_ours_match_what_they_replace_where_it_plays_not_across_its_silences():
     n = 4 * RATE
     # the replaced part plays only in the first of four bars, ours in all four
     replaced = np.zeros((n, 2), np.float32)
-    replaced[: RATE] = 0.2
+    replaced[:RATE] = 0.2
     ours = np.full((n, 2), 0.6, np.float32)
     fitted = render._at_level_of(ours, replaced)
     assert np.allclose(fitted, 0.2, atol=1e-3)
+
+
+def test_a_first_bar_that_starts_before_the_file_is_padded_not_wrapped():
+    stem = np.arange(1, 11, dtype=np.float32)[:, None].repeat(2, axis=1)
+    # bar 0 starts 2 frames before the file, bar 1 at frame 3
+    out = render.splice(stem, [-2, 3, 8], [Block("a", 0, 1)], RATE)
+    assert out[:, 0].tolist() == [0.0, 0.0, 1.0, 2.0, 3.0]

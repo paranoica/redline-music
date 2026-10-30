@@ -97,7 +97,8 @@ def splice(
         if block.to_bar > bars or block.from_bar < 0:
             raise ValueError(f"bars {block.from_bar}..{block.to_bar} are outside the {bars} bars")
         a, b = bar_starts_frames[block.from_bar], bar_starts_frames[block.to_bar]
-        pieces.append(np.array(stem[a:b], dtype=np.float32))
+        # the first bar may start before the file (its bar line was cut off): silence there
+        pieces.append(_slice(stem, a, b))
     out = np.concatenate(pieces) if pieces else np.zeros((0, stem.shape[1]), np.float32)
     half = _fade_frames(rate) // 2
     ramp = np.linspace(0.0, np.pi / 2, 2 * half, dtype=np.float64)

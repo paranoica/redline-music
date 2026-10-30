@@ -156,4 +156,5 @@ def test_a_file_trimmed_a_little_after_a_bar_line_keeps_its_phase(late):
     whole = track(140.0, 24, {0: 1.0, 10: 0.7})
     drums = whole[int(late * RATE) :]
     grid = find_grid(drums, drums, RATE, bpm=140.0)
-    assert grid.downbeat_s == pytest.approx(60.0 / 140.0 * 4 - late, abs=0.005)
+    # the bar line before the file is kept: phase right, the first bar padded
+    assert grid.downbeat_s == pytest.approx(-late, abs=0.005)

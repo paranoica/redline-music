@@ -217,3 +217,12 @@ def test_our_parts_name_the_tempo_the_synth_cannot_play():
     data["bass808"]["mode"] = "original"
     data["hats"]["mode"] = "original"
     assert model.synth_tempo_problem(model.parse(data)) is None
+
+
+def test_a_downbeat_a_little_before_the_file_is_a_bar_line_cut_off_by_the_file():
+    data = doc()
+    data["grid"]["downbeat_s"] = -0.015
+    assert model.parse(data).downbeat_s == -0.015
+    data["grid"]["downbeat_s"] = -0.5
+    with pytest.raises(model.FlipError, match="downbeat"):
+        model.parse(data)

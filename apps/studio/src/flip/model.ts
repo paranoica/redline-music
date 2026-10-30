@@ -131,13 +131,17 @@ export function playToSource(blocks: readonly Block[], playBar: number): { block
   return null;
 }
 
-// moves the first downbeat; before zero it goes a whole bar on, which keeps the grid
+// the first bar line may sit this far before the file (the server's DOWNBEAT_LEAD_S)
+export const DOWNBEAT_LEAD_S = 0.02;
+
+// moves the first downbeat; further before the file than the lead it goes a whole bar on,
+// which keeps the grid
 export function nudgeDownbeat(downbeat: number, bpm: number, step: { ms: number } | { beats: number }): number {
   const beat = 60 / bpm;
   const delta = "ms" in step ? step.ms / 1000 : step.beats * beat;
   let next = downbeat + delta;
   const bar = beat * BEATS_PER_BAR;
-  while (next < 0) next += bar;
+  while (next < -DOWNBEAT_LEAD_S) next += bar;
   return Math.round(next * 1e6) / 1e6;
 }
 
