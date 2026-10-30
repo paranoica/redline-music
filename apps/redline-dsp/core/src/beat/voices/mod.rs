@@ -11,7 +11,7 @@ mod pluck;
 mod saw;
 mod sampler;
 
-pub use sampler::SampleBank;
+pub use sampler::{sampler_for, SampleBank};
 
 /// What every voice reads besides its event.
 pub struct Ctx<'a> {
