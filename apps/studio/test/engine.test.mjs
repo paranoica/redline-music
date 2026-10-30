@@ -572,3 +572,22 @@ test("with the loop on, a seek outside it while playing goes on from the loop's 
   engine.handle({ type: "seek", frame: 30000 });
   assert.equal(firstHeard(engine, frames, true), 10000);
 });
+
+const limiter = rack({ effect: "limiter", params: { ceiling: 0, lookahead: 5 } });
+
+for (const [where, racks] of [["no latency", {}], ["a master with latency", { master: limiter }], ["a vocal rack with latency", { vocal: limiter }]]) {
+  test(`after a seek through ${where} the first frame heard is the frame sought`, () => {
+    const frames = 4 * RATE;
+    for (const to of [30001, 30000 + 127, 96000]) {
+      const stopped = setup({ frames, vocal: indexed(frames), racks });
+      stopped.engine.handle({ type: "seek", frame: to });
+      stopped.engine.handle({ type: "play", playing: true });
+      assert.equal(firstHeard(stopped.engine, frames), to, `stopped, seek to ${to}`);
+      const playing = setup({ frames, vocal: indexed(frames), racks });
+      playing.engine.handle({ type: "play", playing: true });
+      run(playing.engine, 4096);
+      playing.engine.handle({ type: "seek", frame: to });
+      assert.equal(firstHeard(playing.engine, frames, true), to, `playing, seek to ${to}`);
+    }
+  });
+}

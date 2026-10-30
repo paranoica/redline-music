@@ -401,7 +401,9 @@ export class Engine {
     const frames = this.#stems?.frames ?? 0;
     const to = intoLoop(Math.round(frame), this.#loop.on, this.#loop);
     const at = Math.max(0, Math.min(to, Math.max(0, frames - 1)));
-    const preroll = Math.min(at, WARM_MAX, this.#total + WARM_EXTRA);
+    // the hold is let go a whole block at a time, so it ends on a block's edge
+    const want = Math.min(WARM_MAX, this.#total + WARM_EXTRA);
+    const preroll = Math.min(at, Math.ceil((this.#total + want) / BLOCK) * BLOCK - this.#total);
     this.#read = at - preroll;
     for (const d of [this.#pad.vocal, this.#pad.beat, this.#late.original, this.#late.render]) {
       const keep = d.delay;
