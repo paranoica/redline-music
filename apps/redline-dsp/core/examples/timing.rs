@@ -1,8 +1,7 @@
 // Times the parts of the master's clip on three minutes of noise: cargo run --release --example timing
 use std::time::Instant;
 
-#[path = "../src/filters.rs"]
-mod filters;
+use redline_dsp_core::filters;
 
 fn main() {
     let n = 48_000 * 187;

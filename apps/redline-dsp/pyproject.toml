@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 license = "MIT"
 
 [tool.maturin]
+manifest-path = "py/Cargo.toml"
 features = ["pyo3/extension-module"]
 module-name = "redline_dsp"
 
@@ -19,5 +20,8 @@ cache-keys = [
     { file = "pyproject.toml" },
     { file = "Cargo.toml" },
     { file = "Cargo.lock" },
-    { file = "src/**/*.rs" },
+    { file = "core/Cargo.toml" },
+    { file = "core/src/**/*.rs" },
+    { file = "py/Cargo.toml" },
+    { file = "py/src/**/*.rs" },
 ]

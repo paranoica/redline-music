@@ -1,10 +1,11 @@
-//! The heavy inner loops of redline's master, called from Python.
+//! The heavy inner loops of redline's master and the effects rack, called from Python.
 //!
-//! Every filter is designed in Python by scipy and pyloudnorm and handed over, so the two
-//! paths cannot drift apart in their coefficients; only the loops live here.
+//! The master's filters are designed in Python by scipy and pyloudnorm and handed over, so the
+//! two paths cannot drift apart in their coefficients; only the loops live in the core. Each
+//! channel gets its own thread here, as the core has none.
 
-mod filters;
-mod loudness;
+use redline_dsp_core::effect::{effects_json, Rack};
+use redline_dsp_core::{filters, loudness};
 
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
@@ -87,32 +88,19 @@ fn oversampled_clip<'py>(
         ));
     }
     let out = py.detach(|| {
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = channels
-                .iter()
-                .map(|ch| {
-                    let (sos, zi, up, down) = (&sos, &zi, &up, &down);
-                    scope.spawn(move || {
-                        filters::flushing_tiny(|| {
-                            let gained: Vec<f32> = ch.iter().map(|&v| v * gain).collect();
-                            let mut v = filters::upfirdn(&up.0, &gained, up.1, up.2, up.3, up.4);
-                            for _ in 0..passes {
-                                clip(&mut v, ceiling);
-                                v = filters::sosfiltfilt(sos, zi, &v, edge);
-                            }
-                            clip(&mut v, ceiling);
-                            let mut back =
-                                filters::upfirdn(&down.0, &v, down.1, down.2, down.3, down.4);
-                            back.truncate(ch.len());
-                            back
-                        })
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("a channel thread panicked"))
-                .collect::<Vec<_>>()
+        per_channel(&channels, |ch| {
+            filters::flushing_tiny(|| {
+                let gained: Vec<f32> = ch.iter().map(|&v| v * gain).collect();
+                let mut v = filters::upfirdn(&up.0, &gained, up.1, up.2, up.3, up.4);
+                for _ in 0..passes {
+                    clip(&mut v, ceiling);
+                    v = filters::sosfiltfilt(&sos, &zi, &v, edge);
+                }
+                clip(&mut v, ceiling);
+                let mut back = filters::upfirdn(&down.0, &v, down.1, down.2, down.3, down.4);
+                back.truncate(ch.len());
+                back
+            })
         })
     });
     to_array(py, &out)
@@ -144,24 +132,12 @@ fn sosfilt<'py>(
     let channels = columns(&samples);
     let rest = vec![[0.0, 0.0]; sos.len()];
     let out = py.detach(|| {
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = channels
-                .iter()
-                .map(|ch| {
-                    let (sos, rest) = (&sos, &rest);
-                    scope.spawn(move || {
-                        filters::flushing_tiny(|| {
-                            let mut wide: Vec<f64> = ch.iter().map(|&v| v as f64).collect();
-                            filters::sosfilt::<false>(sos, &mut wide, rest, 0.0);
-                            wide.into_iter().map(|v| v as f32).collect::<Vec<f32>>()
-                        })
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("a channel thread panicked"))
-                .collect::<Vec<_>>()
+        per_channel(&channels, |ch| {
+            filters::flushing_tiny(|| {
+                let mut wide: Vec<f64> = ch.iter().map(|&v| v as f64).collect();
+                filters::sosfilt::<false>(&sos, &mut wide, &rest, 0.0);
+                wide.into_iter().map(|v| v as f32).collect::<Vec<f32>>()
+            })
         })
     });
     to_array(py, &out)
@@ -185,7 +161,73 @@ fn integrated_loudness(
         .into_iter()
         .map(|(b, a, gain)| loudness::Stage { b, a, gain })
         .collect();
-    Ok(py.detach(|| loudness::integrated(&channels, rate, &stages, block, overlap)))
+    Ok(py.detach(|| {
+        let sums = per_channel(&channels, |ch| loudness::weighted_sums(ch, &stages));
+        loudness::gated(&sums, rate, block, overlap)
+    }))
+}
+
+/// Frames per call of the rack's process, as a host would hand them over.
+const RACK_BLOCK: usize = 512;
+
+/// Stereo samples (rows, 2) through a rack of effects described in JSON.
+#[pyfunction]
+fn rack_process<'py>(
+    py: Python<'py>,
+    samples: PyReadonlyArray2<'py, f32>,
+    rate: f32,
+    rack_json: &str,
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    if samples.shape()[1] != 2 {
+        return Err(PyValueError::new_err(
+            "the rack takes stereo samples, (rows, 2)",
+        ));
+    }
+    if !(rate.is_finite() && rate > 0.0) {
+        return Err(PyValueError::new_err("the rate must be above zero"));
+    }
+    let mut rack = Rack::from_json(rack_json).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let mut frames: Vec<[f32; 2]> = samples
+        .as_array()
+        .rows()
+        .into_iter()
+        .map(|r| [r[0], r[1]])
+        .collect();
+    py.detach(|| {
+        filters::flushing_tiny(|| {
+            rack.reset(rate);
+            for block in frames.chunks_mut(RACK_BLOCK) {
+                rack.process(block);
+            }
+        })
+    });
+    let rows = frames.len();
+    let flat: Vec<f32> = frames.into_iter().flatten().collect();
+    let arr = numpy::ndarray::Array2::from_shape_vec((rows, 2), flat)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyArray2::from_owned_array(py, arr))
+}
+
+/// The rack's effects and their params, as a JSON list.
+#[pyfunction]
+fn rack_effects() -> String {
+    effects_json()
+}
+
+fn per_channel<T: Send>(channels: &[Vec<f32>], work: impl Fn(&[f32]) -> T + Sync) -> Vec<T> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = channels
+            .iter()
+            .map(|ch| {
+                let work = &work;
+                scope.spawn(move || work(ch))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a channel thread panicked"))
+            .collect()
+    })
 }
 
 #[pymodule]
@@ -194,5 +236,7 @@ fn redline_dsp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(integrated_loudness, m)?)?;
     m.add_function(wrap_pyfunction!(resample, m)?)?;
     m.add_function(wrap_pyfunction!(sosfilt, m)?)?;
+    m.add_function(wrap_pyfunction!(rack_process, m)?)?;
+    m.add_function(wrap_pyfunction!(rack_effects, m)?)?;
     Ok(())
 }

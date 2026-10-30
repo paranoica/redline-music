@@ -1,18 +1,17 @@
-[package]
-name = "redline-dsp"
+[workspace]
+members = ["core", "py"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "The heavy inner loops of redline's DSP: clipping, resampling, filters and BS.1770 loudness"
 publish = false
 
-[lib]
-name = "redline_dsp"
-crate-type = ["cdylib", "rlib"]
-
-[dependencies]
-pyo3 = { version = "0.30", features = ["extension-module", "abi3-py312"] }
-numpy = "0.30"
+[workspace.dependencies]
+redline-dsp-core = { path = "core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 opt-level = 3

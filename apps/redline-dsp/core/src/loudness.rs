@@ -22,6 +22,28 @@ fn level(z: &[f64]) -> f64 {
                 .log10()
 }
 
+/// Running sums of the squares of one channel's K-weighted signal, from a leading zero.
+///
+/// The weighted signal is kept in single precision between stages, as pyloudnorm keeps it.
+pub fn weighted_sums(ch: &[f32], stages: &[Stage]) -> Vec<f64> {
+    flushing_tiny(|| {
+        let weighted = stages.iter().fold(ch.to_vec(), |x, s| {
+            lfilter(&s.b, &s.a, &x)
+                .into_iter()
+                .map(|v| (s.gain * v) as f32)
+                .collect()
+        });
+        let mut sums = Vec::with_capacity(weighted.len() + 1);
+        let mut total = 0.0;
+        sums.push(total);
+        for v in weighted {
+            total += (v as f64) * (v as f64);
+            sums.push(total);
+        }
+        sums
+    })
+}
+
 /// Gated loudness of the channels, in LUFS; -inf when no block passes the gates.
 pub fn integrated(
     channels: &[Vec<f32>],
@@ -30,38 +52,16 @@ pub fn integrated(
     block: f64,
     overlap: f64,
 ) -> f64 {
-    // per channel, on its own thread: the weighted signal, kept in single precision between
-    // stages as pyloudnorm does, as running sums of its squares
-    let sums: Vec<Vec<f64>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = channels
-            .iter()
-            .map(|ch| {
-                scope.spawn(move || {
-                    flushing_tiny(|| {
-                        let weighted = stages.iter().fold(ch.clone(), |x, s| {
-                            lfilter(&s.b, &s.a, &x)
-                                .into_iter()
-                                .map(|v| (s.gain * v) as f32)
-                                .collect()
-                        });
-                        let mut sums = Vec::with_capacity(weighted.len() + 1);
-                        let mut total = 0.0;
-                        sums.push(total);
-                        for v in weighted {
-                            total += (v as f64) * (v as f64);
-                            sums.push(total);
-                        }
-                        sums
-                    })
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("a channel thread panicked"))
-            .collect()
-    });
-    let n = channels[0].len() as f64;
+    let sums: Vec<Vec<f64>> = channels
+        .iter()
+        .map(|ch| weighted_sums(ch, stages))
+        .collect();
+    gated(&sums, rate, block, overlap)
+}
+
+/// Gated loudness, in LUFS, from every channel's [`weighted_sums`].
+pub fn gated(sums: &[Vec<f64>], rate: f64, block: f64, overlap: f64) -> f64 {
+    let n = (sums[0].len() - 1) as f64;
     let step = 1.0 - overlap;
     let blocks = (((n / rate - block) / (block * step)).round_ties_even() + 1.0) as usize;
     let scale = 1.0 / (block * rate);
@@ -81,7 +81,7 @@ pub fn integrated(
     let levels: Vec<f64> = z.iter().map(|zj| level(zj)).collect();
     let mean_over = |keep: &dyn Fn(f64) -> bool| -> Vec<f64> {
         let picked: Vec<usize> = (0..blocks).filter(|&j| keep(levels[j])).collect();
-        (0..channels.len())
+        (0..sums.len())
             .map(|i| {
                 if picked.is_empty() {
                     f64::NAN

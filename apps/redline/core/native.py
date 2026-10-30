@@ -5,6 +5,7 @@ and handed to Rust: the two paths share their coefficients and differ only in th
 function returns None where Rust does not apply, and the caller takes the numpy path.
 """
 
+import json
 from functools import cache, lru_cache
 from typing import Any, cast
 
@@ -119,3 +120,23 @@ def sosfilt(samples: Samples, sos: npt.ArrayLike) -> Samples | None:
     if x.ndim != 2 or x.shape[1] == 0 or not np.all(sections[:, 3] == 1.0):
         return None
     return redline_dsp.sosfilt(x, sections.tolist())
+
+
+def rack_process(samples: Samples, rate: int, rack_json: str) -> Samples | None:
+    """Stereo samples (rows, 2) through a rack of effects given as JSON; None without Rust.
+
+    Raises:
+        ValueError: the rack names an unknown effect or param, a value is out of its range,
+            or the samples are not stereo.
+    """
+    if redline_dsp is None:
+        return None
+    x = np.ascontiguousarray(samples, dtype=np.float32)
+    return redline_dsp.rack_process(x, float(rate), rack_json)
+
+
+def rack_effects() -> list[dict[str, Any]] | None:
+    """The rack's effects with their params' ranges, defaults and units; None without Rust."""
+    if redline_dsp is None:
+        return None
+    return json.loads(redline_dsp.rack_effects())

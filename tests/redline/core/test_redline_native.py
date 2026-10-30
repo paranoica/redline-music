@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pyloudnorm as pyln
 import pytest
@@ -123,3 +125,61 @@ def test_a_rejected_plan_raises_and_leaves_the_threads_float_mode_alone():
         redline_dsp.resample(noise(0.01, channels=1)[:, 0], ([1.0], 0, 1, 0, 5))
     tiny = np.float32(1e-39)
     assert tiny * np.float32(1.0) != 0
+
+
+def _rack(*effects):
+    return json.dumps({"effects": list(effects)})
+
+
+def test_a_gain_rack_of_minus_six_db_halves_the_samples():
+    x = noise(0.5)
+    got = native.rack_process(x, RATE, _rack({"effect": "gain", "on": True, "params": {"db": -6}}))
+    assert got.shape == x.shape and got.dtype == np.float32
+    assert np.abs(got - x * 10 ** (-6 / 20)).max() < 1e-6
+    loud = np.abs(x) > 0.01
+    assert np.abs(got[loud] / x[loud] - 0.5).max() < 0.002
+
+
+def test_an_effect_turned_off_and_an_empty_rack_leave_the_samples():
+    x = noise(0.2)
+    off = _rack({"effect": "gain", "on": False, "params": {"db": -6}})
+    assert np.array_equal(native.rack_process(x, RATE, off), x)
+    assert np.array_equal(native.rack_process(x, RATE, _rack()), x)
+    assert native.rack_process(x[:0], RATE, _rack()).shape == (0, 2)
+
+
+@pytest.mark.parametrize(
+    ("rack", "named"),
+    [
+        (_rack({"effect": "flanger9"}), "flanger9"),
+        (_rack({"effect": "gain", "params": {"dbb": 1}}), "dbb"),
+        (_rack({"effect": "gain", "params": {"db": 100}}), "100"),
+        ("{not json", "rack"),
+    ],
+)
+def test_a_bad_rack_raises_naming_what_is_wrong(rack, named):
+    with pytest.raises(ValueError, match=named):
+        native.rack_process(noise(0.1), RATE, rack)
+
+
+def test_the_rack_takes_stereo_only():
+    with pytest.raises(ValueError, match="stereo"):
+        native.rack_process(noise(0.1, channels=1), RATE, _rack())
+
+
+def test_rack_effects_lists_the_effects_with_ranges():
+    effects = {e["effect"]: e for e in native.rack_effects()}
+    assert list(effects) == ["gain", "pan", "width", "eq", "filter", "saturate", "bitcrush"]
+    db = effects["gain"]["params"][0]
+    assert db["name"] == "db" and db["unit"] == "dB" and db["default"] == 0
+    assert db["low"] < 0 < db["high"]
+    for e in effects.values():
+        for p in e["params"]:
+            assert p["low"] <= p["default"] <= p["high"]
+    assert effects["eq"]["params"][0]["choices"][0] == "peak"
+
+
+def test_without_rust_the_rack_is_left_alone(monkeypatch):
+    monkeypatch.setattr(native, "redline_dsp", None)
+    assert native.rack_process(noise(0.1), RATE, _rack()) is None
+    assert native.rack_effects() is None
