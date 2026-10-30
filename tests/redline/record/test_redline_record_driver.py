@@ -517,3 +517,68 @@ def test_a_take_during_which_the_quantum_moved_is_logged_so(tmp_path, after):
     else:
         assert "quantum_changed" not in data
         assert read_dropouts(tmp_path / "take-01.wav", RATE)[0] == 1
+
+
+class WriterFailed(QuantumEngine):
+    """The writer fails on stop, and the engine holds no take after it."""
+
+    def start(self, path, offset):
+        path.write_bytes(b"")
+        self.started.append(path)
+        return None
+
+    def stop(self):
+        raise EngineError("writing take-01.wav: no space left on device")
+
+
+def test_a_take_the_writer_failed_on_is_not_waited_for(tmp_path):
+    engine = WriterFailed(64)
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError, match="no space"):
+        session.toggle()
+    assert session.pending is None
+    assert session.toggle() == "recording take-02"
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert "no space" in data["error"]
+
+
+def test_quitting_after_the_writer_failed_is_clean(tmp_path):
+    session = Session(WriterFailed(64), tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError):
+        session.toggle()
+    session.close()
+
+
+class DiesAfterStop(TakingEngine):
+    """Its stop answers, then the engine is gone."""
+
+    def meters(self):
+        raise EngineError("the engine stopped")
+
+
+def test_a_stopped_take_keeps_its_log_when_the_engine_dies_right_after(tmp_path):
+    session = Session(DiesAfterStop(64), tmp_path, RoundTrip(300, "calibrated"), 64)
+    engine = session.engine
+    engine.start((tmp_path / "take-01.wav").resolve(), 0)
+    session.current = engine.started[-1]
+    with pytest.raises(EngineError, match="engine stopped"):
+        session.toggle()
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert data["dropouts"] == [[4800, 5280]]
+
+
+def test_discard_while_a_take_is_still_finishing_keeps_the_takes_before_it(tmp_path):
+    take = (tmp_path / "take-02.wav").resolve()
+    engine = LateEngine(late_report(take))
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    first = (tmp_path / "take-01.wav").resolve()
+    first.write_bytes(b"kept")
+    session.recorded.append(first)
+    session.toggle()
+    with pytest.raises(EngineError):
+        session.discard_last()
+    message = session.discard_last()
+    assert first.exists()
+    assert "finishing" in message

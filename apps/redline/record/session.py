@@ -127,13 +127,25 @@ class Session:
         except EngineError as error:
             # `redline takes` must not read a missing log as a take without dropouts
             write_incomplete_sidecar(path, str(error), self.round_trip, self.quantum)
-            self.pending = path
+            if self._holds_a_take():
+                self.pending = path
             raise
         self._log(report)
         return report
 
+    def _holds_a_take(self) -> bool:
+        # a writer error ends the take in the engine; only a stop that timed out leaves one
+        try:
+            return self.engine.meters().recording
+        except EngineError:
+            return False
+
     def _log(self, report: TakeReport) -> None:
-        now = self.engine.meters().quantum
+        try:
+            now = self.engine.meters().quantum
+        except EngineError:
+            write_sidecar(report, self.round_trip, self.quantum, None)
+            raise
         moved = now if now is not None and now != self.quantum else None
         write_sidecar(report, self.round_trip, self.quantum, moved)
 
@@ -143,7 +155,7 @@ class Session:
         try:
             report = self.engine.stop()
         except EngineError as error:
-            if not self.engine.meters().recording:
+            if not self._holds_a_take():
                 # the writer failed, or the engine holds no take: nothing more will come
                 self.pending = None
                 if path in self.recorded:
@@ -162,11 +174,14 @@ class Session:
             try:
                 self.engine.stop()
             except EngineError:
-                self.pending = path
+                if self._holds_a_take():
+                    self.pending = path
                 raise
             finally:
                 discard(path)
             return f"{path.stem} discarded"
+        if self.pending is not None and self.pending not in self.recorded:
+            return f"{self.pending.stem} is still finishing: press space to collect it first"
         if not self.recorded:
             return "nothing recorded in this session to discard"
         path = self.recorded.pop()
