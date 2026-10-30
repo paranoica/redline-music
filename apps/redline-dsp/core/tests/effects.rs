@@ -115,7 +115,11 @@ fn every_effect_has_its_specs_in_range_and_rejects_values_outside() {
             "freq_shift",
             "comb",
             "resonator",
-            "exciter"
+            "exciter",
+            "chain_compressor",
+            "chain_clip",
+            "bass_drive",
+            "master"
         ]
     );
     for name in EFFECTS {

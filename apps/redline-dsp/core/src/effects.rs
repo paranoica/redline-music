@@ -1,5 +1,6 @@
 //! The effects of the rack.
 
+use crate::chain;
 use crate::colour;
 use crate::design::{self, Sos};
 use crate::dynamics;
@@ -71,6 +72,10 @@ pub const EFFECTS: &[&str] = &[
     "comb",
     "resonator",
     "exciter",
+    "chain_compressor",
+    "chain_clip",
+    "bass_drive",
+    "master",
 ];
 
 pub fn make(name: &str) -> Option<Box<dyn Effect>> {
@@ -136,6 +141,10 @@ pub fn make(name: &str) -> Option<Box<dyn Effect>> {
         "comb" => Box::new(colour::Comb::new()),
         "resonator" => Box::new(colour::Resonator::new()),
         "exciter" => Box::new(colour::Exciter::new()),
+        "chain_compressor" => Box::new(chain::ChainCompressor::new()),
+        "chain_clip" => Box::new(chain::ChainClip::new()),
+        "bass_drive" => Box::new(chain::BassDrive::new()),
+        "master" => Box::new(chain::Master::new()),
         _ => return None,
     })
 }

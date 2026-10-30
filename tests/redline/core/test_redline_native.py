@@ -318,6 +318,10 @@ def test_rack_effects_lists_the_effects_with_ranges():
         "comb",
         "resonator",
         "exciter",
+        "chain_compressor",
+        "chain_clip",
+        "bass_drive",
+        "master",
     ]
     assert effects["tune"]["params"][1]["choices"][2] == "harmonic minor"
     db = effects["gain"]["params"][0]
