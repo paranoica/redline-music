@@ -90,3 +90,18 @@ test("a dirty flip is named when another kind would replace it", async () => {
     delete globalThis.document;
   }
 });
+
+test("disposing the host forgets which source the flip was mounted for", async () => {
+  globalThis.document = fakeDocument();
+  try {
+    const host = new SurfaceHost();
+    const slot = document.createElement("div");
+    await host.show("flip", surface([], "flip"), slot, "/api/flip", "t");
+    host.tag = "input/beats/x.mp3";
+    await host.dispose();
+    assert.equal(host.tag, null);
+    assert.equal(host.kind, null);
+  } finally {
+    delete globalThis.document;
+  }
+});

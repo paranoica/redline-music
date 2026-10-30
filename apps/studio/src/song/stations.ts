@@ -3,7 +3,7 @@
 import { mount as mountMix } from "../main.ts";
 import { mount as mountBeat } from "../beat/main.ts";
 import { mount as mountFlip } from "../flip/main.ts";
-import { beatSurface } from "../flip/model.ts";
+import { beatMeta, beatSurface, flipStale, flipTag } from "../flip/model.ts";
 import { ApiError } from "./api.ts";
 import type { RecSnapshot, VariantsReply } from "./api.ts";
 import { Poller } from "./poll.ts";
@@ -34,6 +34,7 @@ function surfaceSlot(
   kind: string,
   what: string,
   tail: string,
+  file?: string,
 ): { el: HTMLElement; mountNow(): void; dispose(): void } {
   const slot = h("div", { class: "surface-slot" });
   const note = deskNote(what, tail);
@@ -45,7 +46,15 @@ function surfaceSlot(
       host.park();
       return;
     }
+    if (file !== undefined && host.kind === kind && flipStale(host.tag, file)) {
+      void host.dispose().then(show);
+      return;
+    }
+    show();
+  };
+  const show = (): void => {
     if (host.place(kind, slot)) return;
+    if (file !== undefined) host.tag = flipTag(host.kind === kind ? host.tag : null, file);
     const mount = kind === "beat" ? mountBeat : kind === "flip" ? mountFlip : mountMix;
     const base = kind === "beat" ? ctx.api.beatBase : kind === "flip" ? ctx.api.flipBase : ctx.api.mixBase;
     void host.show(kind, mount, slot, base, ctx.token).catch(() => {
@@ -72,13 +81,14 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
     slot = null;
     const bpm = b.bpm === null ? "" : ` · ${Math.round(b.bpm)} BPM`;
     if (beatSurface(b) === "flip") {
-      slot = surfaceSlot(ctx, host, "flip", "Редактор флипа", "Бит уже выбран, дальше — текст.");
+      slot = surfaceSlot(ctx, host, "flip", "Редактор флипа", "Бит уже выбран, дальше — текст.", b.file ?? "");
+      const meta = beatMeta(b.file, b.bpm);
       el.replaceChildren(
         h(
           "section",
           { class: "card", "aria-label": "Бит" },
-          h("header", { class: "card__head" }, h("h2", { class: "card__title" }, "Бит"), h("p", { class: "card__meta num" }, `файл${bpm}`)),
-          h("div", { class: "card__body" }, h("p", { class: "result__where" }, b.file ?? ""), slot.el),
+          h("header", { class: "card__head" }, h("h2", { class: "card__title" }, "Бит"), h("p", { class: "card__meta num", title: meta.title }, meta.text)),
+          h("div", { class: "card__body" }, slot.el),
         ),
       );
       slot.mountNow();

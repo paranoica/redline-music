@@ -181,3 +181,45 @@ test("no flip string says лучше", () => {
   for (const f of files) assert.ok(!/лучше/i.test(readFileSync(new URL(f, dir), "utf8")), f);
   assert.ok(!/лучше/i.test(readFileSync(new URL("../src/styles/flip.css", import.meta.url), "utf8")));
 });
+
+import { rangeOf } from "../src/flip/api.ts";
+import { beatMeta, flipStale, flipTag, mayAdoptDraft, sameBpm } from "../src/flip/model.ts";
+
+test("a bpm re-entered as shown is the same bpm", () => {
+  assert.ok(sameBpm(131.4567, 131.46));
+  assert.ok(sameBpm(132, 132));
+  assert.ok(!sameBpm(131.4567, 131.47));
+  assert.ok(!sameBpm(131.4567, 131.45));
+});
+
+test("the server draft is adopted only when nothing was edited since the read began", () => {
+  const idle = { seqBefore: 3, seqNow: 3, edited: false, saving: false, failed: false };
+  assert.ok(mayAdoptDraft(idle));
+  assert.ok(!mayAdoptDraft({ ...idle, seqNow: 4 }));
+  assert.ok(!mayAdoptDraft({ ...idle, edited: true }));
+  assert.ok(!mayAdoptDraft({ ...idle, saving: true }));
+  assert.ok(!mayAdoptDraft({ ...idle, failed: true }));
+});
+
+test("the flip surface is dropped when the song's source file changes, not when a render of it is picked", () => {
+  assert.equal(flipTag(null, "input/beats/x.mp3"), "input/beats/x.mp3");
+  assert.equal(flipTag("input/beats/x.mp3", "work/flips/1a2b3c4d/flip-2.wav"), "input/beats/x.mp3");
+  assert.equal(flipTag(null, "work/flips/1a2b3c4d/flip-2.wav"), "work/flips/1a2b3c4d/flip-2.wav");
+  assert.ok(!flipStale(null, "input/beats/y.mp3"));
+  assert.ok(!flipStale("input/beats/x.mp3", "input/beats/x.mp3"));
+  assert.ok(!flipStale("input/beats/x.mp3", "work/flips/1a2b3c4d/flip-2.wav"));
+  assert.ok(flipStale("input/beats/x.mp3", "input/beats/y.mp3"));
+  assert.ok(flipStale("work/flips/1a2b3c4d/flip-2.wav", "input/beats/y.mp3"));
+});
+
+test("the beat header names the file or the flip version", () => {
+  assert.deepEqual(beatMeta("input/beats/x.mp3", 131.6), { text: "файл · x.mp3 · 132 BPM", title: "input/beats/x.mp3" });
+  assert.deepEqual(beatMeta("input/beats/x.mp3", null), { text: "файл · x.mp3", title: "input/beats/x.mp3" });
+  assert.deepEqual(beatMeta("work/flips/1a2b3c4d/flip-12.wav", 90), { text: "флип · версия 12 · 90 BPM", title: "work/flips/1a2b3c4d/flip-12.wav" });
+  assert.deepEqual(beatMeta(null, null), { text: "файл", title: "" });
+});
+
+test("a param range keeps the unit the server gives", () => {
+  assert.deepEqual(rangeOf({ low: 0.1, high: 2, default: 0.5, unit: "с" }), { low: 0.1, high: 2, def: 0.5, unit: "с" });
+  assert.equal(rangeOf({ low: 0, high: 1 })?.unit, null);
+});

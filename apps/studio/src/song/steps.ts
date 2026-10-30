@@ -188,6 +188,8 @@ export class SurfaceHost {
   #chain: Promise<void> = Promise.resolve();
   #holder: HTMLElement | null;
   #parked = false;
+  // the source file the flip surface was mounted for
+  tag: string | null = null;
 
   constructor(holder?: HTMLElement) {
     this.#holder = holder ?? null;
@@ -293,6 +295,7 @@ export class SurfaceHost {
   async dispose(): Promise<void> {
     this.#token += 1;
     this.#pending = null;
+    this.tag = null;
     const current = this.#current;
     this.#current = null;
     if (current) {

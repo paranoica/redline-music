@@ -6,10 +6,8 @@ import { pointsWord, takeLabel, takesWord } from "./rail.ts";
 import { jobActive, jobBar, jobOf, needCard } from "./steps.ts";
 import type { Ctx, StationView } from "./steps.ts";
 import { decimal } from "./variants.ts";
-import { h, icon } from "../ui/dom.ts";
-
-const PLAY = "M7 4.5v15l12.5-7.5z";
-const PAUSE = "M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z";
+import { h } from "../ui/dom.ts";
+import { playButton } from "../ui/play.ts";
 
 // why a take was left out, in plain words
 export function skipText(s: SkippedTake): string {
@@ -130,15 +128,6 @@ export class TakePlayer {
     this.#name = null;
     if (was !== null) this.#changed();
   }
-}
-
-function playButton(label: string, on: boolean, click: () => void): HTMLButtonElement {
-  const b = h("button", { class: "tplay", type: "button", "aria-pressed": String(on), "aria-label": `Слушать ${label} поверх бита` });
-  const play = icon(PLAY, "play__icon play__icon--play");
-  const pause = icon(PAUSE, "play__icon play__icon--pause");
-  b.append(play, pause);
-  b.addEventListener("click", click);
-  return b;
 }
 
 export function createTakesStation(ctx: Ctx, lyric: StationView): StationView {

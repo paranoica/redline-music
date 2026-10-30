@@ -93,6 +93,7 @@ export interface Range {
   low: number;
   high: number;
   def: number | null;
+  unit: string | null;
 }
 
 // a param range as the server may list it: [low, high] or an object with low/high (min/max)
@@ -100,15 +101,17 @@ export function rangeOf(raw: unknown): Range | null {
   let low: unknown;
   let high: unknown;
   let def: unknown = null;
+  let unit: unknown = null;
   if (Array.isArray(raw)) [low, high, def] = raw;
   else if (raw && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
     low = o["low"] ?? o["min"];
     high = o["high"] ?? o["max"];
     def = o["default"] ?? o["def"] ?? null;
+    unit = o["unit"] ?? null;
   }
   if (typeof low !== "number" || typeof high !== "number" || !(high > low)) return null;
-  return { low, high, def: typeof def === "number" ? def : null };
+  return { low, high, def: typeof def === "number" ? def : null, unit: typeof unit === "string" && unit !== "" ? unit : null };
 }
 
 // the ranges of one effect's params, by name

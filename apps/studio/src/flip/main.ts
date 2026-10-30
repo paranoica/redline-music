@@ -6,8 +6,10 @@ import type { Mount } from "../core/mount.ts";
 import { ApiError } from "../song/api.ts";
 import type { Job } from "../song/api.ts";
 import { Poller } from "../song/poll.ts";
-import { JOB_STATE, jobActive } from "../song/steps.ts";
+import { TakePlayer } from "../song/takes.ts";
+import { finishedKinds, JOB_STATE, jobActive } from "../song/steps.ts";
 import { h } from "../ui/dom.ts";
+import { playButton } from "../ui/play.ts";
 import { createFlipApi, DraftError, effectRanges } from "./api.ts";
 import type { FlipState, Peaks } from "./api.ts";
 import {
@@ -18,10 +20,12 @@ import {
   duplicateBlock,
   fitEffects,
   MAX_BARS,
+  mayAdoptDraft,
   moveBlock,
   nudgeDownbeat,
   paintEffect,
   playToSource,
+  sameBpm,
   scaleBpm,
   setRange,
   splitBlock,
@@ -117,20 +121,21 @@ export const mount: Mount = async (root, options) => {
   let noteTimer = 0;
   let problems: string[] = [];
   let pendingPlay: number | null = null;
-  let playing: string | null = null;
-  let objectUrl: string | null = null;
-  let playSeq = 0;
-  let held = false;
-  let wasPlaying = false;
+  let building = false;
+  let editSeq = 0;
   let closed = false;
-  const active = new Set<string>();
+  const player = new TakePlayer(
+    (key) => api.audio(Number(key)),
+    () => {
+      if (!closed) markPlaying();
+    },
+  );
 
   root.classList.add("flip");
   const status = h("p", { class: "flip__status", role: "status" });
   const notice = h("p", { class: "notice flip__notice", role: "status", hidden: true });
   const errorList = h("ul", { class: "flip__errors", hidden: true });
   const body = h("div", { class: "flip__body" });
-  const audio = h("audio", { class: "flip__audio", controls: true, preload: "none" });
   const wave = h("canvas", { class: "flip-wave", "aria-label": "Исходный бит с сеткой тактов" });
   root.append(status, notice, errorList, body);
 
@@ -141,17 +146,20 @@ export const mount: Mount = async (root, options) => {
     if (text !== null) noteTimer = scope.setTimeout(() => say(null), 8000);
   };
 
-  const dirty = (): boolean => edited || saving !== null || failed;
+  // only a draft the server refused is lost by leaving: the rest is saved on the way out
+  const dirty = (): boolean => failed;
+  const unsaved = (): boolean => edited || saving !== null || failed;
 
   function paintStatus(): void {
-    status.textContent = !doc ? "" : failed ? "Черновик не сохранён" : dirty() ? "Сохраняю черновик…" : "Черновик сохранён";
-    status.dataset["state"] = failed ? "failed" : dirty() ? "saving" : "saved";
+    status.textContent = !doc ? "" : failed ? "Черновик не сохранён" : unsaved() ? "Сохраняю черновик…" : "Черновик сохранён";
+    status.dataset["state"] = failed ? "failed" : unsaved() ? "saving" : "saved";
     errorList.hidden = problems.length === 0;
     errorList.replaceChildren(...problems.map((p) => h("li", {}, p)));
   }
 
   function touch(): void {
     edited = true;
+    editSeq += 1;
     scope.clearTimeout(saveTimer);
     saveTimer = scope.setTimeout(() => void flush(), SAVE_MS);
     paintStatus();
@@ -236,7 +244,7 @@ export const mount: Mount = async (root, options) => {
       drawAll();
       return;
     }
-    if (bpm === doc.grid.bpm) return;
+    if (sameBpm(bpm, doc.grid.bpm)) return;
     if (touchedArrangement() && !confirm("Новый темп меняет нарезку на такты: расстановка и эффекты начнутся заново. Продолжить?")) {
       drawAll();
       return;
@@ -274,10 +282,7 @@ export const mount: Mount = async (root, options) => {
       body.replaceChildren(stemsCard());
       return;
     }
-    // moving the <audio> in the page pauses it
-    const was = !audio.paused;
     body.replaceChildren(sourceCard(), soundCard(), arrangementCard(), renderCard());
-    if (was && !held) void audio.play().catch(() => {});
     scope.requestFrame(drawWaveNow);
   }
 
@@ -312,8 +317,8 @@ export const mount: Mount = async (root, options) => {
     } catch (error) {
       say(error instanceof ApiError && error.code === "busy" ? "Сейчас занято другой задачей: дождись её конца." : errorText(error));
     }
-    await tick();
     jobsPoller.setWanted(true);
+    await tick();
   }
 
   const errorText = (error: unknown): string => (error instanceof Error && error.message ? error.message : "Не получилось.");
@@ -560,7 +565,7 @@ export const mount: Mount = async (root, options) => {
     for (const [name, r] of ranges) {
       const step = WHOLE.has(name) ? 1 : (r.high - r.low) / 200;
       const base = r.def ?? r.low;
-      sliders.append(slider({ label: PARAM_NAMES[name] ?? name, value: paintParams[name] ?? base, min: r.low, max: r.high, step, digits: WHOLE.has(name) ? 0 : step >= 0.1 ? 1 : 2, input: (v) => {
+      sliders.append(slider({ label: PARAM_NAMES[name] ?? name, value: paintParams[name] ?? base, min: r.low, max: r.high, step, ...(r.unit ? { unit: r.unit } : {}), digits: WHOLE.has(name) ? 0 : step >= 0.1 ? 1 : 2, input: (v) => {
         paintParams[name] = v;
       } }));
     }
@@ -615,14 +620,15 @@ export const mount: Mount = async (root, options) => {
   function renderCard(): HTMLElement {
     const s = state as FlipState;
     const live = jobActive(jobs.find((j) => j.kind === "flip_render"));
-    const make = h("button", { class: "btn btn--solid", type: "button", disabled: live }, live ? "Собираю…" : "Собрать");
+    const make = h("button", { class: "btn btn--solid", type: "button", disabled: live || building }, live || building ? "Собираю…" : "Собрать");
     make.addEventListener("click", () => void build());
     const versions = h("ul", { class: "flip-versions" });
     for (const n of [...s.versions].sort((a, b) => b - a)) {
       const has = s.renders.includes(n);
-      const row = h("li", { class: "flip-version" }, h("span", { class: "flip-version__name num" }, `Версия ${n}`), s.used === n ? h("span", { class: "card__meta" }, "бит песни") : null);
+      const row = h("li", { class: "flip-version", "data-version": String(n) }, h("span", { class: "flip-version__name num" }, `Версия ${n}`), s.used === n ? h("span", { class: "card__meta" }, "бит песни") : null);
       if (has) {
-        row.append(small(playing === `n${n}` ? "Играет" : "Играть", "Послушать версию", () => void play(n)));
+        const on = player.name === String(n);
+        row.append(playButton(`версию ${n}`, on, () => void player.toggle(String(n)), ""), h("span", { class: "flip-version__now card__meta", hidden: !on }, "Играет"));
         if (s.used !== n) row.append(small("Сделать битом песни", "Подставить версию битом песни", () => void useVersion(n)));
       } else row.append(h("span", { class: "card__meta" }, "нет записи"));
       versions.append(row);
@@ -632,7 +638,6 @@ export const mount: Mount = async (root, options) => {
       null,
       h("div", { class: "card__end flip__render" }, make, jobLine("flip_render")),
       h("p", { class: "flip__licence" }, LICENCE),
-      audio,
       s.versions.length ? versions : h("p", { class: "lede" }, "Версий пока нет."),
     );
   }
@@ -643,35 +648,27 @@ export const mount: Mount = async (root, options) => {
       say("Черновик не сохранён: поправь ошибки выше, потом собирай.");
       return;
     }
+    building = true;
+    drawAll();
     try {
       pendingPlay = await api.render();
       say(null);
     } catch (error) {
+      building = false;
       say(error instanceof ApiError && error.code === "busy" ? "Сборка уже идёт: дождись её конца." : errorText(error));
+      drawAll();
       return;
     }
-    await tick();
     jobsPoller.setWanted(true);
+    await tick();
   }
 
-  function release(): void {
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-    objectUrl = null;
-  }
-
-  async function play(n: number): Promise<void> {
-    const mine = ++playSeq;
-    try {
-      const blob = await api.audio(n);
-      if (closed || mine !== playSeq) return;
-      release();
-      objectUrl = URL.createObjectURL(blob);
-      audio.src = objectUrl;
-      playing = `n${n}`;
-      if (!held) void audio.play().catch(() => {});
-      drawAll();
-    } catch (error) {
-      if (!closed) say(errorText(error));
+  function markPlaying(): void {
+    for (const row of body.querySelectorAll<HTMLElement>("li[data-version]")) {
+      const on = row.dataset["version"] === player.name;
+      row.querySelector(".tplay")?.setAttribute("aria-pressed", String(on));
+      const now = row.querySelector<HTMLElement>(".flip-version__now");
+      if (now) now.hidden = !on;
     }
   }
 
@@ -694,41 +691,68 @@ export const mount: Mount = async (root, options) => {
   // ---- state and jobs
 
   async function refresh(): Promise<void> {
+    const seqBefore = editSeq;
     const next = await api.state();
     if (closed) return;
+    const fetched = next.analysis && !peaks ? await api.peaks().catch(() => null) : null;
+    if (closed) return;
+    if (fetched) peaks = fetched;
     state = next;
-    if (!doc || !edited) {
+    if (!doc || mayAdoptDraft({ seqBefore, seqNow: editSeq, edited, saving: saving !== null, failed })) {
       doc = next.draft ?? defaultDoc(next);
       if (doc) keepPatterns(doc);
     }
     selected = Math.min(selected, Math.max(0, (doc?.arrangement.length ?? 1) - 1));
     paint = clampPaint(paint);
-    if (next.analysis && !peaks) peaks = await api.peaks().catch(() => null);
     drawAll();
   }
 
-  async function tick(): Promise<void> {
+  const isFlipJob = (j: Job): boolean => j.kind === "flip_stems" || j.kind === "flip_render";
+
+  async function step(): Promise<void> {
     const next = await api.jobs();
     if (closed) return;
-    const flipJobs = next.filter((j) => j.kind === "flip_stems" || j.kind === "flip_render");
-    const same = JSON.stringify(flipJobs) === JSON.stringify(jobs.filter((j) => j.kind === "flip_stems" || j.kind === "flip_render"));
+    const before = jobs.filter(isFlipJob);
+    const flipJobs = next.filter(isFlipJob);
+    const same = JSON.stringify(flipJobs) === JSON.stringify(before);
+    const done = finishedKinds(before, flipJobs);
     jobs = next;
-    let finished = false;
-    for (const j of flipJobs) {
-      if (jobActive(j)) active.add(j.kind);
-      else if (active.delete(j.kind)) finished = true;
-    }
-    if (finished) {
+    const render = flipJobs.find((j) => j.kind === "flip_render");
+    if (jobActive(render) || done.includes("flip_render")) building = false;
+    if (done.length > 0) {
       await refresh();
-      const render = flipJobs.find((j) => j.kind === "flip_render");
-      if (pendingPlay !== null && state) {
+      if (closed) return;
+      if (pendingPlay !== null && done.includes("flip_render")) {
         const n = pendingPlay;
         if (render?.state === "failed") say(`Сборка не вышла: ${render.reason ?? "причина не названа"}`);
-        else if (state.renders.includes(n)) void play(n);
+        else if (state?.renders.includes(n)) void player.toggle(String(n));
         pendingPlay = null;
       }
     } else if (!same) drawAll();
-    jobsPoller.setWanted(flipJobs.some(jobActive) || pendingPlay !== null);
+    jobsPoller.setWanted(flipJobs.some(jobActive) || pendingPlay !== null || building);
+  }
+
+  // one read of the jobs at a time; a call made meanwhile earns one more read after it
+  let ticking: Promise<void> | null = null;
+  let again = false;
+  function tick(): Promise<void> {
+    if (ticking) {
+      again = true;
+      return ticking;
+    }
+    ticking = (async () => {
+      try {
+        do {
+          again = false;
+          await step();
+        } while (again && !closed);
+      } catch {
+        // the next beat tries again
+      } finally {
+        ticking = null;
+      }
+    })();
+    return ticking;
   }
 
   const jobsPoller = new Poller({ ms: 1000, tick });
@@ -741,8 +765,7 @@ export const mount: Mount = async (root, options) => {
   try {
     await refresh();
     jobs = await api.jobs();
-    for (const j of jobs) if ((j.kind === "flip_stems" || j.kind === "flip_render") && jobActive(j)) active.add(j.kind);
-    jobsPoller.setWanted(active.size > 0);
+    jobsPoller.setWanted(jobs.some((j) => isFlipJob(j) && jobActive(j)));
     drawAll();
   } catch (error) {
     body.replaceChildren(h("p", { class: "lede" }, `Флип не загрузился: ${errorText(error)}`));
@@ -752,25 +775,14 @@ export const mount: Mount = async (root, options) => {
     dirty,
     setActive: () => {},
     hold: (on) => {
-      if (on === held) return;
-      held = on;
-      if (on) {
-        wasPlaying = !audio.paused;
-        audio.pause();
-      } else if (wasPlaying) {
-        wasPlaying = false;
-        void audio.play().catch(() => {});
-      }
+      if (on) player.stop();
     },
     dispose: async () => {
       if (closed) return;
       scope.clearTimeout(saveTimer);
-      if (edited && !failed) await flush();
+      await flush();
       closed = true;
-      playSeq += 1;
-      audio.pause();
-      audio.removeAttribute("src");
-      release();
+      player.stop();
       scope.dispose();
       api.close();
       root.classList.remove("flip");

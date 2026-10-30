@@ -175,3 +175,41 @@ export function useConfirm(n: number, takes: number): string {
   const what = plural(takes, "дубль станет записанным", "дубля станут записанными", "дублей станут записанными");
   return `${head} ${takes} ${what} под другой бит.`;
 }
+
+// the bpm field shows two places: entering the shown value back is no change
+export function sameBpm(a: number, b: number): boolean {
+  return Math.round(a * 100) === Math.round(b * 100);
+}
+
+export interface AdoptState {
+  seqBefore: number;
+  seqNow: number;
+  edited: boolean;
+  saving: boolean;
+  failed: boolean;
+}
+
+// the server's draft may replace the page's only when the page has nothing newer
+export function mayAdoptDraft(s: AdoptState): boolean {
+  return s.seqBefore === s.seqNow && !s.edited && !s.saving && !s.failed;
+}
+
+const FLIP_RENDER = /^work\/flips\/[^/]+\/flip-(\d+)\.wav$/;
+
+// the source file a mounted flip surface belongs to: a render of it keeps the tag
+export function flipTag(tag: string | null, file: string): string {
+  return FLIP_RENDER.test(file) && tag !== null ? tag : file;
+}
+
+// the song's beat moved to another source: the mounted flip surface is not its flip
+export function flipStale(tag: string | null, file: string): boolean {
+  return tag !== null && !FLIP_RENDER.test(file) && file !== tag;
+}
+
+export function beatMeta(file: string | null, bpm: number | null): { text: string; title: string } {
+  const tail = bpm === null ? "" : ` · ${Math.round(bpm)} BPM`;
+  if (!file) return { text: `файл${tail}`, title: "" };
+  const render = FLIP_RENDER.exec(file);
+  if (render) return { text: `флип · версия ${render[1]}${tail}`, title: file };
+  return { text: `файл · ${file.split("/").pop()}${tail}`, title: file };
+}

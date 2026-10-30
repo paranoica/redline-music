@@ -344,9 +344,8 @@
   color: var(--text-dim);
 }
 
-.flip__audio {
-  width: 100%;
-  max-width: 560px;
+.flip-version__now[hidden] {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
