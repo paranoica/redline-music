@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -584,3 +585,42 @@ def test_a_saved_draft_never_replaces_a_score_written_meanwhile(tmp_path, monkey
     state = json.loads((folder / "state.json").read_text(encoding="utf-8"))
     assert state["score"] == "score-2.json"
     assert [p.name for p in folder.iterdir() if p.name.endswith(".tmp")] == []
+
+
+@pytest.fixture
+def umask_022():
+    old = os.umask(0o022)
+    yield
+    os.umask(old)
+
+
+def test_handoff_files_are_never_readable_by_others_even_while_written(
+    tmp_path, monkeypatch, umask_022
+):
+    modes: dict[str, int] = {}
+    write_text, fdopen = Path.write_text, os.fdopen
+
+    def spy_write_text(self, *args, **kwargs):
+        written = write_text(self, *args, **kwargs)
+        modes[self.name] = self.stat().st_mode & 0o777
+        return written
+
+    def spy_fdopen(fd, *args, **kwargs):
+        modes[f"fd{fd}"] = os.fstat(fd).st_mode & 0o777
+        return fdopen(fd, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", spy_write_text)
+    monkeypatch.setattr(os, "fdopen", spy_fdopen)
+    start(tmp_path)
+    assert modes
+    assert all(mode == 0o600 for mode in modes.values()), modes
+    for name in ("state.json", "recipe.json"):
+        assert (tmp_path / "5" / name).stat().st_mode & 0o777 == 0o600, name
+
+
+def test_an_existing_open_seed_folder_is_closed_to_the_owner(tmp_path, umask_022):
+    folder = tmp_path / "5"
+    folder.mkdir(mode=0o755)
+    folder.chmod(0o755)
+    start(tmp_path)
+    assert folder.stat().st_mode & 0o777 == 0o700

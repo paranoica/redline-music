@@ -7,6 +7,7 @@ import { History } from "../core/history.ts";
 import { byId, h } from "../ui/dom.ts";
 import { Refused, api, type BeatSession, type Caution, type Mark } from "./api.ts";
 import { startBeat, type BeatClient, type BeatPosition, type BeatResult } from "./client.ts";
+import { Checker, FrameLoop, Latest, type Outcome } from "./flow.ts";
 import { beatKey, type Zone } from "./keys.ts";
 import {
   STEPS_PER_BAR,
@@ -94,31 +95,6 @@ function plural(n: number, one: string, few: string, many: string): string {
   return many;
 }
 
-// sends only the newest of what piles up while one call is out
-class Latest<T> {
-  #busy = false;
-  #next: T | null = null;
-  readonly #send: (value: T) => Promise<void>;
-
-  constructor(send: (value: T) => Promise<void>) {
-    this.#send = send;
-  }
-
-  push(value: T): void {
-    if (this.#busy) {
-      this.#next = value;
-      return;
-    }
-    this.#busy = true;
-    void this.#send(value).finally(() => {
-      this.#busy = false;
-      const next = this.#next;
-      this.#next = null;
-      if (next !== null) this.push(next);
-    });
-  }
-}
-
 class Editor {
   readonly #session: BeatSession;
   readonly #client: BeatClient;
@@ -146,8 +122,8 @@ class Editor {
   #solo: ReadonlySet<string> = new Set();
   #glides: readonly Glide[] = [];
   #tableQueued = false;
-  #checkTimer = 0;
-  #checkSeq = 0;
+  readonly #checker: Checker<Score, Awaited<ReturnType<typeof api.check>>>;
+  readonly #loop = new FrameLoop((fn) => requestAnimationFrame(fn));
   #errors: string[] = [];
   #faults: Faults = { rows: new Set(), notes: new Map(), steps: new Map() };
   #warnings: Caution[] = [];
@@ -175,6 +151,12 @@ class Editor {
     this.#history = new History(session.score);
 
     this.#live = new Latest((text) => this.#sendLive(text));
+    this.#checker = new Checker({
+      run: (score) => api.check(score),
+      apply: (score, outcome) => this.#applyCheck(score, outcome),
+      setTimer: (fn, wait) => window.setTimeout(fn, wait),
+      clearTimer: (id) => clearTimeout(id),
+    });
     this.#strip = new SongStrip({
       select: (bar) => this.#select(bar),
       playFrom: (bar) => void this.#playFrom(bar),
@@ -207,6 +189,8 @@ class Editor {
       rack: (sound, rack, commit) => {
         this.#rackSender(sound).push(JSON.stringify({ effects: rack }));
         this.#change(setRack(this.#score, sound, rack), commit, false);
+        // a live text queued before this edit carries the old rack and would swap it back
+        this.#live.replacePending(serialize(this.#heard()));
       },
     });
     ui.songSlot.replaceWith(this.#strip.root);
@@ -328,37 +312,30 @@ class Editor {
   // ---------- check ----------
 
   #scheduleCheck(wait: number): void {
-    clearTimeout(this.#checkTimer);
     this.#checking = true;
     this.#showCheck();
-    this.#checkTimer = window.setTimeout(() => void this.#check(), wait);
+    this.#checker.schedule(() => this.#score, wait);
   }
 
-  async #check(): Promise<void> {
-    const seq = ++this.#checkSeq;
-    const score = this.#score;
-    try {
-      const reply = await api.check(score);
-      if (seq !== this.#checkSeq) return;
-      this.#warnings = reply.warnings;
-      this.#checking = false;
-      this.#setErrors(reply.errors);
-    } catch (error) {
-      if (seq !== this.#checkSeq) return;
-      this.#checking = false;
+  #applyCheck(score: Score, outcome: Outcome<Awaited<ReturnType<typeof api.check>>>): void {
+    this.#checking = false;
+    if (outcome.ok) {
+      this.#warnings = outcome.value.warnings;
+      this.#setErrors(outcome.value.errors, score);
+    } else {
       this.#warnings = [];
-      this.#setErrors([`проверка не прошла: ${message(error)}`]);
+      this.#setErrors([`проверка не прошла: ${message(outcome.error)}`], score);
     }
     this.#showCheck();
     this.#showIssues();
   }
 
   // a new faults object only when the errors change, so the grid redraws only then
-  #setErrors(errors: string[]): void {
+  #setErrors(errors: string[], score: Score): void {
     const same = errors.length === this.#errors.length && errors.every((e, i) => e === this.#errors[i]);
     this.#errors = errors;
     if (same) return;
-    this.#faults = faultsOf(errors, this.#score);
+    this.#faults = faultsOf(errors, score);
     this.#refresh();
   }
 
@@ -686,10 +663,12 @@ class Editor {
   }
 
   #tick(): void {
-    if (!this.#playing) return;
-    const since = this.#ctx.currentTime - this.#anchor.at;
-    this.#showPosition(this.#anchor.frame + Math.max(0, since) * this.#rate);
-    requestAnimationFrame(() => this.#tick());
+    this.#loop.start(() => {
+      if (!this.#playing) return false;
+      const since = this.#ctx.currentTime - this.#anchor.at;
+      this.#showPosition(this.#anchor.frame + Math.max(0, since) * this.#rate);
+      return true;
+    });
   }
 
   #showPosition(frame: number): void {
@@ -751,14 +730,14 @@ class Editor {
       this.#base = file;
       this.#savedKey = serialize(score);
       this.#warnings = warnings;
-      this.#setErrors([]);
+      this.#setErrors([], this.#score);
       this.#showCheck();
       this.#showIssues();
       status(`Сохранено: ${file}.${warnings.length ? ` Предупреждений: ${warnings.length} — список выше.` : ""}`, "done");
     } catch (error) {
       if (error instanceof Refused && error.status === 422) {
         this.#checking = false;
-        this.#setErrors(error.errors);
+        this.#setErrors(error.errors, this.#score);
         this.#showCheck();
         this.#showIssues();
         status(`Не сохранено: ошибок ${error.errors.length}. Клик по ошибке покажет её место.`, "error");

@@ -7,7 +7,10 @@ import { instrumentLabel } from "../labels.ts";
 import {
   STEPS_PER_BAR,
   addNote,
+  addedNoteStep,
+  clickStep,
   cycleStep,
+  dragOutlived,
   deleteNote,
   drumSteps,
   glidesInBar,
@@ -17,6 +20,7 @@ import {
   nextRoll,
   noteName,
   notesInBar,
+  noteToFocus,
   notesOf,
   resizeNote,
   rollCount,
@@ -85,6 +89,7 @@ interface Drag {
   el: HTMLElement;
   next: Score;
   moved: boolean;
+  stop: () => void;
 }
 
 export class Grid {
@@ -116,8 +121,12 @@ export class Grid {
     this.#state = state;
     // a drag moves its own note; the grid is drawn again once it is let go
     if (this.#drag) {
-      this.#pending = true;
-      return;
+      if (!dragOutlived(this.#drag.next, state.score)) {
+        this.#pending = true;
+        return;
+      }
+      this.#drag.stop();
+      this.#pending = false;
     }
     const content =
       !before ||
@@ -202,6 +211,8 @@ export class Grid {
   #drumKey(st: GridState, row: PlayingRow, action: BeatKey): boolean {
     const step = row.patternBar * STEPS_PER_BAR + st.column;
     const sel = { pattern: row.pattern, sound: row.sound };
+    // a row shorter than the bar has no step under the cursor to change
+    const lacks = () => drumSteps(st.score, row.pattern, row.sound)[step] === undefined;
     const edit = (next: Score) => this.#on.edit(next, true);
     switch (action.type) {
       case "move": {
@@ -216,12 +227,15 @@ export class Grid {
         return true;
       }
       case "hit":
+        if (lacks()) return true;
         edit(setHit(st.score, row.pattern, row.sound, step, action.hit));
         return true;
       case "roll":
+        if (lacks()) return true;
         edit(setRoll(st.score, row.pattern, row.sound, step, action.n));
         return true;
       case "cycle":
+        if (lacks()) return true;
         edit(cycleStep(st.score, row.pattern, row.sound, step));
         return true;
       default:
@@ -236,8 +250,8 @@ export class Grid {
     switch (action.type) {
       case "move": {
         if (!chosen) {
-          const first = notes[0];
-          if (first) this.#on.select(sel, st.column, first.index);
+          const first = noteToFocus(notes, row.patternBar);
+          if (first !== null) this.#on.select(sel, st.column, first);
           return true;
         }
         let next: Score;
@@ -253,8 +267,7 @@ export class Grid {
         this.#on.select(sel, st.column, null);
         return true;
       case "add": {
-        const end = (st.score.patterns[row.pattern]?.bars ?? 1) * STEPS_PER_BAR;
-        const step = chosen ? Math.min(end - 1, chosen.step + chosen.len) : row.patternBar * STEPS_PER_BAR;
+        const step = addedNoteStep(chosen, row.patternBar, st.score.patterns[row.pattern]?.bars ?? 1);
         const midi = chosen?.midi ?? this.#centre(st, row);
         const made = addNote(st.score, row.pattern, row.sound, { step, len: 2, midi, vel: 0.8 });
         this.#on.edit(made.score, true);
@@ -404,8 +417,8 @@ export class Grid {
       );
       cell.addEventListener("click", (e) => {
         this.#on.select(sel, c, null);
-        const next = e.altKey ? setHit(st.score, row.pattern, row.sound, i, nextRoll(hit)) : cycleStep(st.score, row.pattern, row.sound, i);
-        this.#on.edit(next, true);
+        const next = clickStep(st.score, row.pattern, row.sound, i, e.altKey);
+        if (next) this.#on.edit(next, true);
       });
       cell.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -478,7 +491,7 @@ export class Grid {
     );
     roll.addEventListener("focus", () => {
       const now = this.#state;
-      if (now && !same(now.selected, sel)) this.#on.select(sel, now.column, notes[0]?.index ?? null);
+      if (now && !same(now.selected, sel)) this.#on.select(sel, now.column, noteToFocus(notes, row.patternBar));
     });
     area.addEventListener("pointerdown", () => roll.focus({ preventScroll: true }));
     return roll;
@@ -531,7 +544,15 @@ export class Grid {
     const width = area.getBoundingClientRect().width || 1;
     this.#on.select(sel, st.column, n.index);
     (area.parentElement as HTMLElement | null)?.focus({ preventScroll: true });
-    this.#drag = { id: e.pointerId, x: e.clientX, y: e.clientY, stepPx: (width + 3) / STEPS_PER_BAR, base, rowPx, start: st.score, sel, note: n, mode, el, next: st.score, moved: false };
+    const stop = (): void => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      this.#drag = null;
+      el.dataset.dragging = "false";
+    };
+    this.#drag = { id: e.pointerId, x: e.clientX, y: e.clientY, stepPx: (width + 3) / STEPS_PER_BAR, base, rowPx, start: st.score, sel, note: n, mode, el, next: st.score, moved: false, stop };
     el.dataset.dragging = "true";
     const move = (ev: PointerEvent) => {
       const d = this.#drag;
@@ -562,11 +583,7 @@ export class Grid {
     const up = (ev: PointerEvent) => {
       const d = this.#drag;
       if (!d || ev.pointerId !== d.id) return;
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
-      el.removeEventListener("pointercancel", up);
-      this.#drag = null;
-      el.dataset.dragging = "false";
+      d.stop();
       if (d.moved) this.#on.edit(d.next, true);
       if (this.#pending || d.moved) {
         this.#pending = false;

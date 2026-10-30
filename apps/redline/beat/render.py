@@ -276,6 +276,8 @@ def render_seed(
     sounds = list(player.sounds)
     folder = work / "beats" / str(seed)
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # mkdir leaves a folder that already exists at its old mode
+    folder.chmod(0o700)
     partial = folder / ".partial"
     shutil.rmtree(partial, ignore_errors=True)
     try:

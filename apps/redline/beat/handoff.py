@@ -25,6 +25,7 @@ from redline.beat.recipe import (
     recipe_from_json,
     recipe_json,
 )
+from redline.core.private import write_private
 
 PROMPT = Path(__file__).with_name("beatmaker_prompt.md")
 ROOT = Path("private/beats")
@@ -73,11 +74,7 @@ class Marks:
 
 
 def _write(path: Path, text: str) -> None:
-    # written aside and moved in, readable by the owner only
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.chmod(0o600)
-    tmp.replace(path)
+    write_private(path, text)
 
 
 def write_new_score(folder: Path, number: int, text: str) -> str:
@@ -283,6 +280,8 @@ class Session:
     def _start(self, genre: str | None, bpm: float | None, key: str | None) -> dict[str, Any]:
         recipe = make_recipe(self.seed, genre, bpm, key)
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # mkdir leaves a folder that already exists at its old mode
+        self.folder.chmod(0o700)
         # saved scores stay: a restarted seed saves the next free score-K
         for old in self.folder.iterdir():
             if not SAVED.fullmatch(old.name):

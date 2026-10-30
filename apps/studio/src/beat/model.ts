@@ -743,3 +743,30 @@ export function glidesInBar(glides: readonly Glide[], sound: string, bar: number
     return [{ from: g.from, to: g.to, x: Number(x.toFixed(6)), w: Number((((g.ms / 1000) * rate) / step).toFixed(6)) }];
   });
 }
+
+// the note keyboard focus picks when it enters a piano roll showing the given bar of its pattern
+export function noteToFocus(notes: readonly NoteView[], patternBar: number): number | null {
+  const shown = notesInBar(notes, patternBar);
+  if (!shown.length) return null;
+  return shown.reduce((a, b) => (b.start < a.start ? b : a)).index;
+}
+
+// where a note added from the keyboard starts: after the chosen one, inside the bar shown
+export function addedNoteStep(chosen: NoteView | null, patternBar: number, patternBars: number): number {
+  const bar = Math.min(Math.max(0, patternBar), Math.max(1, patternBars) - 1);
+  const from = bar * STEPS_PER_BAR;
+  if (!chosen) return from;
+  return Math.min(from + STEPS_PER_BAR - 1, Math.max(from, chosen.step + chosen.len));
+}
+
+// the score after a click on a drum step, or null for a step the row is too short to have
+export function clickStep(score: Score, pattern: string, sound: string, step: number, alt: boolean): Score | null {
+  const hit = drumSteps(score, pattern, sound)[step];
+  if (hit === undefined) return null;
+  return alt ? setHit(score, pattern, sound, step, nextRoll(hit)) : cycleStep(score, pattern, sound, step);
+}
+
+// a note drag holds while the score shown is the one it last made; undo or a reload ends it
+export function dragOutlived(made: Score, shown: Score): boolean {
+  return made !== shown;
+}

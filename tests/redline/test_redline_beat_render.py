@@ -1,4 +1,5 @@
 import json
+import os
 import re
 
 import numpy as np
@@ -206,6 +207,20 @@ def test_render_files_are_the_owners_only(tmp_path):
     render.render_seed(4, root=root, work=work)
     assert (folder / "render.json").stat().st_mode & 0o777 == 0o600
     assert (folder / "beat.wav").stat().st_mode & 0o777 == 0o600
+
+
+def test_an_existing_open_render_folder_is_closed_to_the_owner(tmp_path):
+    root, work = tmp_path / "beats", tmp_path / "work"
+    place(root, 4, body())
+    folder = work / "beats" / "4"
+    folder.mkdir(parents=True)
+    folder.chmod(0o755)
+    old = os.umask(0o022)
+    try:
+        render.render_seed(4, root=root, work=work)
+    finally:
+        os.umask(old)
+    assert folder.stat().st_mode & 0o777 == 0o700
 
 
 def test_render_report_names_the_score_and_no_library(tmp_path):
