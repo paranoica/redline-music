@@ -218,6 +218,21 @@ def test_non_finite_samples_come_out_as_silence():
     assert np.abs(y[-1000:]).max() > 0.1
 
 
+def test_a_chop_rack_repeats_the_first_sixteenth_of_each_bar_of_four():
+    x = noise(2.0)
+    # 105 bpm at 44100 Hz: a sixteenth is 6300 frames
+    zeros = {"bpm": 105, "steps": 4, "s0": 0, "s1": 0, "s2": 0, "s3": 0}
+    y = native.rack_process(x, RATE, _rack({"effect": "chop", "params": zeros}))
+    assert y.shape == x.shape
+    s, fade = 6300, int(0.003 * RATE) + 1
+    for q in range(len(x) // s):
+        first = q // 4 * 4 * s
+        got, want = y[q * s : (q + 1) * s], x[first : first + s]
+        assert np.array_equal(got[fade:-fade], want[fade:-fade])
+    in_order = native.rack_process(x, RATE, _rack({"effect": "chop", "params": {"bpm": 105}}))
+    assert np.array_equal(in_order, x)
+
+
 def test_the_rack_takes_stereo_only():
     with pytest.raises(ValueError, match="stereo"):
         native.rack_process(noise(0.1, channels=1), RATE, _rack())
@@ -242,6 +257,16 @@ def test_rack_effects_lists_the_effects_with_ranges():
         "drift",
         "robot",
         "tune",
+        "varispeed",
+        "timestretch",
+        "tape_stop",
+        "tape_start",
+        "reverse",
+        "freeze",
+        "granular",
+        "stutter",
+        "chop",
+        "trance_gate",
     ]
     assert effects["tune"]["params"][1]["choices"][2] == "harmonic minor"
     db = effects["gain"]["params"][0]

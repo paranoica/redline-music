@@ -2,6 +2,7 @@
 
 use crate::design::{self, Sos};
 use crate::effect::{check, Effect, ParamError, ParamSpec, Smoothed};
+use crate::time;
 use crate::voice;
 use std::f32::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
 
@@ -22,6 +23,16 @@ pub const EFFECTS: &[&str] = &[
     "drift",
     "robot",
     "tune",
+    "varispeed",
+    "timestretch",
+    "tape_stop",
+    "tape_start",
+    "reverse",
+    "freeze",
+    "granular",
+    "stutter",
+    "chop",
+    "trance_gate",
 ];
 
 pub fn make(name: &str) -> Option<Box<dyn Effect>> {
@@ -42,6 +53,16 @@ pub fn make(name: &str) -> Option<Box<dyn Effect>> {
         "drift" => Box::new(voice::Drift::new()),
         "robot" => Box::new(voice::Robot::new()),
         "tune" => Box::new(voice::Tune::new()),
+        "varispeed" => Box::new(time::Varispeed::new()),
+        "timestretch" => Box::new(time::Timestretch::new()),
+        "tape_stop" => Box::new(time::TapeMotion::stop()),
+        "tape_start" => Box::new(time::TapeMotion::start()),
+        "reverse" => Box::new(time::Reverse::new()),
+        "freeze" => Box::new(time::Freeze::new()),
+        "granular" => Box::new(time::Granular::new()),
+        "stutter" => Box::new(time::Stutter::new()),
+        "chop" => Box::new(time::Chop::new()),
+        "trance_gate" => Box::new(time::TranceGate::new()),
         _ => return None,
     })
 }

@@ -767,10 +767,10 @@ impl Effect for Vibrato {
 }
 
 /// splitmix64: a seeded, portable sequence.
-struct Random(u64);
+pub(crate) struct Random(pub(crate) u64);
 
 impl Random {
-    fn next(&mut self) -> u64 {
+    pub(crate) fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -779,7 +779,7 @@ impl Random {
     }
 
     /// Uniform in [-1, 1].
-    fn signed(&mut self) -> f32 {
+    pub(crate) fn signed(&mut self) -> f32 {
         (self.next() >> 40) as f32 / (1u64 << 23) as f32 - 1.0
     }
 }

@@ -70,7 +70,17 @@ fn every_effect_has_its_specs_in_range_and_rejects_values_outside() {
             "vibrato",
             "drift",
             "robot",
-            "tune"
+            "tune",
+            "varispeed",
+            "timestretch",
+            "tape_stop",
+            "tape_start",
+            "reverse",
+            "freeze",
+            "granular",
+            "stutter",
+            "chop",
+            "trance_gate"
         ]
     );
     for name in EFFECTS {

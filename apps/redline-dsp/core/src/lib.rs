@@ -9,4 +9,5 @@ pub mod filters;
 pub mod loudness;
 pub mod pitch;
 pub mod stretch;
+mod time;
 mod voice;
