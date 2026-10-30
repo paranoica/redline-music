@@ -619,6 +619,10 @@ summary.issues__title {
 }
 
 .trk__inst {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 400;
   font-size: 0.75rem;
   color: var(--text-dim);
@@ -903,7 +907,7 @@ summary.issues__title {
 
 .roll__glide {
   fill: none;
-  stroke: var(--signal);
+  stroke: var(--wave-played);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }

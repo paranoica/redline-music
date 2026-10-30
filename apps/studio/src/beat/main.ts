@@ -37,7 +37,7 @@ import {
   type Score,
 } from "./model.ts";
 import { Tables } from "./tables.ts";
-import { sourceText, warningText, whereText } from "./warnings.ts";
+import { pathText, sourceText, warningText, whereText } from "./warnings.ts";
 import { Grid, type Selection } from "./ui/grid.ts";
 import { StepLane } from "./ui/lane.ts";
 import { BeatMeter } from "./ui/meter.ts";
@@ -389,9 +389,9 @@ class Editor {
       box.replaceChildren();
       return;
     }
-    const item = (path: string, text: string, kind: "error" | "warning", shown = path) => {
+    const item = (path: string, text: string, kind: "error" | "warning", shown = pathText(path)) => {
       const target = path ? targetOf(path, this.#score) : null;
-      const body = [h("span", { class: "issue__path num" }, shown || "—"), h("span", { class: "issue__text" }, text)];
+      const body = [h("span", { class: "issue__path num", title: path }, shown || "—"), h("span", { class: "issue__text" }, text)];
       if (!target) return h("li", { class: "issue", "data-kind": kind }, ...body);
       const b = h("button", { class: "issue__go", type: "button", title: "Показать место" }, ...body);
       b.addEventListener("click", () => this.#goTo(path));
@@ -522,8 +522,7 @@ class Editor {
   #showSave(): void {
     const blocked = !this.#checking && this.#errors.length > 0;
     ui.save.classList.toggle("btn--signal", !blocked);
-    ui.save.classList.toggle("btn--line", blocked);
-    if (blocked && !ui.save.disabled) ui.save.title = `Не сохранится, пока есть ошибки (${this.#errors.length}): список под строкой статуса`;
+        if (blocked && !ui.save.disabled) ui.save.title = `Не сохранится, пока есть ошибки (${this.#errors.length}): список под строкой статуса`;
   }
 
   // ---------- transport ----------
@@ -816,7 +815,7 @@ class Editor {
       this.#renderUrl = URL.createObjectURL(blob);
       const seconds = s.seconds ?? 0;
       const audio = h("audio", { class: "render-out__audio", controls: true, src: this.#renderUrl, "aria-label": `Точный рендер ${file}` });
-      const link = h("a", { class: "btn btn--line btn--small", href: this.#renderUrl, download: `beat-${file.replace(/\.json$/, "")}.wav` }, "Скачать beat.wav");
+      const link = h("a", { class: "btn btn--small", href: this.#renderUrl, download: `beat-${file.replace(/\.json$/, "")}.wav` }, "Скачать beat.wav");
       line.replaceChildren(
         h("span", {}, "Рендер ", h("span", { class: "num" }, file), ": ", h("span", { class: "num" }, `${formatNumber(seconds, 1)} с`), ` за ${Math.round((performance.now() - began) / 1000)} с.`),
       );

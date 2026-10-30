@@ -41,8 +41,8 @@ export class SongStrip {
   constructor(on: StripHandlers) {
     this.#on = on;
     this.#where = h("p", { class: "song__where" });
-    const good = h("button", { class: "btn btn--line btn--small", type: "button", title: "Клавиша G, когда фокус на такте" }, "Хорошо", h("kbd", {}, "G"));
-    const bad = h("button", { class: "btn btn--line btn--small", type: "button", title: "Клавиша B, когда фокус на такте" }, "Плохо", h("kbd", {}, "B"));
+    const good = h("button", { class: "btn btn--small", type: "button", title: "Клавиша G, когда фокус на такте" }, "Хорошо", h("kbd", {}, "G"));
+    const bad = h("button", { class: "btn btn--small", type: "button", title: "Клавиша B, когда фокус на такте" }, "Плохо", h("kbd", {}, "B"));
     good.addEventListener("click", () => this.openMark("good"));
     bad.addEventListener("click", () => this.openMark("bad"));
     this.#form = h("div", { class: "markform", hidden: true });

@@ -569,3 +569,13 @@ test("the check's warnings read in Russian; what the page does not know stays as
   assert.equal(whereText("sections[1] (hook)"), "секция «hook»");
   assert.equal(whereText("patterns.x.rows.y"), "patterns.x.rows.y");
 });
+
+test("an error's place reads as pattern, sound and note or step, not as a JSON path", async () => {
+  const { pathText } = await import("../src/beat/warnings.ts");
+  assert.equal(pathText("patterns.keys_prog.rows.keys[4].note"), "keys_prog · keys · нота 5");
+  assert.equal(pathText("patterns.drums.rows.hat.velocity[12]"), "drums · hat · шаг 13, громкость");
+  assert.equal(pathText("patterns.drums.rows.hat"), "drums · hat");
+  assert.equal(pathText("sections[0].bars"), "секция 1 · bars");
+  assert.equal(pathText("bpm"), "bpm");
+  assert.equal(pathText(""), "");
+});

@@ -57,3 +57,22 @@ export function whereText(where: string): string {
   if (m) return `секция «${m[1]}»`;
   return where;
 }
+
+const LANES: Record<string, string> = { velocity: "громкость", pitch: "высота", decay: "затухание", chance: "шанс" };
+
+/** An error's JSON path as the owner reads the score: pattern, sound, note or step. */
+export function pathText(path: string): string {
+  const row = /^patterns\.([a-z0-9_]+)\.rows\.([a-z0-9_]+)(.*)$/.exec(path);
+  if (row) {
+    const [, pattern, sound, rest] = row as unknown as [string, string, string, string];
+    const head = `${pattern} · ${sound}`;
+    const note = /^\[(\d+)\]/.exec(rest);
+    if (note) return `${head} · нота ${Number(note[1]) + 1}`;
+    const lane = /^\.(velocity|pitch|decay|chance)\[(\d+)\]/.exec(rest);
+    if (lane) return `${head} · шаг ${Number(lane[2]) + 1}, ${LANES[lane[1]!]}`;
+    return rest ? `${head}${rest}` : head;
+  }
+  const section = /^sections\[(\d+)\](?:\.(.+))?$/.exec(path);
+  if (section) return `секция ${Number(section[1]) + 1}${section[2] ? ` · ${section[2]}` : ""}`;
+  return path;
+}
