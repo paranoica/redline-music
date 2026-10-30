@@ -6,11 +6,16 @@
 
 use redline_dsp_core::beat::events::EventTable;
 use redline_dsp_core::beat::instruments::instruments_json;
+use redline_dsp_core::beat::player::{render, Player};
 use redline_dsp_core::beat::score::Score;
+use redline_dsp_core::beat::voices::SampleBank;
 use redline_dsp_core::effect::{effects_json, Rack, RackError, MAX_LANE_POINTS};
 use redline_dsp_core::{filters, loudness};
 
-use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
+use numpy::{
+    PyArray1, PyArray2, PyArray3, PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArrayDyn,
+    PyUntypedArrayMethods,
+};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -362,11 +367,157 @@ fn beat_events(score_json: &str, rate: f32) -> PyResult<String> {
             "rate {rate} is not a positive number"
         )));
     }
-    let score = Score::from_json(score_json).map_err(|errors| {
+    let score = score_of(score_json)?;
+    Ok(EventTable::build(&score, rate).to_json(&score))
+}
+
+/// The score, or a ValueError with every error as a "path: message" line.
+fn score_of(score_json: &str) -> PyResult<Score> {
+    Score::from_json(score_json).map_err(|errors| {
         let lines: Vec<String> = errors.iter().map(ToString::to_string).collect();
         PyValueError::new_err(lines.join("\n"))
-    })?;
-    Ok(EventTable::build(&score, rate).to_json(&score))
+    })
+}
+
+fn stereo<'py>(py: Python<'py>, frames: &[[f32; 2]]) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    let arr =
+        numpy::ndarray::Array2::from_shape_vec((frames.len(), 2), frames.as_flattened().to_vec())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyArray2::from_owned_array(py, arr))
+}
+
+/// The whole song and its tail as one stereo mix (rows, 2), the racks' latency dropped from
+/// the front; no samples are loaded, so a sampler plays silence.
+#[pyfunction]
+fn beat_render<'py>(
+    py: Python<'py>,
+    score_json: &str,
+    rate: f32,
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    let score = score_of(score_json)?;
+    let made = py.detach(|| render(&score, rate, SampleBank::default()));
+    stereo(py, &made.map_err(PyValueError::new_err)?.mix)
+}
+
+/// A block's mix and stems.
+type Played<'py> = (Bound<'py, PyArray2<f32>>, Bound<'py, PyArray3<f32>>);
+
+/// A score played block by block, so a long song's stems can be written as they come.
+#[pyclass(unsendable)]
+struct BeatPlayer {
+    player: Player,
+    sounds: Vec<String>,
+}
+
+#[pymethods]
+impl BeatPlayer {
+    #[new]
+    fn new(score_json: &str, rate: f32) -> PyResult<Self> {
+        let score = score_of(score_json)?;
+        let player =
+            Player::new(&score, rate, SampleBank::default()).map_err(PyValueError::new_err)?;
+        Ok(BeatPlayer {
+            player,
+            sounds: score.sounds.iter().map(|s| s.name.clone()).collect(),
+        })
+    }
+
+    /// Adds a recorded zone, int16 samples (frames,) or (frames, 2) at `rate`, to the
+    /// library; then `rebuild_samplers` lets the samplers find it.
+    fn load_zone(
+        &mut self,
+        library: &str,
+        root: i64,
+        vel_lo: i64,
+        vel_hi: i64,
+        rate: f32,
+        samples: PyReadonlyArrayDyn<'_, i16>,
+    ) -> PyResult<()> {
+        let midi = |v: i64, what: &str| {
+            u8::try_from(v)
+                .ok()
+                .filter(|&v| v <= 127)
+                .ok_or_else(|| PyValueError::new_err(format!("{what} {v} is not within 0..127")))
+        };
+        let root = midi(root, "root note")?;
+        let (vel_lo, vel_hi) = (midi(vel_lo, "velocity")?, midi(vel_hi, "velocity")?);
+        let channels = match samples.shape() {
+            [_] => 1,
+            [_, c @ (1 | 2)] => *c,
+            shape => {
+                return Err(PyValueError::new_err(format!(
+                    "zone samples are (frames,) or (frames, 2), not shape {shape:?}"
+                )))
+            }
+        };
+        let bank = self.player.bank_mut();
+        let loaded = match samples.as_slice() {
+            Ok(flat) => bank.load(library, root, vel_lo..=vel_hi, rate, flat, channels),
+            Err(_) => {
+                let flat: Vec<i16> = samples.as_array().iter().copied().collect();
+                bank.load(library, root, vel_lo..=vel_hi, rate, &flat, channels)
+            }
+        };
+        loaded.map_err(PyValueError::new_err)
+    }
+
+    /// Makes the sampler voices anew for the loaded libraries; ringing samplers stop.
+    fn rebuild_samplers(&mut self) -> PyResult<()> {
+        self.player
+            .rebuild_samplers()
+            .map_err(PyValueError::new_err)
+    }
+
+    /// The next `frames` frames: the mix (frames, 2) and each sound's part of it before the
+    /// master rack, (sounds, frames, 2).
+    fn process<'py>(&mut self, py: Python<'py>, frames: usize) -> PyResult<Played<'py>> {
+        let mut out = vec![[0.0f32; 2]; frames];
+        let mut stems = vec![vec![[0.0f32; 2]; frames]; self.sounds.len()];
+        self.player.process_stems(&mut out, &mut stems);
+        let flat: Vec<f32> = stems
+            .iter()
+            .flat_map(|s| s.as_flattened())
+            .copied()
+            .collect();
+        let stems = numpy::ndarray::Array3::from_shape_vec((self.sounds.len(), frames, 2), flat)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok((stereo(py, &out)?, PyArray3::from_owned_array(py, stems)))
+    }
+
+    /// Plays on from the song's `frame`, as if it had played up to there.
+    fn seek(&mut self, frame: u64) {
+        self.player.seek(frame);
+    }
+
+    /// Frames from a song frame to the mix frame that carries it.
+    #[getter]
+    fn latency(&self) -> usize {
+        self.player.latency()
+    }
+
+    /// The delay every stem comes out with.
+    #[getter]
+    fn stem_latency(&self) -> usize {
+        self.player.stem_latency()
+    }
+
+    /// Frames of the song, without the tails.
+    #[getter]
+    fn length(&self) -> u64 {
+        self.player.table().length
+    }
+
+    /// The sounds' names, in the order of the stems.
+    #[getter]
+    fn sounds(&self) -> Vec<String> {
+        self.sounds.clone()
+    }
+
+    /// The next song frame `process` plays.
+    #[getter]
+    fn position(&self) -> u64 {
+        self.player.position()
+    }
 }
 
 /// The beat instruments and their params, as a JSON list.
@@ -404,5 +555,7 @@ fn redline_dsp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(beat_check, m)?)?;
     m.add_function(wrap_pyfunction!(beat_events, m)?)?;
     m.add_function(wrap_pyfunction!(beat_instruments, m)?)?;
+    m.add_function(wrap_pyfunction!(beat_render, m)?)?;
+    m.add_class::<BeatPlayer>()?;
     Ok(())
 }
