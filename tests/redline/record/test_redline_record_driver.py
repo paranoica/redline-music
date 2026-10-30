@@ -8,7 +8,13 @@ import soundfile as sf
 from redline.record.latency import RoundTrip
 from redline.record.process import EngineError, EngineProcess, engine_argv, parse_startup
 from redline.record.protocol import WrongRate
-from redline.record.session import Session, budget_frames, monitor_ms, quantum_warning
+from redline.record.session import (
+    Session,
+    budget_frames,
+    level_meter,
+    monitor_ms,
+    quantum_warning,
+)
 from redline.takes.rank import read_dropouts
 
 FAKE = [sys.executable, str(Path(__file__).with_name("fake_rec.py"))]
@@ -262,3 +268,20 @@ def test_only_a_calibrated_round_trip_sets_the_monitor_budget():
     # the engine applies its own port-estimate budget when none is sent
     assert budget_frames(RoundTrip(300, "estimate"), RATE) is None
     assert budget_frames(RoundTrip(None, "unknown"), RATE) is None
+
+
+def test_a_null_peak_in_the_meters_reads_as_infinite_not_a_crash():
+    from redline.record.protocol import meters
+
+    reply = {
+        "mic_peak": None,
+        "out_peak": 0.5,
+        "xruns": 0,
+        "overflows": 0,
+        "recording": False,
+        "take_frames": 0,
+        "rack_latency": 0,
+    }
+    m = meters(reply)
+    assert m.mic_peak == float("inf") and m.out_peak == 0.5
+    assert "CLIP" in level_meter(m.mic_peak)

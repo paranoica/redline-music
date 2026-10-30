@@ -66,7 +66,7 @@ def level_meter(peak: float) -> str:
     """A bar from METER_FLOOR_DB to 0 dBFS with the peak in dB."""
     db = 20 * math.log10(peak) if peak > 0 else -math.inf
     filled = round(METER_WIDTH * min(1.0, max(0.0, 1 - db / METER_FLOOR_DB)))
-    shown = f"{db:5.1f} dB" if math.isfinite(db) else " -inf dB"
+    shown = f"{db:5.1f} dB" if math.isfinite(db) else f"{db:5} dB"
     clip = " CLIP" if peak >= 1.0 else ""
     return f"[{'#' * filled}{'-' * (METER_WIDTH - filled)}] {shown}{clip}"
 

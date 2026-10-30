@@ -71,4 +71,10 @@ def loop(
             message = f"engine: {error}"
         if message:
             write(f"{CLEAR}{message}\n")
-        write(CLEAR + session.status(engine.meters()))
+        try:
+            status = session.status(engine.meters())
+        except EngineError as error:
+            if engine.exited():
+                raise
+            status = f"engine: {error}"
+        write(CLEAR + status)

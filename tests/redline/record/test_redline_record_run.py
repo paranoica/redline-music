@@ -212,3 +212,37 @@ def test_a_terminal_is_needed_for_the_keys(monkeypatch):
     monkeypatch.setattr(sys, "stdin", Path(__file__).open(encoding="utf-8"))  # noqa: SIM115
     with pytest.raises(EngineError, match="terminal"), terminal.raw_keys():
         pass
+
+
+class BrokenMeters:
+    """An engine still running whose meters reply cannot be read."""
+
+    startup = type("Startup", (), {"rate": RATE})()
+
+    def __init__(self, exited=False):
+        self._exited = exited
+
+    def meters(self):
+        raise EngineError("the engine's meters are unreadable: no peak")
+
+    def exited(self):
+        return self._exited
+
+
+def test_unreadable_meters_from_a_running_engine_are_shown_not_fatal(tmp_path):
+    engine = BrokenMeters()
+    session = Session(
+        engine, tmp_path, round_trip(tmp_path / "none.json", LatencyKey((), 1, 1), 300), 64
+    )
+    shown = []
+    terminal.loop(session, engine, Keys([None, None, "q"]), shown.append)
+    assert "engine: the engine's meters are unreadable: no peak" in "".join(shown)
+
+
+def test_unreadable_meters_from_an_engine_that_ended_end_the_loop_with_the_reason(tmp_path):
+    engine = BrokenMeters(exited=True)
+    session = Session(
+        engine, tmp_path, round_trip(tmp_path / "none.json", LatencyKey((), 1, 1), 300), 64
+    )
+    with pytest.raises(EngineError, match="meters are unreadable"):
+        terminal.loop(session, engine, Keys([None, "q"]), [].append)

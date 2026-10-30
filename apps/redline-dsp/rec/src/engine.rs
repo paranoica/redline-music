@@ -121,7 +121,9 @@ fn give_back(returns: &mut Producer<Box<Rack>>, rack: Box<Rack>) {
 fn peak(meter: &AtomicU32, block: &[f32]) {
     let p = block
         .iter()
-        .fold(0.0f32, |m, v| if v.abs() > m { v.abs() } else { m });
+        .fold(0.0f32, |m, v| if v.abs() > m { v.abs() } else { m })
+        // NaN never wins the fold; an infinite peak would go out as JSON null
+        .min(f32::MAX);
     // a positive float's bits order as the float does
     meter.fetch_max(p.to_bits(), Ordering::Relaxed);
 }

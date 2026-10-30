@@ -554,3 +554,28 @@ fn a_start_while_the_late_take_is_still_unfinished_is_refused_and_says_so() {
     drop(c);
     std::fs::remove_file(&path).unwrap();
 }
+
+#[test]
+fn a_non_finite_mic_sample_leaves_the_meters_finite_and_in_json() {
+    let (mut e, mut c) = setup(48000);
+    let mut l = [0.0; 4];
+    let mut r = [0.0; 4];
+    e.cycle(&[0.1, f32::NAN, 0.2, 0.0], &mut l, &mut r, 0);
+    let m = c.meters();
+    assert_eq!(m.mic_peak, 0.2);
+    e.cycle(
+        &[0.1, f32::INFINITY, f32::NEG_INFINITY, 0.0],
+        &mut l,
+        &mut r,
+        4,
+    );
+    let m = c.meters();
+    assert!(
+        m.mic_peak.is_finite() && m.mic_peak >= 1.0,
+        "{}",
+        m.mic_peak
+    );
+    assert!(m.out_peak.is_finite(), "{}", m.out_peak);
+    let line = redline_rec::protocol::format(&Reply::Meters(m));
+    assert!(!line.contains("null"), "{line}");
+}

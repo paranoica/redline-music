@@ -6,6 +6,7 @@ command names itself in "cmd", a reply names the command it answers in "reply", 
 """
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -142,11 +143,16 @@ def take_report(data: dict[str, Any]) -> TakeReport:
     )
 
 
+def _peak(value: Any) -> float:
+    # JSON has no infinity: an engine that let one through wrote null
+    return math.inf if value is None else float(value)
+
+
 def meters(data: dict[str, Any]) -> Meters:
-    """A meters reply."""
+    """A meters reply; a null peak is a non-finite one, read as infinite."""
     return Meters(
-        float(data["mic_peak"]),
-        float(data["out_peak"]),
+        _peak(data["mic_peak"]),
+        _peak(data["out_peak"]),
         int(data["xruns"]),
         int(data["overflows"]),
         bool(data["recording"]),
