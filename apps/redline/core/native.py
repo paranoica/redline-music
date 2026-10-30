@@ -122,17 +122,29 @@ def sosfilt(samples: Samples, sos: npt.ArrayLike) -> Samples | None:
     return redline_dsp.sosfilt(x, sections.tolist())
 
 
-def rack_process(samples: Samples, rate: int, rack_json: str) -> Samples | None:
+def rack_process(
+    samples: Samples, rate: int, rack_json: str, side: Samples | None = None
+) -> Samples | None:
     """Stereo samples (rows, 2) through a rack of effects given as JSON; None without Rust.
+
+    Args:
+        samples: the main signal, (rows, 2).
+        rate: the sample rate in Hz.
+        rack_json: the rack, `{"effects": [...]}`.
+        side: the side signal of the same shape, for a sidechain compressor, a ducker or a
+            vocoder's carrier; without it they hear silence.
 
     Raises:
         ValueError: the rack names an unknown effect or param, a value is out of its range,
-            or the samples are not stereo.
+            the samples are not stereo, or the side is not the samples' shape.
     """
     if redline_dsp is None:
         return None
     x = np.ascontiguousarray(samples, dtype=np.float32)
-    return redline_dsp.rack_process(x, float(rate), rack_json)
+    if side is None:
+        return redline_dsp.rack_process(x, float(rate), rack_json)
+    s = np.ascontiguousarray(side, dtype=np.float32)
+    return redline_dsp.rack_process(x, float(rate), rack_json, side=s)
 
 
 def rack_effects() -> list[dict[str, Any]] | None:

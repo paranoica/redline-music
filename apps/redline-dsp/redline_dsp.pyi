@@ -26,6 +26,9 @@ def sosfilt(
     samples: npt.NDArray[np.float32], sos: list[list[float]]
 ) -> npt.NDArray[np.float32]: ...
 def rack_process(
-    samples: npt.NDArray[np.float32], rate: float, rack_json: str
+    samples: npt.NDArray[np.float32],
+    rate: float,
+    rack_json: str,
+    side: npt.NDArray[np.float32] | None = None,
 ) -> npt.NDArray[np.float32]: ...
 def rack_effects() -> str: ...

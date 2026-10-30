@@ -94,7 +94,28 @@ fn every_effect_has_its_specs_in_range_and_rejects_values_outside() {
             "flanger",
             "phaser",
             "doubler",
-            "autopan"
+            "autopan",
+            "compressor",
+            "gate",
+            "deesser",
+            "limiter",
+            "multiband",
+            "duck",
+            "transient",
+            "distort",
+            "downsample",
+            "telephone",
+            "radio",
+            "lofi",
+            "underwater",
+            "whisper",
+            "vocoder",
+            "talkbox",
+            "ring_mod",
+            "freq_shift",
+            "comb",
+            "resonator",
+            "exciter"
         ]
     );
     for name in EFFECTS {

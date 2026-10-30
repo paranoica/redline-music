@@ -118,6 +118,10 @@ pub trait Effect: Send {
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError>;
     fn reset(&mut self, rate: f32);
     fn process(&mut self, block: &mut [[f32; 2]]);
+    /// The side signal of the next `process` call, frame for frame, up to [`MAX_BLOCK`]
+    /// frames. A block that comes without one, or the frames past its end, have a silent
+    /// side. An effect with no side input ignores it.
+    fn sidechain(&mut self, _side: &[[f32; 2]]) {}
     fn latency(&self) -> usize {
         0
     }
@@ -217,6 +221,10 @@ impl<'de> Deserialize<'de> for Params {
 
 /// The lowest rate the rack runs at; the pitch effects' stretcher needs blocks of some length.
 pub const MIN_RATE: f32 = 8000.0;
+
+/// The longest block a side signal is handed over with; [`Rack::process_with`] splits longer
+/// blocks.
+pub const MAX_BLOCK: usize = 4096;
 
 /// Non-finite samples replaced by silence.
 pub fn finite(block: &mut [[f32; 2]]) {
@@ -348,6 +356,22 @@ impl Rack {
         for (e, &on) in self.effects.iter_mut().zip(&self.on) {
             if on {
                 e.process(block);
+            }
+        }
+    }
+
+    /// As `process`, with a side signal for the effects that listen to one (a sidechain
+    /// compressor, a ducker, a vocoder's carrier). Frames of `side` past its end are silent.
+    pub fn process_with(&mut self, block: &mut [[f32; 2]], side: &[[f32; 2]]) {
+        finite(block);
+        for (k, chunk) in block.chunks_mut(MAX_BLOCK).enumerate() {
+            let start = (k * MAX_BLOCK).min(side.len());
+            let part = &side[start..(start + chunk.len()).min(side.len())];
+            for (e, &on) in self.effects.iter_mut().zip(&self.on) {
+                if on {
+                    e.sidechain(part);
+                    e.process(chunk);
+                }
             }
         }
     }

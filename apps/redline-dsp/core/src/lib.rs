@@ -2,7 +2,9 @@
 //! calls through the `redline_dsp` module, filter design, and a rack of real-time effects.
 //! Pitch and formant shifting come from signalsmith-stretch, vendored C++ built by build.rs.
 
+mod colour;
 pub mod design;
+mod dynamics;
 pub mod effect;
 mod effects;
 mod faust;

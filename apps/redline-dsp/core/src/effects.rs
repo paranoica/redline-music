@@ -1,6 +1,8 @@
 //! The effects of the rack.
 
+use crate::colour;
 use crate::design::{self, Sos};
+use crate::dynamics;
 use crate::effect::{check, Effect, ParamError, ParamSpec, Smoothed};
 use crate::space;
 use crate::time;
@@ -48,6 +50,27 @@ pub const EFFECTS: &[&str] = &[
     "phaser",
     "doubler",
     "autopan",
+    "compressor",
+    "gate",
+    "deesser",
+    "limiter",
+    "multiband",
+    "duck",
+    "transient",
+    "distort",
+    "downsample",
+    "telephone",
+    "radio",
+    "lofi",
+    "underwater",
+    "whisper",
+    "vocoder",
+    "talkbox",
+    "ring_mod",
+    "freq_shift",
+    "comb",
+    "resonator",
+    "exciter",
 ];
 
 pub fn make(name: &str) -> Option<Box<dyn Effect>> {
@@ -92,6 +115,27 @@ pub fn make(name: &str) -> Option<Box<dyn Effect>> {
         "phaser" => Box::new(space::Phaser::new()),
         "doubler" => Box::new(space::Doubler::new()),
         "autopan" => Box::new(space::Autopan::new()),
+        "compressor" => Box::new(dynamics::Compressor::new()),
+        "gate" => Box::new(dynamics::Gate::new()),
+        "deesser" => Box::new(dynamics::Deesser::new()),
+        "limiter" => Box::new(dynamics::Limiter::new()),
+        "multiband" => Box::new(dynamics::Multiband::new()),
+        "duck" => Box::new(dynamics::Duck::new()),
+        "transient" => Box::new(dynamics::Transient::new()),
+        "distort" => Box::new(colour::Distort::new()),
+        "downsample" => Box::new(colour::Downsample::new()),
+        "telephone" => Box::new(colour::Telephone::new()),
+        "radio" => Box::new(colour::Radio::new()),
+        "lofi" => Box::new(colour::Lofi::new()),
+        "underwater" => Box::new(colour::Underwater::new()),
+        "whisper" => Box::new(colour::Whisper::new()),
+        "vocoder" => Box::new(colour::Vocoder::new()),
+        "talkbox" => Box::new(colour::Talkbox::new()),
+        "ring_mod" => Box::new(colour::RingMod::new()),
+        "freq_shift" => Box::new(colour::FreqShift::new()),
+        "comb" => Box::new(colour::Comb::new()),
+        "resonator" => Box::new(colour::Resonator::new()),
+        "exciter" => Box::new(colour::Exciter::new()),
         _ => return None,
     })
 }

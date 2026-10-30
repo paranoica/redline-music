@@ -170,18 +170,30 @@ fn integrated_loudness(
 /// Frames per call of the rack's process, as a host would hand them over.
 const RACK_BLOCK: usize = 512;
 
-/// Stereo samples (rows, 2) through a rack of effects described in JSON.
+/// Stereo samples (rows, 2) through a rack of effects described in JSON; `side`, of the same
+/// shape, is the side signal for the effects that listen to one.
 #[pyfunction]
+#[pyo3(signature = (samples, rate, rack_json, side=None))]
 fn rack_process<'py>(
     py: Python<'py>,
     samples: PyReadonlyArray2<'py, f32>,
     rate: f32,
     rack_json: &str,
+    side: Option<PyReadonlyArray2<'py, f32>>,
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
     if samples.shape()[1] != 2 {
         return Err(PyValueError::new_err(
             "the rack takes stereo samples, (rows, 2)",
         ));
+    }
+    if let Some(s) = &side {
+        if s.shape() != samples.shape() {
+            return Err(PyValueError::new_err(format!(
+                "the side signal is {:?}; it must have the samples' shape, {:?}",
+                s.shape(),
+                samples.shape()
+            )));
+        }
     }
     let error = |e: RackError| PyValueError::new_err(e.to_string());
     let mut rack = Rack::from_json(rack_json).map_err(error)?;
@@ -193,10 +205,23 @@ fn rack_process<'py>(
     let mut frames: Vec<[f32; 2]> = Vec::with_capacity(rows + latency);
     frames.extend(samples.as_array().rows().into_iter().map(|r| [r[0], r[1]]));
     frames.resize(rows + latency, [0.0; 2]);
+    let side: Option<Vec<[f32; 2]>> = side.map(|s| {
+        let mut v = Vec::with_capacity(rows + latency);
+        v.extend(s.as_array().rows().into_iter().map(|r| [r[0], r[1]]));
+        v.resize(rows + latency, [0.0; 2]);
+        v
+    });
     py.detach(|| {
-        filters::flushing_tiny(|| {
-            for block in frames.chunks_mut(RACK_BLOCK) {
-                rack.process(block);
+        filters::flushing_tiny(|| match &side {
+            Some(side) => {
+                for (block, s) in frames.chunks_mut(RACK_BLOCK).zip(side.chunks(RACK_BLOCK)) {
+                    rack.process_with(block, s);
+                }
+            }
+            None => {
+                for block in frames.chunks_mut(RACK_BLOCK) {
+                    rack.process(block);
+                }
             }
         })
     });

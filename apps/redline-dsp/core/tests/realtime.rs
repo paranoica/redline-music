@@ -278,3 +278,36 @@ fn a_rack_of_every_effect_does_not_allocate_in_process() {
         assert_eq!(allocations(|| rack.process(&mut block)), 0, "on a tone");
     }
 }
+
+#[test]
+fn no_effect_allocates_taking_a_side_signal() {
+    let tone = tone(512);
+    let side: Vec<[f32; 2]> = tone.iter().map(|f| [f[1], -f[0]]).collect();
+    for name in EFFECTS {
+        let mut e = make(name).unwrap();
+        e.reset(48000.0);
+        let mut block = [[0.0f32; 2]; 512];
+        for _ in 0..30 {
+            block.copy_from_slice(&tone);
+            let n = allocations(|| {
+                e.sidechain(&side);
+                e.process(&mut block);
+            });
+            assert_eq!(n, 0, "{name}, with a side");
+        }
+    }
+    let effects: Vec<String> = EFFECTS
+        .iter()
+        .map(|e| format!(r#"{{"effect": "{e}"}}"#))
+        .collect();
+    let mut rack = Rack::from_json(&format!(r#"{{"effects": [{}]}}"#, effects.join(","))).unwrap();
+    rack.reset(44100.0).unwrap();
+    // longer than the longest block a side comes with: the rack splits it
+    let mut long = vec![[0.1f32, 0.4]; 9000];
+    let long_side = vec![[0.3f32, -0.2]; 9000];
+    assert_eq!(
+        allocations(|| rack.process_with(&mut long, &long_side)),
+        0,
+        "a rack with a side"
+    );
+}
