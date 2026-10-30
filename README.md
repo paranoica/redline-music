@@ -31,6 +31,7 @@ it sounds better is for you to decide by ear.
 | **Record** | Records your vocal over a beat while you hear yourself through the vocal rack with under 10 ms of delay, lines every take up with the beat, and ranks the takes of a song by timing, clipping, noise, dropouts and beat in the mic. |
 | **Song** | One page for a whole song, laid out as a signal path: beat → text → recording → takes → mix → result. The page drives the recording engine, ranks takes as they land, runs the auto mix with seeded variants to compare at equal loudness, and writes the result. |
 | **Beats** | An agent writes a beat as a score (drum steps with rolls, a gliding 808, chords and melodies, sections, a mix) from a recipe drawn by seed, and a Rust synth plays it: drums and 808 by synthesis, keys, plucks and pads by FM, string models and supersaws, plus a few free CC0 instrument libraries. The beat page edits it bar by bar with the sound changing as you click, measures the render against the references' beats, and takes your marks on bars into the next beat. |
+| **Flip** | Takes a type beat apart into stems, reads its grid and 808 notes, and lets you replace the 808 with ours on the same notes, take the hats out or program new ones, move and repeat bars to fit the text, and put tape stops, reverses and stutters on chosen bars. |
 | **Batch** | Runs a saved studio preset over a whole folder of Suno takes in one command. |
 | **Lyrics** | Writes a new text from a style profile of the scene, measures your beat for tempo, bars and hardness so the lines fit it, checks every draft for copied lines, and prints a card ready to paste into Suno. You mark lines as cringe or good, and the next text takes those marks into account. |
 
@@ -119,6 +120,21 @@ Long work (separation, ranking, auto mix, the result) runs as separate processes
 cancel, and pauses while a take records so the audio stays clean. Closing the tab never stops a
 take; stopping the server keeps it. The mix and beat surfaces need a screen 1024 px wide; the
 rest works on a phone. More in [docs/song.md](docs/song.md).
+
+## Flipping a type beat
+
+When the song's beat is a file, the beat station opens the flip. One click splits the beat into
+stems and reads its bar grid and its 808 notes. Then:
+
+- the 808: the original, ours on the same notes (tuned to the source's detune), or off;
+- the hats: the original, removed, or programmed again per block;
+- the bars: moved, repeated, split or cut, or proposed from the song's text (one bar per line,
+  the hook on the most repeated run of bars);
+- effects on chosen bars: reverse, tape stop and start, stutter, granular.
+
+Each render is a new version, brought toward the source's loudness under a -1 dBFS ceiling, and
+can become the song's beat (the page counts the takes recorded over the old one first). Editing a
+beat does not change its licence. More in [docs/flip.md](docs/flip.md).
 
 ## The studio
 
@@ -374,6 +390,7 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline song studio` | the song page |
 | `redline song refs` | set a song's references |
 | `redline song list`, `show` | the songs, one song's file |
+| `redline flip analyse`, `render`, `propose`, `clean` | a type beat's flip from the command line |
 | `redline studio` | the live page |
 | `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
 | `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
@@ -411,6 +428,7 @@ apps/
     beat/           recipes, the beatmaker's rounds, checks, render, marks, sounds, the beat page's server
     studio/         the studio's server
     song/           the song file, the recording engine's owner, jobs, variants, the song page's server
+    flip/           a type beat's stems, grid, 808 notes, our 808 and hats, bars and effects
     lyrics/         text parsing, style profiles, the writer, Suno cards, marks
     web/            what the local pages share: token, host check, headers
     cli/            the command line
@@ -422,7 +440,7 @@ tests/redline/      tests, on synthetic audio and invented texts
 docs/               the sound, beats and lyrics guides
 ```
 
-More detail: [docs/song.md](docs/song.md), [docs/sound.md](docs/sound.md), [docs/beats.md](docs/beats.md),
+More detail: [docs/song.md](docs/song.md), [docs/flip.md](docs/flip.md), [docs/sound.md](docs/sound.md), [docs/beats.md](docs/beats.md),
 [docs/lyrics.md](docs/lyrics.md),
 [docs/lyrics-profile.md](docs/lyrics-profile.md).
 
