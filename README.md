@@ -29,6 +29,7 @@ it sounds better is for you to decide by ear.
 | **Process** | Runs the vocal through a chain built from those measurements: EQ toward the references, compression, saturation, hard tune, formant shift, octave layers, doubles. Then delay throws, reverb and stutter at phrase ends, drive on the 808, and a clip master to the references' loudness. |
 | **Studio** | A local page that plays the track through the chain in real time: move a control and you hear it at once. The vocal, beat and master run in the browser on the same Rust code as the render. A/B against the original and a reference at equal loudness, automation lanes, undo, presets. |
 | **Record** | Records your vocal over a beat while you hear yourself through the vocal rack with under 10 ms of delay, lines every take up with the beat, and ranks the takes of a song by timing, clipping, noise, dropouts and beat in the mic. |
+| **Beats** | An agent writes a beat as a score (drum steps with rolls, a gliding 808, chords and melodies, sections, a mix) from a recipe drawn by seed, and a Rust synth plays it: drums and 808 by synthesis, keys, plucks and pads by FM, string models and supersaws, plus a few free CC0 instrument libraries. The beat page edits it bar by bar with the sound changing as you click, measures the render against the references' beats, and takes your marks on bars into the next beat. |
 | **Batch** | Runs a saved studio preset over a whole folder of Suno takes in one command. |
 | **Lyrics** | Writes a new text from a style profile of the scene, measures your beat for tempo, bars and hardness so the lines fit it, checks every draft for copied lines, and prints a card ready to paste into Suno. You mark lines as cringe or good, and the next text takes those marks into account. |
 
@@ -198,6 +199,45 @@ automatic settings, about 40 s a take. The report and `ranking.json` go to
 `work/takes/<song>/`, with the `redline voice` line for the best take. Whether it is the best
 performance is still for you to judge.
 
+## Beats
+
+A beat starts as a seed. `redline beat write` draws a recipe from it (genre, tempo, key,
+swing, sounds, structure, a few moves such as dropping the 808 before a hook) and hands a
+request to the `beatmaker` agent, which answers with a score in JSON. Run the command again and
+it checks the score: the format to the step, notes in the key, the 808's range, the bar count.
+A score that fails goes back with every problem named by its place, up to four rounds.
+
+```sh
+uv run redline beat write --seed 7 --genre trap        # the request for the agent
+uv run redline beat write --seed 7                     # checks the answer, saves score-1.json
+uv run redline beat render --seed 7                    # work/beats/7/beat.wav and a stem per sound
+uv run redline beat measure --seed 7 --ref input/refs  # against the references' beats
+uv run redline beat studio --seed 7                    # the page
+```
+
+A score is written in steps, sixteen to a bar. A drum row is a string with one character per
+step: `x` a hit, `X` an accent, `g` a ghost, `2 3 4 6` a roll of that many hits, `.` a rest.
+Optional lanes set velocity, pitch, decay and chance per step. Notes have a step, a length, a
+name and a velocity, and two overlapping notes on the 808 glide. Sections say which patterns
+play for how many bars, what is muted and which fill takes the last bar. The full format is in
+[docs/beats.md](docs/beats.md).
+
+The page shows the whole song as a strip of bars. Click a bar and the grid below shows what
+plays in it, every row on one time axis; edits are heard at once, checked as you go and saved
+as the next `score-N.json`, never over an old one. Mark a bar good or bad with `G` and `B`:
+the mark keeps the bar as it was written, and the next request of that genre quotes it.
+
+The render is the same Rust code the page plays, so the file is what you heard. `measure`
+compares it with the beats split out of your references; those are separated stems and the
+render is clean, which the report says next to the numbers. As everywhere here, the numbers
+say closer or further, not better.
+
+Sounds: drums, the 808, FM keys and bells, plucked strings and supersaws are synthesized and
+yours to use. Recorded instruments come only from libraries whose licence is checked at the
+source. `redline beat sounds list` shows them with their licence; `redline beat sounds fetch
+vsco-harp` downloads one into `work/sounds/`, pinned to a commit and checked file by file. The
+ten listed now are CC0. A beat that uses a sound you may not sell says so in its render report.
+
 ## Voice lab
 
 The voice lab is a rack: a list of effects that the vocal goes through in your order, after the
@@ -282,8 +322,8 @@ ignored folders:
 | Folder | What lives there |
 |---|---|
 | `input/` | your takes, beats and references |
-| `private/` | the lyrics base, generated texts, the spec |
-| `work/` | caches, studio settings and presets |
+| `private/` | the lyrics base, generated texts, beat scores and marks, the spec |
+| `work/` | caches, studio settings and presets, renders, downloaded sounds |
 | `output/` | results |
 
 Every folder the tool writes into also ignores itself. Tests use only audio generated by code.
@@ -300,6 +340,12 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
 | `redline record` | record takes over a beat, hearing yourself through the vocal rack; `--calibrate` measures the round trip |
 | `redline takes` | rank recorded takes of a song: timing against the other takes, clipping, noise, dropouts, beat in the mic |
+| `redline beat write` | a beat score by seed, through the beatmaker agent |
+| `redline beat render` | render a score to a WAV and a stem per sound |
+| `redline beat measure` | measure the render against the references' beats |
+| `redline beat studio` | the beat page |
+| `redline beat marks` | mark a bar good or bad, or list the marks |
+| `redline beat sounds` | list or fetch the recorded instrument libraries |
 | `redline effects` | the rack's effects with their params and ranges (`--json` for the raw list) |
 | `redline lyrics index` | build style profiles and copy-check digests from the base |
 | `redline lyrics write` | write a new text by seed, optionally for a beat |
@@ -323,19 +369,21 @@ apps/
     engine/         settings, the staged render with its cache, the racks the studio plays
     record/         the recording session: engine driver, calibration, takes
     takes/          measuring and ranking takes
+    beat/           recipes, the beatmaker's rounds, checks, render, marks, sounds, the beat page's server
     studio/         the studio's server
     lyrics/         text parsing, style profiles, the writer, Suno cards, marks
     web/            what the local pages share: token, host check, headers
     cli/            the command line
-  redline-dsp/      the Rust sound core: effects, rack, master; built for Python and the browser;
-                    rec/ is the recording engine
-  studio/           the studio page, TypeScript
+  redline-dsp/      the Rust sound core: effects, rack, master, the beat synth; built for Python
+                    and the browser; rec/ is the recording engine
+  studio/           the studio and beat pages, TypeScript
   lyrics-web/       the marks page
 tests/redline/      tests, on synthetic audio and invented texts
-docs/               the sound and lyrics guides
+docs/               the sound, beats and lyrics guides
 ```
 
-More detail: [docs/sound.md](docs/sound.md), [docs/lyrics.md](docs/lyrics.md),
+More detail: [docs/sound.md](docs/sound.md), [docs/beats.md](docs/beats.md),
+[docs/lyrics.md](docs/lyrics.md),
 [docs/lyrics-profile.md](docs/lyrics-profile.md).
 
 ## Development
