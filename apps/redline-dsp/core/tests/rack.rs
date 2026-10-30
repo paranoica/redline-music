@@ -282,9 +282,10 @@ fn the_side_is_delayed_behind_timestretch_and_reverse_too() {
     }
 }
 
-const FIXED: [(&str, &str); 8] = [
+const FIXED: [(&str, &str); 9] = [
     ("reverse", "window"),
     ("limiter", "lookahead"),
+    ("chain_compressor", "lookahead"),
     ("granular", "seed"),
     ("drift", "seed"),
     ("tape_delay", "seed"),

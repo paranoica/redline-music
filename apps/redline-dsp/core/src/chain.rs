@@ -5,7 +5,9 @@
 //!   1 ms block, the median of five blocks around each, a compressor over `threshold` and a
 //!   1:2 expander under `gate` (at most 40 dB down), smoothed per block, read linearly between
 //!   block centres. The median looks two blocks ahead and the reading one more, so the effect
-//!   runs four blocks late. `makeup` is the loudness the offline chain gives back afterwards.
+//!   runs four blocks late, as `lookahead` has it by default. A shorter lookahead (0 for a
+//!   live monitor) reads the newest gain known for the blocks it cannot see yet.
+//!   `makeup` is the loudness the offline chain gives back afterwards.
 //! - chain_clip: the drive and clip of `redline.vocal.chain.render_dirt` at eight times the
 //!   rate: tanh after `drive` dB, then a hard clip `below` dB under the driven level of the loud
 //!   part of the voice, `peak` (measured offline, before the drive).
@@ -32,7 +34,7 @@ const ON_OFF: &[&str] = &["off", "on"];
 const BLOCK_SECONDS: f64 = 0.001;
 const LEVEL_FLOOR: f32 = 1e-6;
 const EXPANDER_RANGE_DB: f64 = 40.0;
-/// Blocks the compressor's reading of its gain runs behind the input.
+/// Blocks the compressor needs to read its gain as the offline law does.
 const LOOKAHEAD_BLOCKS: usize = 4;
 /// Taps each side of a polyphase filter, per unit of the factor, as resample_poly designs it.
 const HALF_PER_FACTOR: usize = 10;
@@ -225,6 +227,7 @@ pub struct ChainCompressor {
     smoothed: [f64; 8],
     squash: f64,
     expand: f64,
+    lookahead: usize,
     delay: Vec<[f32; 2]>,
     // u64: a usize is 32 bits on wasm32 and would wrap within a day of play
     now: u64,
@@ -238,6 +241,15 @@ impl ChainCompressor {
         ParamSpec::range("release", 5.0, 500.0, 40.0, "ms"),
         ParamSpec::range("gate", -120.0, 0.0, -120.0, "dB"),
         ParamSpec::range("makeup", -24.0, 48.0, 0.0, "dB"),
+        // in 1 ms blocks
+        ParamSpec::range(
+            "lookahead",
+            0.0,
+            LOOKAHEAD_BLOCKS as f32,
+            LOOKAHEAD_BLOCKS as f32,
+            "ms",
+        )
+        .fixed(),
     ];
 
     pub fn new() -> Self {
@@ -260,6 +272,7 @@ impl ChainCompressor {
             smoothed: [0.0; 8],
             squash: 0.0,
             expand: 0.0,
+            lookahead: LOOKAHEAD_BLOCKS,
             delay: Vec::new(),
             now: 0,
         };
@@ -325,8 +338,9 @@ impl ChainCompressor {
         self.smoothed[(self.blocks - 3) & 7] = self.squash + self.expand;
     }
 
-    /// The gain in dB of frame `n`, between the centres of the blocks around it.
-    fn gain_db(&self, n: u64) -> f64 {
+    /// The gain in dB of frame `n`, between the centres of the blocks around it, read at
+    /// frame `now`: a block whose gain is not known yet takes the newest one that is.
+    fn gain_db(&self, n: u64, now: u64) -> f64 {
         let b = self.block as f64;
         let pos = n as f64 - (b - 1.0) / 2.0;
         if pos <= 0.0 {
@@ -334,9 +348,11 @@ impl ChainCompressor {
         }
         let i = (pos / b).floor() as u64;
         let t = (pos - i as f64 * b) / b;
+        // a block's gain is known two blocks after it ends; with the full lookahead, always
+        let known = ((now + 1) / self.block as u64).saturating_sub(3);
         let (a, z) = (
-            self.smoothed[(i & 7) as usize],
-            self.smoothed[((i + 1) & 7) as usize],
+            self.smoothed[(i.min(known) & 7) as usize],
+            self.smoothed[((i + 1).min(known) & 7) as usize],
         );
         a + t * (z - a)
     }
@@ -357,7 +373,8 @@ impl Effect for ChainCompressor {
             2 => self.attack_ms = v,
             3 => self.release_ms = v,
             4 => self.gate = v,
-            _ => self.makeup.set(amplitude(value)),
+            5 => self.makeup.set(amplitude(value)),
+            _ => self.lookahead = value.round() as usize,
         }
         // the block length depends on the rate only, which set does not change
         let step = self.block as f64 / self.rate as f64;
@@ -379,7 +396,7 @@ impl Effect for ChainCompressor {
         self.expand = 0.0;
         self.delay.clear();
         self.delay.resize(
-            (LOOKAHEAD_BLOCKS * self.block + 1).next_power_of_two(),
+            (self.lookahead * self.block + 1).next_power_of_two(),
             [0.0; 2],
         );
         self.now = 0;
@@ -390,7 +407,7 @@ impl Effect for ChainCompressor {
         }
         finite(block);
         let mask = self.delay.len() - 1;
-        let lag = (LOOKAHEAD_BLOCKS * self.block) as u64;
+        let lag = (self.lookahead * self.block) as u64;
         for f in block {
             self.peak = self.peak.max(f[0].abs()).max(f[1].abs());
             self.delay[self.now as usize & mask] = *f;
@@ -401,7 +418,7 @@ impl Effect for ChainCompressor {
             let makeup = self.makeup.next();
             *f = if self.now >= lag {
                 let n = self.now - lag;
-                let g = (10f64.powf(self.gain_db(n) / 20.0)) as f32 * makeup;
+                let g = (10f64.powf(self.gain_db(n, self.now) / 20.0)) as f32 * makeup;
                 let x = self.delay[n as usize & mask];
                 [x[0] * g, x[1] * g]
             } else {
@@ -411,7 +428,7 @@ impl Effect for ChainCompressor {
         }
     }
     fn latency(&self) -> usize {
-        LOOKAHEAD_BLOCKS * self.block
+        self.lookahead * self.block
     }
 }
 
@@ -811,6 +828,9 @@ mod tests {
             .map(|(x, y)| (x[0] - y[0]).abs().max((x[1] - y[1]).abs()))
             .fold(0.0f32, f32::max);
         assert!(worst < 1e-6, "differs by {worst} past the wrap");
-        assert!(a.iter().any(|f| f[0].abs() > 1e-3), "the input came through");
+        assert!(
+            a.iter().any(|f| f[0].abs() > 1e-3),
+            "the input came through"
+        );
     }
 }

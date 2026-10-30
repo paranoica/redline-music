@@ -169,6 +169,78 @@ fn chain_compressor_follows_the_engines_law_sample_for_sample() {
 }
 
 #[test]
+fn chain_compressor_looks_four_blocks_ahead_unless_told_otherwise() {
+    let e = make("chain_compressor").unwrap();
+    let spec = *e
+        .params()
+        .iter()
+        .find(|p| p.name == "lookahead")
+        .expect("a lookahead param");
+    assert_eq!(
+        (spec.low, spec.high, spec.default, spec.unit),
+        (0.0, 4.0, 4.0, "ms")
+    );
+    assert!(spec.fixed_while_playing);
+    let x = phrases(RATE as usize);
+    let mut default = effect("chain_compressor", &[("threshold", -30.0), ("gate", -50.0)]);
+    let mut four = effect(
+        "chain_compressor",
+        &[("threshold", -30.0), ("gate", -50.0), ("lookahead", 4.0)],
+    );
+    assert_eq!(four.latency(), 4 * 44);
+    assert_eq!(run(four.as_mut(), &x, 300), run(default.as_mut(), &x, 300));
+}
+
+#[test]
+fn chain_compressor_without_lookahead_is_not_late() {
+    let mut e = effect(
+        "chain_compressor",
+        &[("threshold", -30.0), ("ratio", 10.0), ("lookahead", 0.0)],
+    );
+    assert_eq!(e.latency(), 0);
+    let start = 1000;
+    let mut x = sine(1000.0, db(-10.0) as f32, RATE as usize);
+    x[..start].fill([0.0; 2]);
+    let y = run(e.as_mut(), &x, 256);
+    assert!(y[..start].iter().all(|f| *f == [0.0; 2]));
+    assert!(
+        y[start + 1][0] != 0.0,
+        "the tone is heard from its first frames"
+    );
+    // in step with the input: a steady -18 dB on every frame, not a ratio that wobbles with
+    // the phase of a delayed copy
+    for n in RATE as usize / 2..RATE as usize {
+        if x[n][0].abs() > 0.1 {
+            let g = 20.0 * (y[n][0] as f64 / x[n][0] as f64).log10();
+            assert!((g - (-18.0)).abs() < 0.3, "frame {n}: {g} dB");
+        }
+    }
+    // the same in any block size
+    let x = phrases(RATE as usize / 2);
+    let mut a = effect("chain_compressor", &[("lookahead", 0.0)]);
+    let mut b = effect("chain_compressor", &[("lookahead", 0.0)]);
+    assert_eq!(run(a.as_mut(), &x, 1), run(b.as_mut(), &x, 777));
+}
+
+#[test]
+fn chain_compressor_lookahead_is_whole_blocks_within_its_range() {
+    assert_eq!(
+        effect("chain_compressor", &[("lookahead", 2.0)]).latency(),
+        2 * 44
+    );
+    assert_eq!(
+        effect("chain_compressor", &[("lookahead", 1.6)]).latency(),
+        2 * 44
+    );
+    let mut e = make("chain_compressor").unwrap();
+    assert!(e.set("lookahead", 4.5).is_err());
+    assert!(e.set("lookahead", -0.5).is_err());
+    e.set("lookahead", 1.0).unwrap();
+    e.reset(48000.0);
+    assert_eq!(e.latency(), 48);
+}
+
+#[test]
 fn chain_compressor_squashes_over_the_threshold_and_expands_under_the_gate() {
     // a steady tone 20 dB over the threshold at 10:1 sits 18 dB down
     let x = sine(1000.0, db(-10.0) as f32, RATE as usize);
