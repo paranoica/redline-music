@@ -74,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     studio.add_argument(
         "--no-browser", action="store_true", help="print the address, do not open it"
     )
+    _classic(studio)
     run = commands.add_parser(
         "run", help="process takes with the chosen settings and write a result folder for each"
     )
@@ -83,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--settings", type=Path, help="settings saved from the studio (default: the picks)"
     )
     chosen.add_argument("--preset", help="a preset saved in the studio, by its name")
+    _classic(run)
     voice = commands.add_parser(
         "voice",
         help="your own recorded vocal over a beat, with settings found by measurement",
@@ -105,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="render the picks instead of searching for the settings closest to the references",
     )
+    _classic(voice)
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
     )
@@ -199,6 +202,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--stress", action="store_true", help="find rhymes by stress (needs the stress extra)"
     )
     return parser
+
+
+def _classic(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--classic",
+        action="store_true",
+        help="render with the old Python engine instead of the racks the studio plays live",
+    )
 
 
 def _own_offset(command: argparse.ArgumentParser) -> None:

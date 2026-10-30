@@ -15,6 +15,7 @@ from redline.core.audio import true_peak_db
 from redline.core.listen import common_lufs
 from redline.core.loudness import gated_crest_db, integrated_lufs
 from redline.core.spectrum import low_end
+from redline.engine import racks_render
 from redline.engine.render import Engine, timbre_of
 from redline.engine.settings import SPECS, Settings, to_dict
 from redline.engine.track import reference_loudness, track_engine
@@ -233,11 +234,16 @@ def run_track(
     out_dir: Path,
     separator: Separator,
     settings: Settings | None = None,
+    classic: bool = False,
 ) -> Path:
-    """The spec's run: the chain at the given settings (the picks by default), as a folder."""
+    """The spec's run: the chain at the given settings (the picks by default), as a folder.
+
+    Rendered through the studio's racks, or through the Python engine when classic.
+    """
     check_folders(work_dir, out_dir)
     inputs = measure_inputs(track, refs, work_dir, separator)
-    return write_result(inputs, track_engine(inputs), out_dir, track.stem, settings)
+    engine = track_engine(inputs)
+    return write_result(inputs, engine, out_dir, track.stem, settings, classic=classic)
 
 
 def write_result(
@@ -247,6 +253,7 @@ def write_result(
     label: str,
     settings: Settings | None = None,
     extra: dict[str, Any] | None = None,
+    classic: bool = False,
 ) -> Path:
     """Render a measured track and write the result folder.
 
@@ -257,6 +264,7 @@ def write_result(
         label: The folder's name after the time.
         settings: The settings to render at; the picks when None.
         extra: More entries for chain.json, after the usual ones.
+        classic: Render with the Python engine instead of the racks the studio plays.
 
     Returns:
         The folder with final.wav, original.wav, stems/, compare/, chain.json and report.md.
@@ -264,7 +272,7 @@ def write_result(
     settings = settings or Settings()
     rate = engine.context.rate
     original = inputs.track_stems.vocal + inputs.track_stems.beat
-    rendered = engine.render(settings)
+    rendered = engine.render(settings) if classic else racks_render.render(engine, settings)
     vocal, beat, final = rendered.vocal, rendered.beat, rendered.final
     chain, master = rendered.chain, rendered.master
     final_lufs = integrated_lufs(final, rate)
@@ -283,6 +291,7 @@ def write_result(
         gain = 10 ** ((level - integrated_lufs(samples, rate)) / 20)
         sf.write(folder / "compare" / f"{name}.wav", samples * gain, rate, subtype="PCM_24")
     record = {
+        "render": "classic" if classic else "racks",
         "vocal_level": chain.level,
         "vocal_db": settings.vocal_db,
         "timbre": timbre_of(settings),

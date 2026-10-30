@@ -4,6 +4,7 @@ import json
 import threading
 from pathlib import Path
 
+import numpy as np
 import pytest
 import soundfile as sf
 from redline.engine.render import Engine
@@ -315,3 +316,24 @@ def test_the_browser_file_opens_from_a_relative_folder(tmp_path, monkeypatch):
     path = browser_file("http://127.0.0.1:5555/", Path("work") / "studio")
     assert path.as_uri().startswith("file:///")
     assert path == tmp_path / "work" / "studio" / "open.html"
+
+
+@pytest.mark.parametrize("classic", [False, True])
+def test_the_exact_render_goes_through_the_racks_unless_classic(studio, monkeypatch, classic):
+    pytest.importorskip("redline_dsp")
+    from redline.engine import racks_render
+
+    calls = []
+    real = racks_render.render
+
+    def spy(engine, settings, *args):
+        calls.append(settings)
+        return real(engine, settings, *args)
+
+    monkeypatch.setattr(racks_render, "render", spy)
+    studio.classic = classic
+    rendered = studio.render(Settings(), 1)
+    assert rendered is not None
+    assert len(calls) == (0 if classic else 1)
+    classic_final = studio.engine.render(Settings()).final
+    assert bool(np.array_equal(rendered.final, classic_final)) is classic

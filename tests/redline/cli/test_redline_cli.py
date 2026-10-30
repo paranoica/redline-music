@@ -261,3 +261,19 @@ def test_corrupt_cached_measurements_are_recomputed(tmp_path, inputs):
     run_dir = measure_run(track, sorted(refs.iterdir()), tmp_path / "work", HalfSeparator())
     data = json.loads((run_dir / "measurements.json").read_text(encoding="utf-8"))
     assert data["track"]["values"]["mix.lufs"] == pytest.approx(-20.0, abs=0.2)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "--track", "t.wav", "--ref", "r"],
+        ["voice", "--vocal", "v.wav", "--beat", "b.wav", "--ref", "r"],
+        ["studio", "--track", "t.wav", "--ref", "r"],
+    ],
+)
+def test_the_rendering_commands_take_classic_and_default_to_the_racks(args):
+    from redline.cli.parser import build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(args).classic is False
+    assert parser.parse_args([*args, "--classic"]).classic is True

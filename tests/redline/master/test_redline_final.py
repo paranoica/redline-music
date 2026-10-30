@@ -121,8 +121,14 @@ def test_master_round_masters_the_chosen_sound(inputs, tmp_path):
         v: k for k, v in json.loads((result.run_dir / "key.json").read_text())["key"].items()
     }
     heard, _ = sf.read(result.listen_dir / f"{letters['no master']}.wav", always_2d=True)
+    # the rounds render with the Python engine, so the run they stand for is the classic one
     folder = run_track(
-        track, sorted(refs.iterdir()), tmp_path / "w2", tmp_path / "o2", HalfSeparator()
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w2",
+        tmp_path / "o2",
+        HalfSeparator(),
+        classic=True,
     )
     vocal, _ = sf.read(folder / "stems" / "vocal.wav", always_2d=True)
     beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
@@ -242,9 +248,12 @@ def test_compare_pair_is_at_one_safe_loudness(hot_inputs, tmp_path):
     assert levels[0] == pytest.approx(levels[1], abs=0.1)
 
 
-def test_stems_rebuild_the_mix_before_the_master(inputs, tmp_path):
+def test_stems_rebuild_the_mix_before_the_classic_master(inputs, tmp_path):
     # quiet references: a light master leaves stretches the clip never touches
-    folder = make_track(inputs, tmp_path)
+    track, refs = inputs
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), classic=True
+    )
     vocal, _ = sf.read(folder / "stems" / "vocal.wav", always_2d=True)
     beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True)
     chain = json.loads((folder / "chain.json").read_text())
@@ -260,6 +269,31 @@ def test_stems_rebuild_the_mix_before_the_master(inputs, tmp_path):
     error = np.abs(sosfiltfilt(band, final, axis=0)[calm] - expected[calm])
     # a gain or stem mistake moves most samples; a few band-limit residues are allowed
     assert np.mean(error < 2e-3) > 0.999
+
+
+def test_stems_and_the_recorded_master_rebuild_the_final_of_the_racks(inputs, tmp_path):
+    from redline.core import native
+
+    pytest.importorskip("redline_dsp")
+    folder = make_track(inputs, tmp_path)
+    vocal, rate = sf.read(folder / "stems" / "vocal.wav", always_2d=True, dtype="float32")
+    beat, _ = sf.read(folder / "stems" / "beat.wav", always_2d=True, dtype="float32")
+    chain = json.loads((folder / "chain.json").read_text())
+    assert chain["render"] == "racks"
+    master = chain["master"]
+    # the master effect raises by the gain before its clip and trims after it
+    effect = {
+        "effect": "master",
+        "params": {
+            "gain": master["gain_db"] - master["trim_db"],
+            "trim": master["trim_db"],
+            "ceiling": CEILING_DB,
+        },
+    }
+    rebuilt = native.rack_process(vocal + beat, rate, json.dumps({"effects": [effect]}))
+    final, _ = sf.read(folder / "final.wav", always_2d=True, dtype="float32")
+    # final.wav is 24-bit: half a step of it apart at most
+    np.testing.assert_allclose(final, rebuilt, rtol=0, atol=2**-23 + 1e-7)
 
 
 WORDS = {
@@ -454,8 +488,14 @@ def test_timbre_round_plays_the_chosen_timbre_as_the_final(inputs, tmp_path):
     heard, _ = sf.read(
         result.listen_dir / f"{letters['octave down + doubles']}.wav", always_2d=True
     )
+    # the rounds render with the Python engine, so the run they stand for is the classic one
     folder = run_track(
-        track, sorted(refs.iterdir()), tmp_path / "w2", tmp_path / "o2", HalfSeparator()
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w2",
+        tmp_path / "o2",
+        HalfSeparator(),
+        classic=True,
     )
     final, _ = sf.read(folder / "final.wav", always_2d=True)
     assert np.corrcoef(heard[:, 0], final[:, 0])[0, 1] > 0.999
@@ -860,3 +900,52 @@ def test_a_run_with_a_rack_writes_settings_that_load_back(inputs, tmp_path):
     )
     record = json.loads((folder / "chain.json").read_text())
     assert from_dict(record["settings"]) == racked
+
+
+@pytest.fixture
+def through_racks(monkeypatch):
+    from redline.engine import racks_render
+
+    calls = []
+    real = racks_render.render
+
+    def spy(engine, settings, *args):
+        calls.append(settings)
+        return real(engine, settings, *args)
+
+    monkeypatch.setattr(racks_render, "render", spy)
+    return calls
+
+
+@pytest.mark.parametrize(("extra", "renderer"), [([], "racks"), (["--classic"], "classic")])
+def test_cli_run_renders_through_the_racks_unless_classic(
+    inputs, tmp_path, through_racks, extra, renderer
+):
+    pytest.importorskip("redline_dsp")
+    track, refs = inputs
+    args = ["run", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+    assert main([*args, "--out", str(tmp_path / "o"), *extra], HalfSeparator()) == 0
+    (folder,) = list((tmp_path / "o").iterdir())
+    assert json.loads((folder / "chain.json").read_text())["render"] == renderer
+    assert len(through_racks) == (1 if renderer == "racks" else 0)
+
+
+def test_run_through_the_racks_differs_from_the_classic_render(inputs, tmp_path):
+    pytest.importorskip("redline_dsp")
+    track, refs = inputs
+    finals = []
+    for classic, out in ((False, "o1"), (True, "o2")):
+        folder = run_track(
+            track,
+            sorted(refs.iterdir()),
+            tmp_path / "w",
+            tmp_path / out,
+            HalfSeparator(),
+            classic=classic,
+        )
+        finals.append(sf.read(folder / "final.wav", always_2d=True)[0])
+    assert finals[0].shape == finals[1].shape
+    assert np.abs(finals[0] - finals[1]).max() > 1e-3
+    assert integrated_lufs(finals[0], 44100) == pytest.approx(
+        integrated_lufs(finals[1], 44100), abs=0.5
+    )

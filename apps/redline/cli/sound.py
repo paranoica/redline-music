@@ -146,7 +146,7 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
     failed = 0
     for take in takes:
         try:
-            folder = run_track(take, refs, args.work, args.out, separator, chosen)
+            folder = run_track(take, refs, args.work, args.out, separator, chosen, args.classic)
         except SOUND_ERRORS as error:
             print(f"redline: {take.name}: {error}", file=sys.stderr)
             failed += 1
@@ -195,7 +195,9 @@ def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
             if found is None
             else {"auto": {**asdict(found), "settings": to_dict(found.settings)}}
         )
-        folder = write_result(inputs, engine, args.out, args.vocal.stem, chosen, extra)
+        folder = write_result(
+            inputs, engine, args.out, args.vocal.stem, chosen, extra, args.classic
+        )
     except SOUND_ERRORS as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
@@ -287,6 +289,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
             args.work / "studio",
             track_key,
             references,
+            classic=args.classic,
         )
         token = secrets.token_urlsafe(32)
         httpd = studio_server.make_server(studio, token, args.port)

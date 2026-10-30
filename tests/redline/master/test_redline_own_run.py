@@ -452,3 +452,30 @@ def test_studio_names_the_keys_left_at_the_edge_of_their_range(
         out.index("at the edge of its range: comp_threshold_db")
         == out.index("distance: 12.50 → 3.25") + 1
     )
+
+
+@pytest.mark.parametrize(("extra", "renderer"), [((), "racks"), (("--classic",), "classic")])
+def test_voice_renders_through_the_racks_unless_classic(
+    own, tmp_path, no_auto, monkeypatch, extra, renderer
+):
+    pytest.importorskip("redline_dsp")
+    from redline.engine import racks_render
+
+    calls = []
+    real = racks_render.render
+
+    def spy(engine, settings, *args):
+        calls.append(settings)
+        return real(engine, settings, *args)
+
+    monkeypatch.setattr(racks_render, "render", spy)
+    assert main(voice_args(own, tmp_path, "--no-auto", *extra), CountingSeparator()) == 0
+    _, chain = only_result(tmp_path)
+    assert chain["render"] == renderer
+    assert len(calls) == (1 if renderer == "racks" else 0)
+
+
+@pytest.mark.parametrize(("extra", "classic"), [((), False), (("--classic",), True)])
+def test_studio_takes_classic_for_its_exact_render(own, tmp_path, auto, served, extra, classic):
+    assert main(studio_args(own, tmp_path, *extra), CountingSeparator()) == 0
+    assert served["studio"].classic is classic

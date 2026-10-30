@@ -25,7 +25,7 @@ import soundfile as sf
 
 from redline.core import native
 from redline.core.loudness import integrated_lufs
-from redline.engine import live
+from redline.engine import live, racks_render
 from redline.engine.render import Cancelled, Engine, Rendered
 from redline.engine.settings import PRESET_NAME, VERSION, Settings, from_dict, schema, to_dict
 from redline.web.local import KINDS, BadRequest, LocalHandler, LocalServer, only
@@ -84,6 +84,7 @@ class Studio:
         folder: Path,
         track_key: str,
         references: Sequence[tuple[str, Samples, int]] = (),
+        classic: bool = False,
     ) -> None:
         """Hold the engine of one track.
 
@@ -93,12 +94,15 @@ class Studio:
             folder: Where settings and presets are saved.
             track_key: The track's folder name under folder.
             references: Name, samples and rate of each reference, played in the A/B.
+            classic: Render exactly with the Python engine instead of the racks the page
+                plays live.
         """
         self.references = [
             (name, samples, rate, integrated_lufs(samples, rate))
             for name, samples, rate in references
         ]
         self.engine = engine
+        self.classic = classic
         self.original = original
         self.folder = folder
         self.track_key = track_key
@@ -133,7 +137,16 @@ class Studio:
 
     def render(self, settings: Settings, seq: int) -> Rendered | None:
         """The whole track at these settings; None when a newer request came in."""
-        rendered = self._run(seq, lambda cancelled: self.engine.render(settings, cancelled))
+
+        def work(cancelled: Any) -> Rendered:
+            if self.classic:
+                return self.engine.render(settings, cancelled)
+            try:
+                return racks_render.render(self.engine, settings, cancelled)
+            except ValueError as error:
+                raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
+
+        rendered = self._run(seq, work)
         if rendered is not None:
             self.exact.add(settings)
         return rendered

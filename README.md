@@ -106,6 +106,10 @@ uv run redline run --preset "my preset" --track input/takes/ --ref input/refs
 
 A take that fails is reported and the rest still run.
 
+`run`, `voice` and the studio's exact render go through the same vocal, beat and master racks
+the studio plays live, so the file is what you heard. `--classic` renders with the old Python
+engine instead.
+
 ## Your own vocal
 
 Recorded the vocal yourself? Give Redline the vocal and the beat as two files instead of a
