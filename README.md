@@ -29,6 +29,7 @@ it sounds better is for you to decide by ear.
 | **Process** | Runs the vocal through a chain built from those measurements: EQ toward the references, compression, saturation, hard tune, formant shift, octave layers, doubles. Then delay throws, reverb and stutter at phrase ends, drive on the 808, and a clip master to the references' loudness. |
 | **Studio** | A local page that plays the track through the chain in real time: move a control and you hear it at once. The vocal, beat and master run in the browser on the same Rust code as the render. A/B against the original and a reference at equal loudness, automation lanes, undo, presets. |
 | **Record** | Records your vocal over a beat while you hear yourself through the vocal rack with under 10 ms of delay, lines every take up with the beat, and ranks the takes of a song by timing, clipping, noise, dropouts and beat in the mic. |
+| **Song** | One page for a whole song, laid out as a signal path: beat → text → recording → takes → mix → result. The page drives the recording engine, ranks takes as they land, runs the auto mix with seeded variants to compare at equal loudness, and writes the result. |
 | **Beats** | An agent writes a beat as a score (drum steps with rolls, a gliding 808, chords and melodies, sections, a mix) from a recipe drawn by seed, and a Rust synth plays it: drums and 808 by synthesis, keys, plucks and pads by FM, string models and supersaws, plus a few free CC0 instrument libraries. The beat page edits it bar by bar with the sound changing as you click, measures the render against the references' beats, and takes your marks on bars into the next beat. |
 | **Batch** | Runs a saved studio preset over a whole folder of Suno takes in one command. |
 | **Lyrics** | Writes a new text from a style profile of the scene, measures your beat for tempo, bars and hardness so the lines fit it, checks every draft for copied lines, and prints a card ready to paste into Suno. You mark lines as cringe or good, and the next text takes those marks into account. |
@@ -84,6 +85,40 @@ uv run redline run     --track input/track.wav --ref input/refs   # render with 
 
 `run` writes `output/<time>-<take>/` with `final.wav`, the stems, an `original.wav` brought to
 the same loudness, a `compare/` pair at equal loudness and a `report.md`.
+
+## One song, one page
+
+A song ties a beat, a text and a voice together in `private/songs/<name>/song.json`. Start one
+and open its page:
+
+```sh
+uv run redline song new my-song --beat-seed 7 --text-seed 12 --ref input/refs/*.mp3
+uv run redline song studio my-song
+```
+
+`--beat FILE` takes a type beat instead of an own one, `--suno FILE` a Suno track instead of
+recorded takes; `redline song refs` changes the references later.
+
+The page reads like a patch line across six stations: **Beat → Text → Recording → Takes →
+Mix → Result**. The line is lit up to where the song has got, so what is missing shows without
+a checklist, and each station says what it needs and how to get it.
+
+- **Beat**: the beat page sits inside it; the render becomes the song's beat.
+- **Text**: pick a version, edit it by hand (saved as the next version after the same checks
+  the writer's texts pass), or get the command that asks the writer for a new one.
+- **Recording**: opens the recording engine and shows its stages, then one button (or `R`)
+  for a take. The text stays beside it in large type. Red appears only while a take records.
+- **Takes**: each finished take is ranked as it lands; play one over the beat and take it.
+- **Mix**: the studio sits inside it. Auto mix finds the settings closest to the references and
+  draws three variants by seed, each one setting a grid step away. They are there to be heard:
+  the auto result is the closest the search found, so the variants usually measure further.
+  Click a pad to hear it, keep one or none.
+- **Result**: renders the final track into `output/<song>/`.
+
+Long work (separation, ranking, auto mix, the result) runs as separate processes you can
+cancel, and waits while a take records so the audio stays clean. Closing the tab never stops a
+take; stopping the server keeps it. The mix and beat surfaces need a screen 1024 px wide; the
+rest works on a phone. More in [docs/song.md](docs/song.md).
 
 ## The studio
 
@@ -335,6 +370,10 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline measure` | measure a track against references, write a report |
 | `redline vocal` | blind listening round on the vocal chain |
 | `redline master` | blind round on the master, timbre, voice or 808 |
+| `redline song new` | start a song: a beat, a text, a voice, references |
+| `redline song studio` | the song page |
+| `redline song refs` | set a song's references |
+| `redline song list`, `show` | the songs, one song's file |
 | `redline studio` | the live page |
 | `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
 | `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
@@ -371,18 +410,19 @@ apps/
     takes/          measuring and ranking takes
     beat/           recipes, the beatmaker's rounds, checks, render, marks, sounds, the beat page's server
     studio/         the studio's server
+    song/           the song file, the recording engine's owner, jobs, variants, the song page's server
     lyrics/         text parsing, style profiles, the writer, Suno cards, marks
     web/            what the local pages share: token, host check, headers
     cli/            the command line
   redline-dsp/      the Rust sound core: effects, rack, master, the beat synth; built for Python
                     and the browser; rec/ is the recording engine
-  studio/           the studio and beat pages, TypeScript
+  studio/           the song, studio and beat pages, TypeScript
   lyrics-web/       the marks page
 tests/redline/      tests, on synthetic audio and invented texts
 docs/               the sound, beats and lyrics guides
 ```
 
-More detail: [docs/sound.md](docs/sound.md), [docs/beats.md](docs/beats.md),
+More detail: [docs/song.md](docs/song.md), [docs/sound.md](docs/sound.md), [docs/beats.md](docs/beats.md),
 [docs/lyrics.md](docs/lyrics.md),
 [docs/lyrics-profile.md](docs/lyrics-profile.md).
 
