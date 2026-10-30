@@ -76,6 +76,39 @@ class Rack {
   }
 }
 
+// what a rack heard live at each track frame, the last HISTORY frames of it, so a new rack
+// warms up on the same signal
+const HISTORY = 2 * WARM_MAX;
+
+class History {
+  readonly #data = new Float32Array(2 * HISTORY);
+  readonly #at = new Int32Array(HISTORY).fill(-1);
+
+  write(heap: Float32Array, ptr: number, pos: Int32Array, n: number): void {
+    const base = ptr >> 2;
+    for (let i = 0; i < n; i++) {
+      const p = pos[i] as number;
+      const k = p & (HISTORY - 1);
+      this.#at[k] = p;
+      this.#data[2 * k] = heap[base + 2 * i] as number;
+      this.#data[2 * k + 1] = heap[base + 2 * i + 1] as number;
+    }
+  }
+
+  // frames [from, from + n) over the heap at ptr where it has them; the rest stays as it is
+  read(heap: Float32Array, ptr: number, from: number, n: number): void {
+    const base = ptr >> 2;
+    for (let i = 0; i < n; i++) {
+      const p = from + i;
+      if (p < 0) continue;
+      const k = p & (HISTORY - 1);
+      if (this.#at[k] !== p) continue;
+      heap[base + 2 * i] = this.#data[2 * k] as number;
+      heap[base + 2 * i + 1] = this.#data[2 * k + 1] as number;
+    }
+  }
+}
+
 interface Accum {
   peak: number;
   sum: number;
@@ -110,6 +143,10 @@ export class Engine {
   #total = 0;
   readonly #original = new Float32Array(2 * BLOCK);
   readonly #renderBlock = new Float32Array(2 * BLOCK);
+  // the track frame of each frame of the block
+  readonly #pos = new Int32Array(BLOCK);
+  readonly #heardSide = new History();
+  readonly #heardMix = new History();
   readonly #meter: LoudnessMeter;
   #window = 0;
   #levels = { vocal: accum(), beat: accum(), pre: accum(), master: accum() };
@@ -379,15 +416,18 @@ export class Engine {
       const { warm, warmSide } = this.#buf;
       const from = pending.cursor;
       let side = 0;
+      // what the live rack heard, where it is still kept; the raw stems before that
       if (rack.track === "vocal") {
         this.#fill(stems.vocal, warm, from, n);
         this.#fill(stems.beat, warmSide, from, n);
+        this.#heardSide.read(this.#heap(), warmSide, from, n);
         side = warmSide;
       } else if (rack.track === "beat") {
         this.#fill(stems.beat, warm, from, n);
       } else {
         this.#fill(stems.vocal, warm, from, n);
         this.#fill(stems.beat, warm, from, n, true);
+        this.#heardMix.read(this.#heap(), warm, from, n);
       }
       this.#process(rack, pending.inst, warm, side, n, rack.track === "vocal" ? from / this.#rate : null);
       pending.cursor += n;
@@ -470,6 +510,7 @@ export class Engine {
     for (let i = 0; i < n; i++) {
       const p = this.#read;
       const inside = p < stems.frames;
+      this.#pos[i] = p;
       for (let c = 0; c < 2; c++) {
         heap[v + 2 * i + c] = inside ? (stems.vocal[2 * p + c] as number) : 0;
         heap[b + 2 * i + c] = inside ? (stems.beat[2 * p + c] as number) : 0;
@@ -486,6 +527,7 @@ export class Engine {
     this.#track(this.#racks.beat, beat, 0, n, start);
     heap = this.#heap();
     heap.copyWithin(side >> 2, b, b + 2 * n);
+    this.#heardSide.write(heap, side, this.#pos, n);
     this.#track(this.#racks.vocal, vocal, side, n, start);
     heap = this.#heap();
     this.#pad.vocal.process(heap.subarray(v, v + 2 * n), n);
@@ -503,6 +545,7 @@ export class Engine {
       L.beat.sum += c * c;
       L.pre.peak = Math.max(L.pre.peak, Math.abs(s));
     }
+    this.#heardMix.write(heap, mix, this.#pos, n);
     this.#track(this.#racks.master, mix, 0, n, start);
     heap = this.#heap();
     const result = heap.subarray(x, x + 2 * n);

@@ -363,3 +363,42 @@ test("a reverb's tail from the end does not ring into the next play", () => {
   const loudest = again.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
   assert.ok(loudest < 1e-6, `the tail rang on at ${loudest}`);
 });
+
+function quietest(out) {
+  let m = Infinity;
+  for (let i = 0; i < out.length / 2; i++) m = Math.min(m, Math.abs(left(out, i)));
+  return m;
+}
+
+test("a rebuilt vocal rack warms up on the beat its rack put out, as the live one hears it", () => {
+  // the beat's rack takes it down to -66 dBFS, under the duck's threshold; the raw beat is over it
+  const { engine } = setup({
+    vocal: dc(RATE, 0.5),
+    beat: dc(RATE, 0.5),
+    racks: { vocal: rack({ effect: "duck" }), beat: rack({ effect: "gain", params: { db: -60 } }) },
+  });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 9600);
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: rack({ effect: "duck", params: { release: 500 } }), lanes: [] });
+  const out = run(engine, RATE / 2);
+  assert.ok(quietest(out) > 0.45, `the new rack ducked the vocal to ${quietest(out)}`);
+});
+
+test("a rebuilt master rack warms up on the mix the racks put out, as the live one hears it", () => {
+  // the mix after the racks is at -40 dBFS, under the limiter's ceiling; the raw stems at 0 dBFS
+  const limiter = (release) => rack({ effect: "limiter", params: { ceiling: -20, lookahead: 5, release } });
+  const { engine } = setup({
+    vocal: dc(RATE, 0.5),
+    beat: dc(RATE, 0.5),
+    racks: {
+      vocal: rack({ effect: "gain", params: { db: -40 } }),
+      beat: rack({ effect: "gain", params: { db: -40 } }),
+      master: limiter(50),
+    },
+  });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 9600);
+  engine.handle({ type: "rack", track: "master", version: 2, json: limiter(500), lanes: [] });
+  const out = run(engine, RATE / 2);
+  assert.ok(quietest(out) > 0.009, `the new rack limited the mix to ${quietest(out)}`);
+});
