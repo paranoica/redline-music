@@ -5,6 +5,7 @@ import { ApiError } from "./api.ts";
 import type { TextProblem, TextReply, TextStation } from "./api.ts";
 import { commandBox, needCard } from "./steps.ts";
 import type { Ctx, StationView } from "./steps.ts";
+import type { KeyedView } from "./stations.ts";
 import { h } from "../ui/dom.ts";
 
 export interface LyricPart {
@@ -110,7 +111,11 @@ export function createLyric(ctx: Ctx, size: "read" | "ref"): StationView {
   };
 }
 
-export function createTextStation(ctx: Ctx): StationView {
+export function textDirty(editing: boolean, draft: string, loaded: Pick<TextReply, "text"> | null): boolean {
+  return editing && loaded !== null && draft !== loaded.text;
+}
+
+export function createTextStation(ctx: Ctx): KeyedView {
   const el = h("div", { class: "view view--one" });
   let viewing: number | null = null;
   let editing = false;
@@ -156,8 +161,14 @@ export function createTextStation(ctx: Ctx): StationView {
       editing = false;
       viewing = made.version;
       loaded = null;
-      await ctx.reload();
-      ctx.notice(`Сохранено как v${made.version}. Чтобы петь по нему, выбери эту версию.`);
+      const said = `Сохранено как v${made.version}. Чтобы петь по нему, выбери эту версию.`;
+      let listed = true;
+      try {
+        await ctx.reload();
+      } catch {
+        listed = false;
+      }
+      ctx.notice(listed ? said : `${said} Список версий обновится чуть позже.`);
     } catch (error) {
       if (error instanceof ApiError && error.status === 422) {
         problems = ((error.body["errors"] as TextProblem[] | undefined) ?? []).slice();
@@ -306,6 +317,7 @@ export function createTextStation(ctx: Ctx): StationView {
       draw();
       load();
     },
+    dirty: () => textDirty(editing, draft, loaded),
     dispose() {
       closed = true;
     },

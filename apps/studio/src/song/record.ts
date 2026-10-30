@@ -37,6 +37,10 @@ export function recPhase(s: RecSnapshot | null): RecPhase {
   return s.stage === "ready" ? "ready" : "opening";
 }
 
+export function takeKeyAllowed(phase: RecPhase, choosing: boolean): boolean {
+  return !choosing && (phase === "ready" || phase === "live");
+}
+
 // `failedAt` is the stage the engine was in before it failed, when the page saw it
 export function stageRows(s: RecSnapshot, failedAt: OpenStage | null): StageRow[] {
   const at = s.stage === "failed" ? (failedAt ?? "building") : (s.stage as OpenStage);
@@ -112,6 +116,7 @@ export interface RecView {
   el: HTMLElement;
   update(snapshot: RecSnapshot | null, now: number): void;
   note(text: string | null): void;
+  choosing(): boolean;
 }
 
 export interface RecOptions {
@@ -396,6 +401,7 @@ export function createRecView({ actions, beatLine }: RecOptions): RecView {
       message = text;
       shape = "";
     },
+    choosing: () => calibrating,
     update(s, now) {
       const phase = recPhase(s);
       if (s && s.stage !== "failed" && s.stage !== "closed" && s.stage !== "ready" && s.stage !== "calibrating") failedAt = s.stage;

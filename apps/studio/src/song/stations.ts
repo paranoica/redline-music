@@ -5,9 +5,9 @@ import { mount as mountBeat } from "../beat/main.ts";
 import { ApiError } from "./api.ts";
 import type { RecSnapshot, VariantsReply } from "./api.ts";
 import { Poller } from "./poll.ts";
-import { createRecView, recPhase } from "./record.ts";
+import { createRecView, recPhase, takeKeyAllowed } from "./record.ts";
 import { takeLabel } from "./rail.ts";
-import { copyButton, deskNote, desktopQuery, jobActive, jobBar, jobOf, needCard, SurfaceHost } from "./steps.ts";
+import { copyButton, deskNote, desktopQuery, jobActive, jobBar, jobOf, needCard, refusalText, SurfaceHost } from "./steps.ts";
 import type { Ctx, StationView } from "./steps.ts";
 import { createPads, padModel, padSettings } from "./variants.ts";
 import { h } from "../ui/dom.ts";
@@ -15,6 +15,8 @@ import { h } from "../ui/dom.ts";
 export interface KeyedView extends StationView {
   // true when the key was taken
   key?(e: KeyboardEvent): boolean;
+  // true when the station holds an edit that leaving would lose
+  dirty?(): boolean;
 }
 
 function goButton(label: string, click: () => void, solid = true): HTMLButtonElement {
@@ -38,7 +40,7 @@ function surfaceSlot(
   const sync = (): void => {
     const wide = query ? query.matches : true;
     if (!wide) {
-      void host.dispose();
+      host.park();
       return;
     }
     if (host.place(kind, slot)) return;
@@ -363,7 +365,7 @@ export function createRecStation(ctx: Ctx, lyric: StationView, hooks: RecHooks):
       view.note(note ? note(reply.code) : null);
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
-        view.note(error.code === "out_of_sync" ? "Движок не отвечает: перезапусти его." : error.code === "not_ready" ? "Движок ещё не готов." : error.message);
+        view.note(refusalText(error, ctx.state().jobs));
       } else {
         view.note(error instanceof Error ? error.message : "Не вышло.");
       }
@@ -404,8 +406,7 @@ export function createRecStation(ctx: Ctx, lyric: StationView, hooks: RecHooks):
     shown: (on) => poller.setWanted(on),
     key(e) {
       if (e.code !== "KeyR" || e.ctrlKey || e.metaKey || e.altKey) return false;
-      const phase = recPhase(latest);
-      if (phase !== "ready" && phase !== "live") return false;
+      if (!takeKeyAllowed(recPhase(latest), view.choosing())) return false;
       void run(() => ctx.api.recToggle(), (code) => (code === "kept" ? "Дубль сохранён." : null));
       return true;
     },

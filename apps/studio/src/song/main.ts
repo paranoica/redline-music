@@ -4,7 +4,7 @@
 import { Scope } from "../core/lifecycle.ts";
 import type { Mount } from "../core/mount.ts";
 import { h } from "../ui/dom.ts";
-import { ApiError, createSongApi, staleSong } from "./api.ts";
+import { acceptSong, ApiError, createSongApi, staleSong } from "./api.ts";
 import type { Job, JobKind, Ranking, RecSnapshot, SongChange, SongReply } from "./api.ts";
 import { Poller } from "./poll.ts";
 import { createRail, defaultStation, railItems, STATION_NAMES } from "./rail.ts";
@@ -35,6 +35,7 @@ export const mount: Mount = async (root, options) => {
   let view: KeyedView | null = null;
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
   let jobsSeq = 0;
+  let songSeq = 0;
   let opening = 0;
 
   root.classList.add("song-app");
@@ -149,7 +150,10 @@ export const mount: Mount = async (root, options) => {
   }
 
   async function reload(): Promise<void> {
-    song = await api.song();
+    const mine = ++songSeq;
+    const next = await api.song();
+    if (mine !== songSeq) return;
+    song = acceptSong(song, next);
     paint();
     view?.update();
   }
@@ -164,7 +168,9 @@ export const mount: Mount = async (root, options) => {
     go: (id) => void open(id),
     async change(set: SongChange) {
       try {
-        song = await api.setSong(state().song.song.rev, set);
+        const next = await api.setSong(state().song.song.rev, set);
+        songSeq += 1;
+        song = acceptSong(song, next);
         say(null);
         paint();
         view?.update();
@@ -172,7 +178,10 @@ export const mount: Mount = async (root, options) => {
       } catch (error) {
         if (error instanceof ApiError && error.status === 412) {
           const fresh = staleSong(error.body);
-          if (fresh) song = fresh;
+          if (fresh) {
+            songSeq += 1;
+            song = acceptSong(song, fresh);
+          }
           else await reload().catch(() => {});
           paint();
           view?.update();
@@ -254,6 +263,7 @@ export const mount: Mount = async (root, options) => {
     const kind = id === "beat" || id === "mix" ? id : null;
     const lost = kind ? surfaces.unsavedFor(kind) : null;
     if (lost && !confirm(`Несохранённые правки в ${lost === "beat" ? "бите" : "сведении"} пропадут. Перейти?`)) return;
+    if (!first && current === "text" && id !== "text" && view?.dirty?.() && !confirm("Несохранённая правка текста пропадёт. Перейти?")) return;
     if (!first) {
       await reload().catch(() => {});
       if (mine !== opening || scope.closed) return;

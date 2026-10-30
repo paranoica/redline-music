@@ -179,6 +179,11 @@ export function staleSong(body: Record<string, unknown>): SongReply | null {
   return null;
 }
 
+// an older read never replaces a newer song
+export function acceptSong(held: SongReply | null, next: SongReply): SongReply {
+  return held && next.song.rev < held.song.rev ? held : next;
+}
+
 export interface SongApiOptions {
   base?: string | undefined;
   token: string;
