@@ -1,6 +1,7 @@
 """Song format v1: what a song holds, where it lives, and the one writer that saves it."""
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -288,3 +289,78 @@ def list_songs(root: Path | None = None) -> list[str]:
     if not folder.is_dir():
         return []
     return sorted(p.name for p in folder.iterdir() if (p / "song.json").is_file())
+
+
+class NoVoice(SongError):
+    """There is no voice to mix: none chosen, or a file it needs is missing."""
+
+
+@dataclass(frozen=True)
+class MixInputs:
+    """The files a mix is made of: the voice, the beat it goes over, and the references."""
+
+    kind: str
+    voice: Path
+    beat: Path | None
+    refs: tuple[Path, ...]
+
+    def key(self) -> str:
+        """A hash of the files' names, sizes and times: another key means another mix."""
+        digest = hashlib.sha256(self.kind.encode())
+        for path in (self.voice, self.beat, *self.refs):
+            if path is None:
+                continue
+            stat = path.stat()
+            digest.update(f"|{path}|{stat.st_mtime_ns}|{stat.st_size}".encode())
+        return digest.hexdigest()
+
+
+def beat_file(song: Song, root: Path | None = None) -> Path:
+    """The song's beat file, resolved inside the allowed folders; it may not exist yet."""
+    if "own" in song.beat:
+        return resolve_inside(f"work/beats/{song.beat['own']}/beat.wav", root, "beat")
+    return resolve_inside(song.beat["file"], root, "beat.file")
+
+
+def take_file(song: Song, name: str, root: Path | None = None) -> Path:
+    """A take of the song by file name, inside the song's takes folder.
+
+    Raises:
+        SongError: The song has no takes folder, the name is not take-NN.wav, or the file
+            resolves out of the folder or does not exist.
+    """
+    if "takes" not in song.voice:
+        raise SongError("the song's voice is a Suno track: it has no takes")
+    if not isinstance(name, str) or not TAKE_FILE.fullmatch(name):
+        raise SongError(f"{name!r} is not a take file name")
+    folder = resolve_inside(song.voice["takes"], root, "voice.takes")
+    path = (folder / name).resolve()
+    if path.parent != folder or not path.is_file():
+        raise SongError(f"{name}: no such take")
+    return path
+
+
+def mix_inputs(song: Song, root: Path | None = None) -> MixInputs:
+    """The files of the song's mix.
+
+    Raises:
+        NoVoice: No voice is chosen, there are no references, or a file is missing.
+    """
+    refs = tuple(resolve_inside(r, root, "references") for r in song.references)
+    if "suno" in song.voice:
+        kind, voice, beat = "suno", resolve_inside(song.voice["suno"], root, "voice.suno"), None
+    else:
+        chosen = song.voice["chosen"]
+        if chosen is None:
+            raise NoVoice("no voice chosen")
+        try:
+            voice = take_file(song, chosen, root)
+        except SongError as error:
+            raise NoVoice(str(error)) from None
+        kind, beat = "takes", beat_file(song, root)
+    if not refs:
+        raise NoVoice("the song has no references")
+    for path in (voice, beat, *refs):
+        if path is not None and not path.is_file():
+            raise NoVoice(f"{path.name}: no such file")
+    return MixInputs(kind, voice, beat, refs)

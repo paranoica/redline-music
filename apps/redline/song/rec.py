@@ -104,6 +104,8 @@ class RecSnapshot:
     monitor_ms: float | None
     dropped: tuple[str, ...]
     age_s: float
+    round_trip: tuple[str, str] | None = None
+    notices: tuple[tuple[str, dict[str, Any]], ...] = ()
 
 
 Opener = Callable[[OpenRequest, OnStage, Callable[[], Meters], Callable[[Path], None]], Ready]
@@ -191,6 +193,8 @@ class _State:
     quantum: int | None = None
     monitor_ms: float | None = None
     dropped: tuple[str, ...] = ()
+    round_trip: tuple[str, str] | None = None
+    notices: tuple[tuple[str, dict[str, Any]], ...] = ()
     latest: Meters | None = None
     peaks: tuple[float, float] | None = None
     last_peaks: tuple[float, float] = (0.0, 0.0)
@@ -315,7 +319,15 @@ class RecOwner:
                 monitor_ms=state.monitor_ms,
                 dropped=state.dropped,
                 age_s=time.monotonic() - state.at,
+                round_trip=state.round_trip,
+                notices=state.notices,
             )
+
+    def taking(self) -> bool:
+        """Whether a take is recording or finishing; reads the state, not the engine."""
+        with self._lock:
+            state = self._state
+            return bool(state.stopping or state.take or (state.latest and state.latest.recording))
 
     def shutdown(self, timeout: float = SHUTDOWN_TIMEOUT_S) -> None:
         """Refuse new commands, close the session in the owner thread, and join it.
@@ -550,6 +562,8 @@ class RecOwner:
             last_peaks=(0.0, 0.0),
             monitor_ms=None,
             dropped=(),
+            round_trip=None,
+            notices=(),
             rate=None,
             quantum=None,
             at=time.monotonic(),
@@ -566,6 +580,8 @@ class RecOwner:
             quantum=ready.link.quantum,
             monitor_ms=ready.monitor.latency_ms,
             dropped=ready.monitor.dropped,
+            round_trip=(ready.link.trip.label(), ready.link.trip.source),
+            notices=tuple((n.code, dict(n.values)) for n in ready.link.notices),
             at=time.monotonic(),
         )
         with contextlib.suppress(EngineError):

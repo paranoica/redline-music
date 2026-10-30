@@ -337,6 +337,15 @@ def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     song_commands.add_parser("list", help="the songs' names")
     show = song_commands.add_parser("show", help="print a song's file")
     show.add_argument("name", help="the song's name")
+    studio = song_commands.add_parser("studio", help="open the song's page")
+    studio.add_argument("name", help="the song's name")
+    studio.add_argument("--port", type=int, default=0, help="port to listen on (default: free)")
+    studio.add_argument("--no-browser", action="store_true", help="only print the address")
+    job = song_commands.add_parser("job", help="one long piece of work of the page (internal)")
+    job.add_argument("kind", choices=("separate", "rank", "auto", "result"))
+    job.add_argument("name", help="the song's name")
+    job.add_argument("--seed", type=int, default=0, help="chooses the auto mix's variants")
+    job.add_argument("--result", type=Path, required=True, help="where the JSON result goes")
 
 
 def check_record(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

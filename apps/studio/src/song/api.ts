@@ -77,7 +77,7 @@ export interface TextProblem {
 }
 
 export interface RecSnapshot {
-  stage: "closed" | "building" | "launching" | "relaunching" | "analysing" | "level_check" | "ready" | "failed";
+  stage: "closed" | "building" | "launching" | "relaunching" | "analysing" | "level_check" | "ready" | "calibrating" | "failed";
   error: string | null;
   out_of_sync: boolean;
   recording: boolean;

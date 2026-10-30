@@ -385,7 +385,7 @@ export function createRecView({ actions, beatLine }: RecOptions): RecView {
     },
     update(s, now) {
       const phase = recPhase(s);
-      if (s && s.stage !== "failed" && s.stage !== "closed" && s.stage !== "ready") failedAt = s.stage;
+      if (s && s.stage !== "failed" && s.stage !== "closed" && s.stage !== "ready" && s.stage !== "calibrating") failedAt = s.stage;
       const key = `${phase}|${calibrating}|${s?.stage ?? ""}|${s ? stageRows(s, failedAt).map((r) => r.state + r.value).join() : ""}|${s?.take ?? ""}|${message ?? ""}|${s?.round_trip?.label ?? ""}|${armDiscard}`;
       if (phase !== "live") hold.reset();
       if (key !== shape) {
