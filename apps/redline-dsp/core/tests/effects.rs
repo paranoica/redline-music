@@ -272,3 +272,157 @@ fn bitcrush_quantises_to_its_bits_and_holds_across_blocks() {
         }
     }
 }
+
+/// A sine with some side content.
+fn stereo_sine(freq: f32, secs: f32) -> Vec<[f32; 2]> {
+    (0..(secs * RATE) as usize)
+        .map(|i| {
+            let v = 0.5 * (2.0 * PI * freq * i as f32 / RATE).sin();
+            [v, -0.5 * v]
+        })
+        .collect()
+}
+
+fn largest_step(y: &[[f32; 2]]) -> f32 {
+    y.windows(2)
+        .flat_map(|w| [(w[1][0] - w[0][0]).abs(), (w[1][1] - w[0][1]).abs()])
+        .fold(0.0, f32::max)
+}
+
+/// The largest step after `param` jumps to `to` mid-sound, and the largest step of the same
+/// sound with the effect settled at either value from the start.
+fn step_after_set(
+    name: &str,
+    before: &[(&str, f32)],
+    param: &str,
+    to: f32,
+    x: &[[f32; 2]],
+    split: usize,
+) -> (f32, f32) {
+    let mut e = effect(name, before);
+    let mut y = x.to_vec();
+    for chunk in y[..split].chunks_mut(64) {
+        e.process(chunk);
+    }
+    e.set(param, to).unwrap();
+    for chunk in y[split..].chunks_mut(64) {
+        e.process(chunk);
+    }
+    let mut settled: Vec<(&str, f32)> = before.to_vec();
+    settled.push((param, to));
+    let steady_after = run(effect(name, &settled).as_mut(), x, 64);
+    let steady_before = run(effect(name, before).as_mut(), x, 64);
+    let steady = largest_step(&steady_after[split..]).max(largest_step(&steady_before[split..]));
+    (largest_step(&y[split - 1..]), steady)
+}
+
+type Case<'a> = (&'a str, &'a [(&'a str, f32)], &'a str, f32, &'a [[f32; 2]]);
+
+#[test]
+fn a_set_while_playing_does_not_click() {
+    let low = stereo_sine(200.0, 0.5);
+    let band = stereo_sine(1000.0, 0.5);
+    // 50 periods of 200 Hz and a quarter more: both sines at their peak
+    let split = 12060;
+    let cases: &[Case] = &[
+        ("gain", &[("db", -60.0)], "db", 0.0, &low),
+        ("gain", &[("db", 0.0)], "db", -60.0, &low),
+        ("pan", &[("pan", -1.0)], "pan", 1.0, &low),
+        ("width", &[("width", 0.0)], "width", 2.0, &low),
+        ("saturate", &[("drive", 0.0)], "drive", 12.0, &low),
+        (
+            "saturate",
+            &[("drive", 12.0), ("mix", 0.0)],
+            "mix",
+            1.0,
+            &low,
+        ),
+        (
+            "eq",
+            &[("freq", 1000.0), ("gain", -24.0)],
+            "gain",
+            24.0,
+            &band,
+        ),
+        // a low shelf sliding down past the tone: the level falls 12 dB, never through a peak
+        (
+            "eq",
+            &[("kind", 1.0), ("freq", 5000.0), ("gain", 12.0)],
+            "freq",
+            100.0,
+            &band,
+        ),
+        (
+            "eq",
+            &[("freq", 1000.0), ("gain", 12.0)],
+            "kind",
+            3.0,
+            &band,
+        ),
+        ("filter", &[("cutoff", 200.0)], "cutoff", 5000.0, &band),
+        ("filter", &[("cutoff", 1000.0)], "mode", 1.0, &band),
+        ("octaver", &[("down", 1.0), ("dry", 1.0)], "dry", 0.0, &low),
+        ("octaver", &[("up", 0.0), ("dry", 1.0)], "up", 1.0, &low),
+        ("harmonizer", &[("mix", 0.0)], "mix", 1.0, &low),
+        ("unison", &[("mix", 0.0)], "mix", 1.0, &low),
+        (
+            "tune",
+            &[("key", 9.0), ("scale", 5.0), ("mix", 0.0)],
+            "mix",
+            1.0,
+            &low,
+        ),
+        ("robot", &[("mix", 0.0)], "mix", 1.0, &low),
+    ];
+    for (name, before, param, to, x) in cases {
+        let (step, steady) = step_after_set(name, before, param, *to, x, split);
+        let bound = 1.25 * steady + 2e-3;
+        eprintln!("{name}.{param} -> {to}: step {step}, settled {steady}");
+        assert!(
+            step <= bound,
+            "{name}.{param} -> {to}: a step of {step}, settled {steady}"
+        );
+    }
+}
+
+#[test]
+fn a_filter_ringing_out_never_leaves_subnormal_samples() {
+    // a 20 Hz pole pair at q 18 rings for minutes before its state underflows by itself
+    let mut e = effect("eq", &[("kind", 3.0), ("freq", 20.0), ("q", 18.0)]);
+    let mut x = vec![[0.0f32; 2]; 40 * RATE as usize];
+    x[0] = [1.0, -1.0];
+    let y = run(e.as_mut(), &x, 512);
+    let tiny = y.iter().flatten().filter(|v| v.is_subnormal()).count();
+    assert_eq!(tiny, 0, "{tiny} subnormal samples");
+    assert!(y[y.len() - 48000..].iter().all(|f| *f == [0.0, 0.0]));
+    assert!(y[..48000].iter().any(|f| f[0].abs() > 1e-4));
+}
+
+#[test]
+fn every_effect_survives_a_rate_too_low_for_it() {
+    let x = noise(2000);
+    for name in EFFECTS {
+        for rate in [10.0, 4000.0] {
+            let mut e = make(name).unwrap();
+            e.reset(rate);
+            let y = run(e.as_mut(), &x, 256);
+            assert!(
+                y.iter().flatten().all(|v| v.is_finite()),
+                "{name} at {rate}"
+            );
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn flush_tiny_zeroes_subnormal_arithmetic_until_dropped() {
+    use redline_dsp_core::filters::flush_tiny;
+    let half = || std::hint::black_box(1e-39f32) * std::hint::black_box(0.5f32);
+    assert!(half() != 0.0);
+    {
+        let _flushed = flush_tiny();
+        assert_eq!(half(), 0.0);
+    }
+    assert!(half() != 0.0);
+}

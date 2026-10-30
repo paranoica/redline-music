@@ -7,11 +7,18 @@
 /// about 1e-38 in single precision and 1e-308 in double, far under anything audible. The
 /// thread's own mode comes back however f ends, a panic included.
 pub fn flushing_tiny<R>(f: impl FnOnce() -> R) -> R {
-    let _mode = FlushTiny::on();
+    let _mode = flush_tiny();
     f()
 }
 
-struct FlushTiny {
+/// Numbers too small for normal floats read and written as zero on this thread until the
+/// guard drops. A real-time host takes one around each audio callback.
+pub fn flush_tiny() -> FlushTiny {
+    FlushTiny::on()
+}
+
+#[must_use = "the thread's float mode comes back when the guard drops"]
+pub struct FlushTiny {
     #[cfg(target_arch = "x86_64")]
     before: u32,
 }

@@ -1,7 +1,7 @@
 //! The pitch effects of the voice lab. Shifting goes through signalsmith-stretch; the
 //! stretchers are created in `reset`, so an effect that was never reset passes sound through.
 
-use crate::effect::{check, Effect, ParamError, ParamSpec};
+use crate::effect::{check, finite, Effect, ParamError, ParamSpec, Smoothed, MIN_RATE};
 use crate::pitch::{freq, midi, Scale, Tracker, KEYS, SCALES};
 use crate::stretch::Stretch;
 use std::f32::consts::{FRAC_PI_4, LN_2, PI};
@@ -32,7 +32,13 @@ impl Shifter {
         }
     }
 
+    /// Under [`MIN_RATE`] there is no stretcher, and the effect passes sound through.
     fn reset(&mut self, rate: f32) {
+        if rate.is_nan() || rate < MIN_RATE {
+            self.stretch = None;
+            self.rate = 0.0;
+            return;
+        }
         match &mut self.stretch {
             Some(s) if self.rate == rate => s.reset(),
             _ => {
@@ -174,7 +180,7 @@ impl Effect for Pitch {
         self.apply();
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        self.steered.process(block, 1.0, |_| None);
+        self.steered.process(block, |_| None);
     }
     fn latency(&self) -> usize {
         self.steered.shifter.latency()
@@ -228,7 +234,7 @@ impl Effect for Formant {
         self.apply();
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        self.steered.process(block, 1.0, |_| None);
+        self.steered.process(block, |_| None);
     }
     fn latency(&self) -> usize {
         self.steered.shifter.latency()
@@ -237,7 +243,7 @@ impl Effect for Formant {
 
 /// The input with an octave down and an octave up layered in.
 pub struct Octaver {
-    levels: [f32; 3],
+    levels: [Smoothed; 3],
     down: Shifter,
     up: Shifter,
     dry: Delay,
@@ -255,7 +261,7 @@ impl Octaver {
 
     pub fn new() -> Self {
         Octaver {
-            levels: [0.5, 0.0, 1.0],
+            levels: [Smoothed::new(0.5), Smoothed::new(0.0), Smoothed::new(1.0)],
             down: Shifter::new(2, 3),
             up: Shifter::new(2, 4),
             dry: Delay::new(),
@@ -274,10 +280,13 @@ impl Effect for Octaver {
         Self::SPECS
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
-        self.levels[check(self.name(), Self::SPECS, name, value)?] = value;
+        self.levels[check(self.name(), Self::SPECS, name, value)?].set(value);
         Ok(())
     }
     fn reset(&mut self, rate: f32) {
+        for l in &mut self.levels {
+            l.reset(rate);
+        }
         self.down.reset(rate);
         self.up.reset(rate);
         self.down.transpose(0.5);
@@ -288,7 +297,7 @@ impl Effect for Octaver {
         if self.down.stretch.is_none() {
             return;
         }
-        let [down, up, dry] = self.levels;
+        finite(block);
         for chunk in block.chunks_mut(CHUNK) {
             let n = chunk.len() * 2;
             self.input[..n].copy_from_slice(chunk.as_flattened());
@@ -296,6 +305,7 @@ impl Effect for Octaver {
             self.up.process(&self.input[..n], &mut self.high[..n]);
             for (k, f) in chunk.iter_mut().enumerate() {
                 let d = self.dry.tick(*f);
+                let [down, up, dry] = self.levels.each_mut().map(|l| l.next());
                 for c in 0..2 {
                     f[c] = dry * d[c] + down * self.low[2 * k + c] + up * self.high[2 * k + c];
                 }
@@ -307,9 +317,12 @@ impl Effect for Octaver {
     }
 }
 
-/// Mono stretchers fed the same mono input, each into its own output buffer.
+/// Mono stretchers fed the same mono input, each into its own output buffer. A voice is fed
+/// while it sounds: from when it is switched on until its level has faded out after it is
+/// switched off, so switching voices on or off never cuts the others.
 struct Voices {
     shifters: Vec<Shifter>,
+    fed: Vec<bool>,
     input: Vec<f32>,
     outputs: Vec<Vec<f32>>,
 }
@@ -318,21 +331,36 @@ impl Voices {
     fn new(count: usize) -> Self {
         Voices {
             shifters: (0..count).map(|i| Shifter::new(1, 10 + i as u32)).collect(),
+            fed: vec![false; count],
             input: vec![0.0; CHUNK],
             outputs: vec![vec![0.0; CHUNK]; count],
         }
     }
 
-    fn reset(&mut self, rate: f32) {
-        for s in &mut self.shifters {
+    fn reset(&mut self, rate: f32, active: usize) {
+        for (i, s) in self.shifters.iter_mut().enumerate() {
             s.reset(rate);
+            self.fed[i] = i < active;
         }
     }
 
-    fn restart(&mut self) {
-        for s in &mut self.shifters {
-            if let Some(s) = &mut s.stretch {
-                s.reset();
+    /// Feeds the first `active` voices; one that was silent starts from a clean stretcher.
+    fn wake(&mut self, active: usize) {
+        for (s, fed) in self.shifters.iter_mut().zip(&mut self.fed).take(active) {
+            if !*fed {
+                if let Some(s) = &mut s.stretch {
+                    s.reset();
+                }
+                *fed = true;
+            }
+        }
+    }
+
+    /// Stops feeding voice `i` from `active` on once `silent` says its level has reached 0.
+    fn rest(&mut self, active: usize, silent: impl Fn(usize) -> bool) {
+        for (i, fed) in self.fed.iter_mut().enumerate().skip(active) {
+            if *fed && silent(i) {
+                *fed = false;
             }
         }
     }
@@ -345,9 +373,15 @@ impl Voices {
         self.shifters[0].latency()
     }
 
-    /// The first `active` voices over the first `n` frames of `input`.
-    fn process(&mut self, active: usize, n: usize) {
-        for (s, out) in self.shifters.iter_mut().zip(&mut self.outputs).take(active) {
+    /// The voices being fed, over the first `n` frames of `input`.
+    fn process(&mut self, n: usize) {
+        for ((s, out), _) in self
+            .shifters
+            .iter_mut()
+            .zip(&mut self.outputs)
+            .zip(&self.fed)
+            .filter(|(_, fed)| **fed)
+        {
             s.process(&self.input[..n], &mut out[..n]);
         }
     }
@@ -360,6 +394,8 @@ pub struct Harmonizer {
     voices: Voices,
     dry: Delay,
     rate: f32,
+    gains: [Smoothed; 4],
+    mix: Smoothed,
 }
 
 impl Harmonizer {
@@ -379,17 +415,30 @@ impl Harmonizer {
         for (v, s) in values.iter_mut().zip(Self::SPECS) {
             *v = s.default;
         }
-        Harmonizer {
+        let mut h = Harmonizer {
             values,
             tracker: Tracker::new(),
             voices: Voices::new(4),
             dry: Delay::new(),
             rate: 0.0,
-        }
+            gains: [Smoothed::new(0.0); 4],
+            mix: Smoothed::new(values[7]),
+        };
+        h.level();
+        h
     }
 
     fn active(&self) -> usize {
         self.values[2].round() as usize
+    }
+
+    /// The voices' levels: their sum keeps the power of one voice, as unrelated pitches add.
+    fn level(&mut self) {
+        let active = self.active();
+        let each = 1.0 / (active as f32).sqrt();
+        for (i, g) in self.gains.iter_mut().enumerate() {
+            g.set(if i < active { each } else { 0.0 });
+        }
     }
 
     fn retarget(&mut self) {
@@ -416,19 +465,26 @@ impl Effect for Harmonizer {
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         let i = check(self.name(), Self::SPECS, name, value)?;
-        let before = self.active();
         self.values[i] = value;
-        if self.active() != before {
-            self.voices.restart();
+        match i {
+            2 => {
+                self.level();
+                self.voices.wake(self.active());
+            }
+            7 => self.mix.set(value),
+            _ => {}
         }
         Ok(())
     }
     fn reset(&mut self, rate: f32) {
         self.rate = rate;
-        self.voices.reset(rate);
+        self.voices.reset(rate, self.active());
         for s in &mut self.voices.shifters {
             s.transpose(1.0);
             s.formant(1.0, true, 0.0);
+        }
+        for g in self.gains.iter_mut().chain([&mut self.mix]) {
+            g.reset(rate);
         }
         self.tracker
             .reset(rate, self.voices.shifters[0].input_latency());
@@ -438,7 +494,7 @@ impl Effect for Harmonizer {
         if !self.voices.ready() {
             return;
         }
-        let (active, mix) = (self.active(), self.values[7]);
+        finite(block);
         let mut start = 0;
         while start < block.len() {
             let n = next_chunk(block.len() - start, &self.tracker);
@@ -449,15 +505,31 @@ impl Effect for Harmonizer {
                     self.retarget();
                 }
             }
-            self.voices.process(active, n);
+            self.voices.process(n);
             for (k, f) in chunk.iter_mut().enumerate() {
                 let d = self.dry.tick(*f);
-                let wet: f32 = self.voices.outputs[..active].iter().map(|o| o[k]).sum();
+                let mut wet = 0.0;
+                for ((g, out), fed) in self
+                    .gains
+                    .iter_mut()
+                    .zip(&self.voices.outputs)
+                    .zip(&self.voices.fed)
+                {
+                    let g = g.next();
+                    if *fed {
+                        wet += g * out[k];
+                    }
+                }
+                let mix = self.mix.next();
                 *f = [
                     (1.0 - mix) * d[0] + mix * wet,
                     (1.0 - mix) * d[1] + mix * wet,
                 ];
             }
+            let gains = &self.gains;
+            self.voices.rest(self.active(), |i| {
+                gains[i].settled() && gains[i].value() == 0.0
+            });
             start += n;
         }
     }
@@ -471,7 +543,8 @@ const MAX_UNISON: usize = 16;
 /// Copies of the voice detuned across a spread of cents and panned across the stereo field.
 pub struct Unison {
     values: [f32; 4],
-    gains: [[f32; 2]; MAX_UNISON],
+    gains: [[Smoothed; 2]; MAX_UNISON],
+    mix: Smoothed,
     voices: Voices,
     dry: Delay,
 }
@@ -487,7 +560,8 @@ impl Unison {
     pub fn new() -> Self {
         let mut u = Unison {
             values: [4.0, 15.0, 1.0, 0.5],
-            gains: [[0.0; 2]; MAX_UNISON],
+            gains: [[Smoothed::new(0.0); 2]; MAX_UNISON],
+            mix: Smoothed::new(0.5),
             voices: Voices::new(MAX_UNISON),
             dry: Delay::new(),
         };
@@ -501,14 +575,20 @@ impl Unison {
 
     fn apply(&mut self) {
         let n = self.active();
-        let [_, detune, spread, _] = self.values;
+        let [_, detune, spread, mix] = self.values;
+        self.mix.set(mix);
         let norm = (2.0 / n as f32).sqrt();
-        for i in 0..n {
+        for (i, gains) in self.gains.iter_mut().enumerate() {
+            if i >= n {
+                gains.iter_mut().for_each(|g| g.set(0.0));
+                continue;
+            }
             // -1 for the first voice, +1 for the last
             let place = 2.0 * i as f32 / (n - 1) as f32 - 1.0;
             self.voices.shifters[i].transpose(ratio(detune * place / 100.0));
             let angle = (spread * place + 1.0) * FRAC_PI_4;
-            self.gains[i] = [angle.cos() * norm, angle.sin() * norm];
+            gains[0].set(angle.cos() * norm);
+            gains[1].set(angle.sin() * norm);
         }
     }
 }
@@ -522,41 +602,59 @@ impl Effect for Unison {
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         let i = check(self.name(), Self::SPECS, name, value)?;
-        let before = self.active();
         self.values[i] = value;
-        if self.active() != before {
-            self.voices.restart();
-        }
         self.apply();
+        self.voices.wake(self.active());
         Ok(())
     }
     fn reset(&mut self, rate: f32) {
-        self.voices.reset(rate);
+        self.voices.reset(rate, self.active());
         self.apply();
+        for g in self
+            .gains
+            .as_flattened_mut()
+            .iter_mut()
+            .chain([&mut self.mix])
+        {
+            g.reset(rate);
+        }
         self.dry.reset(self.voices.latency());
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
         if !self.voices.ready() {
             return;
         }
-        let (active, mix) = (self.active(), self.values[3]);
+        finite(block);
         for chunk in block.chunks_mut(CHUNK) {
             for (k, f) in chunk.iter().enumerate() {
                 self.voices.input[k] = mono(*f);
             }
-            self.voices.process(active, chunk.len());
+            self.voices.process(chunk.len());
             for (k, f) in chunk.iter_mut().enumerate() {
                 let d = self.dry.tick(*f);
                 let mut wet = [0.0f32; 2];
-                for (g, out) in self.gains.iter().zip(&self.voices.outputs).take(active) {
-                    wet[0] += g[0] * out[k];
-                    wet[1] += g[1] * out[k];
+                for ((g, out), fed) in self
+                    .gains
+                    .iter_mut()
+                    .zip(&self.voices.outputs)
+                    .zip(&self.voices.fed)
+                {
+                    let g = [g[0].next(), g[1].next()];
+                    if *fed {
+                        wet[0] += g[0] * out[k];
+                        wet[1] += g[1] * out[k];
+                    }
                 }
+                let mix = self.mix.next();
                 *f = [
                     (1.0 - mix) * d[0] + mix * wet[0],
                     (1.0 - mix) * d[1] + mix * wet[1],
                 ];
             }
+            let gains = &self.gains;
+            self.voices.rest(self.active(), |i| {
+                gains[i].iter().all(|g| g.settled() && g.value() == 0.0)
+            });
         }
     }
     fn latency(&self) -> usize {
@@ -634,6 +732,7 @@ impl Effect for Vibrato {
         if self.buf.is_empty() {
             return;
         }
+        finite(block);
         let mask = self.buf.len() - 1;
         let step = 2.0 * PI * self.rate_hz / self.rate;
         let target = self.swing_for(self.rate_hz, self.depth);
@@ -695,9 +794,14 @@ pub struct Drift {
     from: f32,
     to: f32,
     along: f32,
+    since: usize,
     shifter: Shifter,
     scratch: Vec<f32>,
 }
+
+/// Frames between drift's transpose updates, counted from reset, so where the host's blocks
+/// begin and end does not change the sound.
+const DRIFT_GRID: usize = CHUNK;
 
 impl Drift {
     const SPECS: &'static [ParamSpec] = &[
@@ -716,6 +820,7 @@ impl Drift {
             from: 0.0,
             to: 0.0,
             along: 0.0,
+            since: 0,
             shifter: Shifter::new(2, 5),
             scratch: vec![0.0; CHUNK * 2],
         }
@@ -744,23 +849,35 @@ impl Effect for Drift {
         self.from = 0.0;
         self.to = self.random.signed();
         self.along = 0.0;
+        self.since = 0;
         self.shifter.transpose(1.0);
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
         if self.shifter.stretch.is_none() {
             return;
         }
-        for chunk in block.chunks_mut(CHUNK) {
-            let t = self.along;
-            let eased = t * t * (3.0 - 2.0 * t);
-            let wander = self.from + (self.to - self.from) * eased;
-            self.shifter.transpose(ratio(self.depth * wander / 100.0));
-            self.shifter.process_stereo(&mut self.scratch, chunk);
-            self.along += chunk.len() as f32 * self.speed / self.rate;
-            while self.along >= 1.0 {
-                self.along -= 1.0;
-                self.from = self.to;
-                self.to = self.random.signed();
+        finite(block);
+        let mut start = 0;
+        while start < block.len() {
+            if self.since == 0 {
+                let t = self.along;
+                let eased = t * t * (3.0 - 2.0 * t);
+                let wander = self.from + (self.to - self.from) * eased;
+                self.shifter.transpose(ratio(self.depth * wander / 100.0));
+            }
+            let n = (block.len() - start).min(DRIFT_GRID - self.since);
+            self.shifter
+                .process_stereo(&mut self.scratch, &mut block[start..start + n]);
+            start += n;
+            self.since += n;
+            if self.since == DRIFT_GRID {
+                self.since = 0;
+                self.along += DRIFT_GRID as f32 * self.speed / self.rate;
+                while self.along >= 1.0 {
+                    self.along -= 1.0;
+                    self.from = self.to;
+                    self.to = self.random.signed();
+                }
             }
         }
     }
@@ -780,6 +897,7 @@ struct Steered {
     formant: f32,
     compensate: bool,
     base: f32,
+    mix: Smoothed,
 }
 
 impl Steered {
@@ -793,6 +911,7 @@ impl Steered {
             formant: 1.0,
             compensate: true,
             base: 0.0,
+            mix: Smoothed::new(1.0),
         }
     }
 
@@ -810,6 +929,7 @@ impl Steered {
         self.set_formant(self.formant, self.compensate);
         self.tracker.reset(rate, self.shifter.input_latency());
         self.dry.reset(self.shifter.latency());
+        self.mix.reset(rate);
     }
 
     /// `steer` gets each new detection (Hz, None when unvoiced) and returns the transpose
@@ -817,12 +937,12 @@ impl Steered {
     fn process(
         &mut self,
         block: &mut [[f32; 2]],
-        mix: f32,
         mut steer: impl FnMut(Option<f32>) -> Option<f32>,
     ) {
         if self.shifter.stretch.is_none() {
             return;
         }
+        finite(block);
         let mut start = 0;
         while start < block.len() {
             let n = next_chunk(block.len() - start, &self.tracker);
@@ -845,6 +965,7 @@ impl Steered {
                 let d = self
                     .dry
                     .tick([self.scratch[2 * k], self.scratch[2 * k + 1]]);
+                let mix = self.mix.next();
                 *f = [
                     mix * f[0] + (1.0 - mix) * d[0],
                     mix * f[1] + (1.0 - mix) * d[1],
@@ -858,7 +979,6 @@ impl Steered {
 /// A monotone: every detected pitch moved onto one note.
 pub struct Robot {
     note: f32,
-    mix: f32,
     steered: Steered,
 }
 
@@ -871,7 +991,6 @@ impl Robot {
     pub fn new() -> Self {
         Robot {
             note: 57.0,
-            mix: 1.0,
             steered: Steered::new(6),
         }
     }
@@ -887,7 +1006,7 @@ impl Effect for Robot {
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         match check(self.name(), Self::SPECS, name, value)? {
             0 => self.note = value.round(),
-            _ => self.mix = value,
+            _ => self.steered.mix.set(value),
         }
         Ok(())
     }
@@ -896,9 +1015,8 @@ impl Effect for Robot {
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
         let target = freq(self.note, 0.0);
-        self.steered.process(block, self.mix, |f| {
-            f.map(|f| (target / f).clamp(0.25, 4.0))
-        });
+        self.steered
+            .process(block, |f| f.map(|f| (target / f).clamp(0.25, 4.0)));
     }
     fn latency(&self) -> usize {
         self.steered.shifter.latency()
@@ -909,6 +1027,13 @@ impl Effect for Robot {
 const HYSTERESIS: f32 = 0.1;
 /// The slowest extra retune time humanize gives a sustained note.
 const HUMANIZE: f32 = 0.3;
+/// Unvoiced for this long, in seconds, and tune lets its correction go. Shorter gaps are a
+/// consonant or a missed detection inside a phrase, where dropping the correction would make
+/// the note wobble; a breath between phrases is several times longer.
+const RELEASE_AFTER: f32 = 0.06;
+/// The time constant the released correction falls to nothing with, in seconds: gone well
+/// within a breath, so the next note starts from its own pitch.
+const RELEASE: f32 = 0.05;
 
 /// Pitch correction to the nearest note of a key and scale.
 pub struct Tune {
@@ -916,6 +1041,7 @@ pub struct Tune {
     steered: Steered,
     target: Option<i32>,
     held: f32,
+    unvoiced: f32,
     correction: f32,
 }
 
@@ -935,6 +1061,7 @@ impl Tune {
             steered: Steered::new(7),
             target: None,
             held: 0.0,
+            unvoiced: 0.0,
             correction: 0.0,
         }
     }
@@ -948,26 +1075,45 @@ impl Effect for Tune {
         Self::SPECS
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
-        self.values[check(self.name(), Self::SPECS, name, value)?] = value;
+        let i = check(self.name(), Self::SPECS, name, value)?;
+        self.values[i] = value;
+        if i == 5 {
+            self.steered.mix.set(value);
+        }
         Ok(())
     }
     fn reset(&mut self, rate: f32) {
         self.steered.reset(rate);
         self.target = None;
         self.held = 0.0;
+        self.unvoiced = 0.0;
         self.correction = 0.0;
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        let [key, scale, reference, speed, humanize, mix] = self.values;
+        let [key, scale, reference, speed, humanize, _] = self.values;
         let scale = Scale::new(key.round() as usize, scale.round() as usize);
         let hop = self.steered.tracker.hop() as f32 / self.steered.rate;
-        let (target, held, correction) = (&mut self.target, &mut self.held, &mut self.correction);
-        self.steered.process(block, mix, |detected| {
+        let (target, held, unvoiced, correction) = (
+            &mut self.target,
+            &mut self.held,
+            &mut self.unvoiced,
+            &mut self.correction,
+        );
+        self.steered.process(block, |detected| {
             let Some(f) = detected else {
                 *target = None;
                 *held = 0.0;
-                return None;
+                *unvoiced += hop;
+                if *unvoiced <= RELEASE_AFTER || *correction == 0.0 {
+                    return None;
+                }
+                *correction *= (-hop / RELEASE).exp();
+                if correction.abs() < 1e-3 {
+                    *correction = 0.0;
+                }
+                return Some(ratio(*correction));
             };
+            *unvoiced = 0.0;
             let sung = midi(f, reference);
             let nearest = scale.nearest(sung);
             match *target {

@@ -1,7 +1,7 @@
 //! The effects of the rack.
 
 use crate::design::{self, Sos};
-use crate::effect::{check, Effect, ParamError, ParamSpec};
+use crate::effect::{check, Effect, ParamError, ParamSpec, Smoothed};
 use crate::voice;
 use std::f32::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
 
@@ -78,16 +78,129 @@ impl Biquad {
         }
     }
 
-    fn process(&mut self, block: &mut [[f32; 2]]) {
+    #[inline]
+    fn tick(&mut self, frame: [f32; 2]) -> [f32; 2] {
         let c = self.c;
-        for frame in block {
-            for (v, z) in frame.iter_mut().zip(self.z.iter_mut()) {
-                let x = *v as f64;
-                let y = c[0] * x + z[0];
-                z[0] = c[1] * x - c[4] * y + z[1];
-                z[1] = c[2] * x - c[5] * y;
-                *v = y as f32;
+        let mut out = [0.0; 2];
+        for ((v, z), o) in frame.iter().zip(self.z.iter_mut()).zip(&mut out) {
+            // NaN or infinity would stay in the state for good
+            let x = if v.is_finite() { *v as f64 } else { 0.0 };
+            let y = c[0] * x + z[0];
+            z[0] = c[1] * x - c[4] * y + z[1];
+            z[1] = c[2] * x - c[5] * y;
+            // A high-q low pole rings for minutes; stop it at 1e-30 (-600 dB) rather than creep
+            // through subnormals. Both values at once: zeroing one alone can feed a slow
+            // resonance more than it decays per sample, and it rings on for good.
+            if z[0].abs() < 1e-30 && z[1].abs() < 1e-30 {
+                *z = [0.0; 2];
             }
+            *o = y as f32;
+        }
+        out
+    }
+}
+
+/// Frames between redesigns of a band while its params glide.
+const REDESIGN: usize = 32;
+/// A change of filter kind crossfades from the old filter over this long, in seconds.
+const CROSSFADE: f32 = 0.01;
+
+/// A biquad following its params without clicks: frequency and q glide on a log scale and
+/// gain in dB, redesigned every few frames while they move. A new kind has no in-between
+/// with the old one, so the old filter keeps running and is crossfaded out.
+struct Band {
+    kind: usize,
+    freq: Smoothed,
+    gain: Smoothed,
+    q: Smoothed,
+    rate: f32,
+    filter: Biquad,
+    old: Biquad,
+    fade: usize,
+    fade_len: usize,
+    countdown: usize,
+    design: fn(usize, f64, f64, f64, f64) -> Sos,
+}
+
+impl Band {
+    fn new(
+        kind: usize,
+        freq: f32,
+        gain: f32,
+        q: f32,
+        design: fn(usize, f64, f64, f64, f64) -> Sos,
+    ) -> Self {
+        let mut b = Band {
+            kind,
+            freq: Smoothed::new(freq.log2()),
+            gain: Smoothed::new(gain),
+            q: Smoothed::new(q.log2()),
+            rate: DEFAULT_RATE,
+            filter: Biquad::new(),
+            old: Biquad::new(),
+            fade: 0,
+            fade_len: 1,
+            countdown: 0,
+            design,
+        };
+        b.redesign();
+        b
+    }
+
+    fn redesign(&mut self) {
+        let freq = under_nyquist(self.freq.value().exp2(), self.rate);
+        self.filter.c = (self.design)(
+            self.kind,
+            freq,
+            self.gain.value() as f64,
+            self.q.value().exp2() as f64,
+            self.rate as f64,
+        );
+    }
+
+    fn set_kind(&mut self, kind: usize) {
+        if kind == self.kind {
+            return;
+        }
+        self.kind = kind;
+        self.old = self.filter;
+        self.fade = self.fade_len;
+        self.redesign();
+    }
+
+    fn reset(&mut self, rate: f32) {
+        self.rate = rate;
+        for s in [&mut self.freq, &mut self.gain, &mut self.q] {
+            s.reset(rate);
+        }
+        self.filter = Biquad::new();
+        self.fade = 0;
+        self.fade_len = ((CROSSFADE * rate) as usize).max(1);
+        self.countdown = 0;
+        self.redesign();
+    }
+
+    fn process(&mut self, block: &mut [[f32; 2]]) {
+        for f in block {
+            if self.countdown == 0 {
+                self.countdown = REDESIGN;
+                if !(self.freq.settled() && self.gain.settled() && self.q.settled()) {
+                    for s in [&mut self.freq, &mut self.gain, &mut self.q] {
+                        s.skip(REDESIGN);
+                    }
+                    self.redesign();
+                }
+            }
+            self.countdown -= 1;
+            let y = self.filter.tick(*f);
+            *f = if self.fade == 0 {
+                y
+            } else {
+                let o = self.old.tick(*f);
+                let t = self.fade as f32 / self.fade_len as f32;
+                self.fade -= 1;
+                [y[0] + (o[0] - y[0]) * t, y[1] + (o[1] - y[1]) * t]
+            };
         }
     }
 }
@@ -106,14 +219,16 @@ macro_rules! specs {
 }
 
 pub struct Gain {
-    gain: f32,
+    gain: Smoothed,
 }
 
 specs!(Gain, &[ParamSpec::range("db", -60.0, 24.0, 0.0, "dB")]);
 
 impl Gain {
     fn new() -> Self {
-        Gain { gain: 1.0 }
+        Gain {
+            gain: Smoothed::new(1.0),
+        }
     }
 }
 
@@ -126,28 +241,33 @@ impl Effect for Gain {
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         check(self.name(), Self::SPECS, name, value)?;
-        self.gain = amplitude(value);
+        self.gain.set(amplitude(value));
         Ok(())
     }
-    fn reset(&mut self, _rate: f32) {}
+    fn reset(&mut self, rate: f32) {
+        self.gain.reset(rate);
+    }
     fn process(&mut self, block: &mut [[f32; 2]]) {
         for f in block {
-            f[0] *= self.gain;
-            f[1] *= self.gain;
+            let g = self.gain.next();
+            f[0] *= g;
+            f[1] *= g;
         }
     }
 }
 
 /// Balance: the far side is turned down along a quarter cosine, the near side stays.
 pub struct Pan {
-    gains: [f32; 2],
+    gains: [Smoothed; 2],
 }
 
 specs!(Pan, &[ParamSpec::range("pan", -1.0, 1.0, 0.0, "")]);
 
 impl Pan {
     fn new() -> Self {
-        Pan { gains: [1.0, 1.0] }
+        Pan {
+            gains: [Smoothed::new(1.0); 2],
+        }
     }
 }
 
@@ -161,28 +281,37 @@ impl Effect for Pan {
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         check(self.name(), Self::SPECS, name, value)?;
         let far = (value.abs() * FRAC_PI_2).cos();
-        self.gains = if value >= 0.0 { [far, 1.0] } else { [1.0, far] };
+        let gains = if value >= 0.0 { [far, 1.0] } else { [1.0, far] };
+        for (s, g) in self.gains.iter_mut().zip(gains) {
+            s.set(g);
+        }
         Ok(())
     }
-    fn reset(&mut self, _rate: f32) {}
+    fn reset(&mut self, rate: f32) {
+        for s in &mut self.gains {
+            s.reset(rate);
+        }
+    }
     fn process(&mut self, block: &mut [[f32; 2]]) {
         for f in block {
-            f[0] *= self.gains[0];
-            f[1] *= self.gains[1];
+            f[0] *= self.gains[0].next();
+            f[1] *= self.gains[1].next();
         }
     }
 }
 
 /// Mid/side: the side scaled by the width, the mid kept.
 pub struct Width {
-    width: f32,
+    width: Smoothed,
 }
 
 specs!(Width, &[ParamSpec::range("width", 0.0, 2.0, 1.0, "x")]);
 
 impl Width {
     fn new() -> Self {
-        Width { width: 1.0 }
+        Width {
+            width: Smoothed::new(1.0),
+        }
     }
 }
 
@@ -195,14 +324,16 @@ impl Effect for Width {
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         check(self.name(), Self::SPECS, name, value)?;
-        self.width = value;
+        self.width.set(value);
         Ok(())
     }
-    fn reset(&mut self, _rate: f32) {}
+    fn reset(&mut self, rate: f32) {
+        self.width.reset(rate);
+    }
     fn process(&mut self, block: &mut [[f32; 2]]) {
         for f in block {
             let mid = 0.5 * (f[0] + f[1]);
-            let side = 0.5 * (f[0] - f[1]) * self.width;
+            let side = 0.5 * (f[0] - f[1]) * self.width.next();
             *f = [mid + side, mid - side];
         }
     }
@@ -210,9 +341,26 @@ impl Effect for Width {
 
 /// One RBJ band.
 pub struct Eq {
-    values: [f32; 4],
-    rate: f32,
-    filter: Biquad,
+    band: Band,
+}
+
+fn eq_design(kind: usize, freq: f64, gain: f64, q: f64, rate: f64) -> Sos {
+    match kind {
+        0 => design::peaking(freq, gain, q, rate),
+        1 => design::low_shelf(freq, gain, q, rate),
+        2 => design::high_shelf(freq, gain, q, rate),
+        3 => design::lowpass(freq, q, rate),
+        4 => design::highpass(freq, q, rate),
+        _ => design::bandpass(freq, q, rate),
+    }
+}
+
+fn filter_design(mode: usize, freq: f64, _gain: f64, q: f64, rate: f64) -> Sos {
+    match mode {
+        0 => design::lowpass(freq, q, rate),
+        1 => design::highpass(freq, q, rate),
+        _ => design::bandpass(freq, q, rate),
+    }
 }
 
 specs!(
@@ -237,31 +385,10 @@ specs!(
 
 impl Eq {
     fn new() -> Self {
-        let mut eq = Eq {
-            values: defaults(Self::SPECS),
-            rate: DEFAULT_RATE,
-            filter: Biquad::new(),
-        };
-        eq.design();
-        eq
-    }
-
-    fn design(&mut self) {
-        let [kind, freq, gain, q] = self.values;
-        let (freq, gain, q, rate) = (
-            under_nyquist(freq, self.rate),
-            gain as f64,
-            q as f64,
-            self.rate as f64,
-        );
-        self.filter.c = match kind.round() as usize {
-            0 => design::peaking(freq, gain, q, rate),
-            1 => design::low_shelf(freq, gain, q, rate),
-            2 => design::high_shelf(freq, gain, q, rate),
-            3 => design::lowpass(freq, q, rate),
-            4 => design::highpass(freq, q, rate),
-            _ => design::bandpass(freq, q, rate),
-        };
+        let [kind, freq, gain, q] = defaults(Self::SPECS);
+        Eq {
+            band: Band::new(kind as usize, freq, gain, q, eq_design),
+        }
     }
 }
 
@@ -273,25 +400,27 @@ impl Effect for Eq {
         Self::SPECS
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
-        self.values[check(self.name(), Self::SPECS, name, value)?] = value;
-        self.design();
+        let i = check(self.name(), Self::SPECS, name, value)?;
+        let b = &mut self.band;
+        match i {
+            0 => b.set_kind(value.round() as usize),
+            1 => b.freq.set(value.log2()),
+            2 => b.gain.set(value),
+            _ => b.q.set(value.log2()),
+        }
         Ok(())
     }
     fn reset(&mut self, rate: f32) {
-        self.rate = rate;
-        self.filter = Biquad::new();
-        self.design();
+        self.band.reset(rate);
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        self.filter.process(block);
+        self.band.process(block);
     }
 }
 
 /// A resonant low, high or band pass.
 pub struct Filter {
-    values: [f32; 4],
-    rate: f32,
-    filter: Biquad,
+    band: Band,
 }
 
 specs!(
@@ -305,23 +434,10 @@ specs!(
 
 impl Filter {
     fn new() -> Self {
-        let mut f = Filter {
-            values: defaults(Self::SPECS),
-            rate: DEFAULT_RATE,
-            filter: Biquad::new(),
-        };
-        f.design();
-        f
-    }
-
-    fn design(&mut self) {
-        let [mode, cutoff, q, _] = self.values;
-        let (cutoff, q, rate) = (under_nyquist(cutoff, self.rate), q as f64, self.rate as f64);
-        self.filter.c = match mode.round() as usize {
-            0 => design::lowpass(cutoff, q, rate),
-            1 => design::highpass(cutoff, q, rate),
-            _ => design::bandpass(cutoff, q, rate),
-        };
+        let [mode, cutoff, q, _] = defaults(Self::SPECS);
+        Filter {
+            band: Band::new(mode as usize, cutoff, 0.0, q, filter_design),
+        }
     }
 }
 
@@ -333,24 +449,27 @@ impl Effect for Filter {
         Self::SPECS
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
-        self.values[check(self.name(), Self::SPECS, name, value)?] = value;
-        self.design();
+        let i = check(self.name(), Self::SPECS, name, value)?;
+        let b = &mut self.band;
+        match i {
+            0 => b.set_kind(value.round() as usize),
+            1 => b.freq.set(value.log2()),
+            _ => b.q.set(value.log2()),
+        }
         Ok(())
     }
     fn reset(&mut self, rate: f32) {
-        self.rate = rate;
-        self.filter = Biquad::new();
-        self.design();
+        self.band.reset(rate);
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        self.filter.process(block);
+        self.band.process(block);
     }
 }
 
 /// tanh of the driven signal, mixed with the dry one.
 pub struct Saturate {
-    drive: f32,
-    mix: f32,
+    drive: Smoothed,
+    mix: Smoothed,
 }
 
 specs!(
@@ -364,8 +483,8 @@ specs!(
 impl Saturate {
     fn new() -> Self {
         Saturate {
-            drive: 1.0,
-            mix: 1.0,
+            drive: Smoothed::new(1.0),
+            mix: Smoothed::new(1.0),
         }
     }
 }
@@ -379,17 +498,20 @@ impl Effect for Saturate {
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
         match check(self.name(), Self::SPECS, name, value)? {
-            0 => self.drive = amplitude(value),
-            _ => self.mix = value,
+            0 => self.drive.set(amplitude(value)),
+            _ => self.mix.set(value),
         }
         Ok(())
     }
-    fn reset(&mut self, _rate: f32) {}
+    fn reset(&mut self, rate: f32) {
+        self.drive.reset(rate);
+        self.mix.reset(rate);
+    }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        let (drive, wet, dry) = (self.drive, self.mix, 1.0 - self.mix);
         for f in block {
+            let (drive, wet) = (self.drive.next(), self.mix.next());
             for v in f.iter_mut() {
-                *v = wet * (drive * *v).tanh() + dry * *v;
+                *v = wet * (drive * *v).tanh() + (1.0 - wet) * *v;
             }
         }
     }

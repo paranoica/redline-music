@@ -177,6 +177,47 @@ def test_a_pitch_rack_an_octave_up_doubles_the_fundamental():
     assert freqs[np.argmax(dry)] == pytest.approx(440.0, rel=0.01)
 
 
+def test_a_shifting_rack_keeps_an_onset_on_its_frame():
+    onset = RATE // 2
+    x = np.zeros((RATE * 3 // 2, 2), np.float32)
+    x[onset:] = noise(1.0)
+    y = native.rack_process(x, RATE, _rack({"effect": "pitch"}))
+    assert y.shape == x.shape
+    n = 1 << 18
+    a, b = x[:, 0].astype(np.float64), y[:, 0].astype(np.float64)
+    corr = np.fft.irfft(np.fft.rfft(b, n) * np.conj(np.fft.rfft(a, n)), n)
+    lag = int(np.argmax(corr))
+    assert (lag if lag < n // 2 else lag - n) == 0
+    first = int(np.argmax(np.abs(y[:, 0]) > 0.01))
+    assert abs(first - onset) <= 64
+
+
+def test_a_shifting_rack_keeps_the_end_of_a_tone():
+    x = tone(440.0, 1.0, amp=0.5)
+    y = native.rack_process(x, RATE, _rack({"effect": "pitch"}))
+    energy = float(np.sum(y.astype(np.float64) ** 2) / np.sum(x.astype(np.float64) ** 2))
+    assert energy == pytest.approx(1.0, abs=0.05)
+    last = x[-RATE // 20 :].astype(np.float64)
+    assert np.sqrt(np.mean(y[-RATE // 20 :].astype(np.float64) ** 2)) == pytest.approx(
+        np.sqrt(np.mean(last**2)), rel=0.1
+    )
+
+
+@pytest.mark.parametrize("rate", [10, 4000, 7999])
+def test_a_rate_too_low_for_the_rack_raises_naming_it(rate):
+    with pytest.raises(ValueError, match=str(rate)):
+        native.rack_process(noise(0.1), rate, _rack({"effect": "pitch"}))
+
+
+def test_non_finite_samples_come_out_as_silence():
+    x = tone(220.0, 0.5, amp=0.4)
+    x[1000, 0] = np.nan
+    x[2000, 1] = np.inf
+    y = native.rack_process(x, RATE, _rack({"effect": "eq", "params": {"gain": 6}}))
+    assert np.isfinite(y).all()
+    assert np.abs(y[-1000:]).max() > 0.1
+
+
 def test_the_rack_takes_stereo_only():
     with pytest.raises(ValueError, match="stereo"):
         native.rack_process(noise(0.1, channels=1), RATE, _rack())

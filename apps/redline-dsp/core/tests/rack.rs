@@ -1,4 +1,4 @@
-use redline_dsp_core::effect::{effects_json, Rack, EFFECTS};
+use redline_dsp_core::effect::{effects_json, make, Rack, EFFECTS};
 
 fn noise(n: usize) -> Vec<[f32; 2]> {
     (0..n)
@@ -11,7 +11,7 @@ fn noise(n: usize) -> Vec<[f32; 2]> {
 
 fn render(json: &str, x: &[[f32; 2]]) -> Vec<[f32; 2]> {
     let mut rack = Rack::from_json(json).unwrap();
-    rack.reset(48000.0);
+    rack.reset(48000.0).unwrap();
     let mut y = x.to_vec();
     for chunk in y.chunks_mut(128) {
         rack.process(chunk);
@@ -103,4 +103,76 @@ fn the_catalogue_lists_every_effect_with_its_ranges() {
     let kind = &list[3]["params"][0];
     assert_eq!(kind["name"], "kind");
     assert_eq!(kind["choices"][0], "peak");
+}
+
+#[test]
+fn a_param_given_twice_is_rejected_by_name() {
+    let out = error(r#"{"effects": [{"effect": "gain", "params": {"db": -3, "db": 6}}]}"#);
+    assert!(out.contains("db") && out.contains("twice"), "{out}");
+    let other = r#"{"effects": [{"effect": "eq", "params": {"gain": 3, "freq": 500, "gain": 3}}]}"#;
+    assert!(error(other).contains("gain"));
+    // distinct keys, and the same key in two slots, are fine
+    let ok = r#"{"effects": [{"effect": "gain", "params": {"db": -3}},
+                             {"effect": "gain", "params": {"db": 3}}]}"#;
+    assert!(Rack::from_json(ok).is_ok());
+}
+
+/// A 220 Hz tone with a NaN at 0.3 s and an infinity at 0.6 s.
+fn tone_with_holes() -> (Vec<[f32; 2]>, usize) {
+    let mut x: Vec<[f32; 2]> = (0..48000)
+        .map(|i| {
+            let v = 0.4 * (i as f32 * 2.0 * std::f32::consts::PI * 220.0 / 48000.0).sin();
+            [v, v]
+        })
+        .collect();
+    x[14400] = [f32::NAN, 0.1];
+    x[28800] = [0.2, f32::INFINITY];
+    (x, 14400)
+}
+
+const STATEFUL: [&str; 6] = ["pitch", "octaver", "harmonizer", "tune", "unison", "eq"];
+
+#[test]
+fn a_rack_turns_non_finite_input_into_silence_instead_of_spreading_it() {
+    let (x, hole) = tone_with_holes();
+    for name in STATEFUL {
+        let y = render(&format!(r#"{{"effects": [{{"effect": "{name}"}}]}}"#), &x);
+        let bad = y.iter().flatten().filter(|v| !v.is_finite()).count();
+        assert_eq!(bad, 0, "{name}: {bad} non-finite samples");
+        // still sounding after the holes
+        assert!(
+            y[hole + 24000..].iter().any(|f| f[0].abs() > 0.05),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn an_effect_driven_without_a_rack_also_survives_non_finite_input() {
+    let (x, _) = tone_with_holes();
+    for name in STATEFUL
+        .iter()
+        .chain(&["filter", "vibrato", "drift", "robot", "formant"])
+    {
+        let mut e = make(name).unwrap();
+        e.reset(48000.0);
+        let mut y = x.clone();
+        for chunk in y.chunks_mut(100) {
+            e.process(chunk);
+        }
+        let bad = y.iter().flatten().filter(|v| !v.is_finite()).count();
+        assert_eq!(bad, 0, "{name}: {bad} non-finite samples");
+    }
+}
+
+#[test]
+fn a_rate_below_eight_kilohertz_is_an_error_naming_it() {
+    let mut rack = Rack::from_json(r#"{"effects": [{"effect": "pitch"}]}"#).unwrap();
+    for rate in [10.0, 4000.0, 7999.0, 0.0, -48000.0, f32::NAN, f32::INFINITY] {
+        let err = rack.reset(rate).unwrap_err().to_string();
+        assert!(err.contains(&rate.to_string()), "{err}");
+    }
+    assert!(rack.reset(8000.0).is_ok());
+    let mut y = vec![[0.1f32, 0.2]; 4000];
+    rack.process(&mut y);
 }

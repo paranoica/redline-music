@@ -4,7 +4,7 @@
 //! two paths cannot drift apart in their coefficients; only the loops live in the core. Each
 //! channel gets its own thread here, as the core has none.
 
-use redline_dsp_core::effect::{effects_json, Rack};
+use redline_dsp_core::effect::{effects_json, Rack, RackError};
 use redline_dsp_core::{filters, loudness};
 
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
@@ -183,26 +183,24 @@ fn rack_process<'py>(
             "the rack takes stereo samples, (rows, 2)",
         ));
     }
-    if !(rate.is_finite() && rate > 0.0) {
-        return Err(PyValueError::new_err("the rate must be above zero"));
-    }
-    let mut rack = Rack::from_json(rack_json).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    let mut frames: Vec<[f32; 2]> = samples
-        .as_array()
-        .rows()
-        .into_iter()
-        .map(|r| [r[0], r[1]])
-        .collect();
+    let error = |e: RackError| PyValueError::new_err(e.to_string());
+    let mut rack = Rack::from_json(rack_json).map_err(error)?;
+    rack.reset(rate).map_err(error)?;
+    let rows = samples.shape()[0];
+    // the input and then silence the length of the latency, so the output can be shifted back
+    // onto the input's frames without losing its end
+    let latency = rack.latency();
+    let mut frames: Vec<[f32; 2]> = Vec::with_capacity(rows + latency);
+    frames.extend(samples.as_array().rows().into_iter().map(|r| [r[0], r[1]]));
+    frames.resize(rows + latency, [0.0; 2]);
     py.detach(|| {
         filters::flushing_tiny(|| {
-            rack.reset(rate);
             for block in frames.chunks_mut(RACK_BLOCK) {
                 rack.process(block);
             }
         })
     });
-    let rows = frames.len();
-    let flat: Vec<f32> = frames.into_iter().flatten().collect();
+    let flat: Vec<f32> = frames.into_iter().skip(latency).flatten().collect();
     let arr = numpy::ndarray::Array2::from_shape_vec((rows, 2), flat)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(PyArray2::from_owned_array(py, arr))

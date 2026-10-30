@@ -624,7 +624,7 @@ fn a_pitch_rack_from_json_shifts_by_name() {
         r#"{"effects": [{"effect": "pitch", "params": {"semitones": 7, "preserve": "on"}}]}"#,
     )
     .unwrap();
-    rack.reset(RATE);
+    rack.reset(RATE).unwrap();
     assert!(rack.latency() > 0);
     let mut y = sine(440.0, 1.5);
     for chunk in y.chunks_mut(512) {
@@ -633,4 +633,109 @@ fn a_pitch_rack_from_json_shifts_by_name() {
     let got = steady(&y, 0.5).peak(300.0, 900.0);
     let want = 440.0 * 2f64.powf(7.0 / 12.0);
     assert!((got / want - 1.0).abs() < 0.01, "{got}");
+}
+
+// --- behaviour the host's block size and live changes must not alter ---
+
+#[test]
+fn drift_does_not_depend_on_the_block_size() {
+    let x = sine(440.0, 2.0);
+    let render = |block: usize| {
+        let mut e = effect("drift", &[("seed", 3.0), ("depth", 60.0), ("rate", 2.0)]);
+        run(e.as_mut(), &x, block)
+    };
+    let want = render(512);
+    for block in [1, 64, 100] {
+        let got = render(block);
+        let first = got.iter().zip(&want).position(|(a, b)| a != b);
+        assert!(
+            first.is_none(),
+            "block {block} differs from frame {first:?}"
+        );
+    }
+}
+
+fn rms(y: &[[f32; 2]]) -> f64 {
+    let sum: f64 = y
+        .iter()
+        .map(|f| (f[0] as f64).powi(2) + (f[1] as f64).powi(2))
+        .sum();
+    (sum / (2 * y.len()) as f64).sqrt()
+}
+
+#[test]
+fn adding_voices_keeps_the_sounding_ones_going() {
+    let x = sine(freq(60.0, 0.0) as f64, 3.0);
+    let split = (1.5 * RATE) as usize;
+    let harmonizer: &[(&str, f32)] = &[("key", 0.0), ("scale", 0.0), ("mix", 1.0), ("voices", 1.0)];
+    // no detune: the voices sound in unison, so the level does not beat
+    let unison: &[(&str, f32)] = &[
+        ("detune", 0.0),
+        ("spread", 0.0),
+        ("mix", 1.0),
+        ("voices", 2.0),
+    ];
+    for (name, params, more) in [("harmonizer", harmonizer, 2.0), ("unison", unison, 4.0)] {
+        let mut e = effect(name, params);
+        let mut y = x.clone();
+        for chunk in y[..split].chunks_mut(256) {
+            e.process(chunk);
+        }
+        e.set("voices", more).unwrap();
+        for chunk in y[split..].chunks_mut(256) {
+            e.process(chunk);
+        }
+        let before = rms(&y[split - 24000..split]);
+        let quietest = y[split..split + 24000]
+            .chunks(960)
+            .map(rms)
+            .fold(f64::MAX, f64::min);
+        eprintln!("{name}: {before:.3} before more voices, quietest 20 ms after {quietest:.3}");
+        assert!(quietest > 0.5 * before, "{name}: {quietest} vs {before}");
+    }
+}
+
+#[test]
+fn after_a_breath_tune_starts_the_next_note_without_the_old_correction() {
+    // 430 Hz, 39 cents flat of A4; a breath of silence; 450 Hz, 39 cents sharp
+    let mut x = sine(430.0, 1.0);
+    x.extend(vec![[0.0f32; 2]; (0.4 * RATE) as usize]);
+    x.extend(sine(450.0, 1.0));
+    // a slow retune, so a correction carried over would last long enough to measure
+    let mut e = effect("tune", &[("key", 9.0), ("scale", 5.0), ("speed", 200.0)]);
+    let onset = 1.4 + e.latency() as f32 / RATE;
+    let y = run(e.as_mut(), &x, 256);
+    let start = track(&y, onset + 0.02, 0.02);
+    let start: Vec<f64> = start[..4].iter().map(|f| cents(*f, 450.0)).collect();
+    eprintln!("tune after a breath: the first 80 ms in cents from 450 Hz {start:?}");
+    // never sharper than the sung note, beyond signalsmith's own few cents
+    assert!(start.iter().all(|c| *c < 8.0), "{start:?}");
+    // and the flat note before it was corrected
+    let held = steady(&y[..(0.95 * RATE) as usize + e.latency()], 0.6).peak(300.0, 600.0);
+    assert!(cents(held, 440.0).abs() < 8.0, "{held}");
+}
+
+#[test]
+fn harmonizer_voices_add_up_by_power() {
+    let x = sine(freq(60.0, 0.0) as f64, 2.0);
+    let peak = |params: &[(&str, f32)]| {
+        let mut all = vec![("key", 0.0), ("scale", 0.0), ("mix", 1.0)];
+        all.extend_from_slice(params);
+        let y = run(effect("harmonizer", &all).as_mut(), &x, 256);
+        y[(0.6 * RATE) as usize..]
+            .iter()
+            .map(|f| f[0].abs())
+            .fold(0.0, f32::max)
+    };
+    // each of the four default intervals sounding alone, as the first voice
+    let alone: Vec<f32> = [2.0, 4.0, -3.0, 7.0]
+        .iter()
+        .map(|d| peak(&[("voices", 1.0), ("interval1", *d)]))
+        .collect();
+    let four = peak(&[("voices", 4.0)]);
+    let loudest = alone.iter().cloned().fold(0.0, f32::max);
+    eprintln!("harmonizer peak: voices alone {alone:?}, all four {four:.3}");
+    // four voices, each scaled by 1/sqrt(4), cannot pass twice the loudest of them
+    assert!(four <= 2.0 * loudest * 1.02, "{four} vs {loudest}");
+    assert!(four > loudest, "{four} vs {loudest}");
 }

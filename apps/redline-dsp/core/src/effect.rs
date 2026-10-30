@@ -1,7 +1,7 @@
 //! The effect interface and the rack: effects in the user's order, configured by JSON.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::fmt;
 
 pub use crate::effects::{make, EFFECTS};
@@ -107,7 +107,11 @@ pub fn check(
     Ok(i)
 }
 
-/// A stereo effect. `process` must not allocate, lock or wait: `reset` sizes what it needs.
+/// A stereo effect. `process` and `set` must not allocate, lock or wait: `reset` sizes what
+/// it needs. The host runs `process` with subnormals flushed to zero
+/// ([`crate::filters::flush_tiny`]), as the Python binding does; effects do not guard every
+/// sample against them. Input may hold NaN or infinity: an effect that keeps state treats them
+/// as silence, so one bad sample cannot poison it.
 pub trait Effect: Send {
     fn name(&self) -> &'static str;
     fn params(&self) -> &'static [ParamSpec];
@@ -176,7 +180,123 @@ struct SlotSpec {
     #[serde(default = "on")]
     on: bool,
     #[serde(default)]
-    params: Map<String, Value>,
+    params: Params,
+}
+
+/// A slot's params in their order; a JSON map would silently keep the last of a repeated key.
+#[derive(Default)]
+struct Params(Vec<(String, Value)>);
+
+impl<'de> Deserialize<'de> for Params {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Params;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a map of params")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Params, A::Error> {
+                let mut params: Vec<(String, Value)> = Vec::new();
+                while let Some((name, value)) = map.next_entry::<String, Value>()? {
+                    if params.iter().any(|(n, _)| *n == name) {
+                        return Err(serde::de::Error::custom(format!(
+                            "param {name} is given twice"
+                        )));
+                    }
+                    params.push((name, value));
+                }
+                Ok(Params(params))
+            }
+        }
+        d.deserialize_map(Visitor)
+    }
+}
+
+/// The lowest rate the rack runs at; the pitch effects' stretcher needs blocks of some length.
+pub const MIN_RATE: f32 = 8000.0;
+
+/// Non-finite samples replaced by silence.
+pub fn finite(block: &mut [[f32; 2]]) {
+    for v in block.as_flattened_mut() {
+        if !v.is_finite() {
+            *v = 0.0;
+        }
+    }
+}
+
+/// The time constant of a smoothed param, in seconds: short enough not to be heard as a lag
+/// behind a knob, long enough that a jump across the whole range does not click.
+pub(crate) const SMOOTHING: f32 = 0.02;
+
+/// A param that glides to a new value along a one-pole curve instead of jumping.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Smoothed {
+    value: f32,
+    target: f32,
+    step: f32,
+}
+
+impl Smoothed {
+    pub(crate) fn new(value: f32) -> Self {
+        Smoothed {
+            value,
+            target: value,
+            step: Self::step_for(48000.0),
+        }
+    }
+
+    fn step_for(rate: f32) -> f32 {
+        1.0 - (-1.0 / (SMOOTHING * rate)).exp()
+    }
+
+    pub(crate) fn set(&mut self, target: f32) {
+        self.target = target;
+    }
+
+    /// At the target from the first sample on: a reset starts where the params are.
+    pub(crate) fn reset(&mut self, rate: f32) {
+        self.step = Self::step_for(rate);
+        self.value = self.target;
+    }
+
+    pub(crate) fn settled(&self) -> bool {
+        self.value == self.target
+    }
+
+    pub(crate) fn value(&self) -> f32 {
+        self.value
+    }
+
+    /// The value for the next sample.
+    #[inline]
+    pub(crate) fn next(&mut self) -> f32 {
+        if self.value != self.target {
+            let gap = self.target - self.value;
+            // close enough to land on the target exactly, so a settled param costs nothing
+            self.value = if gap.abs() < 1e-6 {
+                self.target
+            } else {
+                self.value + gap * self.step
+            };
+        }
+        self.value
+    }
+
+    /// `n` samples on at once.
+    pub(crate) fn skip(&mut self, n: usize) {
+        if self.value != self.target {
+            let gap = self.target - self.value;
+            let left = gap * (1.0 - self.step).powi(n as i32);
+            self.value = if left.abs() < 1e-6 {
+                self.target
+            } else {
+                self.target - left
+            };
+        }
+    }
 }
 
 /// Effects in order; one turned off is kept but skipped.
@@ -198,7 +318,7 @@ impl Rack {
         for slot in spec.effects {
             let mut effect = make(&slot.effect)
                 .ok_or_else(|| RackError(format!("no effect {}", slot.effect)))?;
-            for (name, value) in &slot.params {
+            for (name, value) in &slot.params.0 {
                 let value = param_value(effect.as_ref(), name, value)?;
                 effect.set(name, value)?;
             }
@@ -208,13 +328,23 @@ impl Rack {
         Ok(rack)
     }
 
-    pub fn reset(&mut self, rate: f32) {
+    /// Sizes every effect for `rate`; a rate under [`MIN_RATE`] (or not a number) is refused
+    /// and the effects are left as they were.
+    pub fn reset(&mut self, rate: f32) -> Result<(), RackError> {
+        // written so NaN fails it too
+        if !(rate >= MIN_RATE && rate.is_finite()) {
+            return Err(RackError(format!(
+                "the rate {rate} Hz is under the rack's lowest, {MIN_RATE} Hz"
+            )));
+        }
         for e in &mut self.effects {
             e.reset(rate);
         }
+        Ok(())
     }
 
     pub fn process(&mut self, block: &mut [[f32; 2]]) {
+        finite(block);
         for (e, &on) in self.effects.iter_mut().zip(&self.on) {
             if on {
                 e.process(block);
@@ -222,6 +352,9 @@ impl Rack {
         }
     }
 
+    /// Frames from an input to the output it shows up in: the sum over the effects switched
+    /// on. An offline render feeds this many frames of silence after the input and drops as
+    /// many from the front.
     pub fn latency(&self) -> usize {
         self.effects
             .iter()
