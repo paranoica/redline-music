@@ -5,6 +5,7 @@ FAKE_REC_RATE      the graph rate it reports (default 48000)
 FAKE_REC_FAIL      "nojack": say JACK is missing and exit 2 before the startup line
 FAKE_REC_DROPOUTS  JSON list of dropouts put in every take report
 FAKE_REC_TONE      "sweep:<frames>": a stopped take holds the beat delayed by that many frames
+FAKE_REC_TAKE_S    seconds of the 220 Hz sine at 0.1 a take holds otherwise (default 0.5)
 """
 
 import argparse
@@ -15,8 +16,6 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-
-TAKE_SECONDS = 0.5
 
 
 def reply(**fields):
@@ -39,7 +38,8 @@ class Fake:
             out = np.zeros(delay + len(played) + self.rate // 4, dtype=np.float32)
             out[delay : delay + len(played)] = 0.5 * played
             return out
-        t = np.arange(int(TAKE_SECONDS * self.rate)) / self.rate
+        seconds = float(os.environ.get("FAKE_REC_TAKE_S", "0.5"))
+        t = np.arange(int(seconds * self.rate)) / self.rate
         return (0.1 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
 
     def start(self, command):

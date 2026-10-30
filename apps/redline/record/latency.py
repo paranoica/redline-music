@@ -7,6 +7,7 @@ and every place that shows it says it is an estimate.
 """
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,7 +82,10 @@ def save_calibration(path: Path, key: LatencyKey, delay: Delay, mode: str) -> No
             "rate": key.rate,
             "quantum": key.quantum,
             "frames": delay.frames,
-            "peak_to_noise_db": round(delay.peak_to_noise_db, 1),
+            # a recording without any noise has an infinite ratio, which JSON cannot hold
+            "peak_to_noise_db": (
+                round(delay.peak_to_noise_db, 1) if math.isfinite(delay.peak_to_noise_db) else None
+            ),
             "mode": mode,
             "measured": datetime.now(UTC).isoformat(timespec="seconds"),
         }
