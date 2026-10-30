@@ -270,6 +270,45 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     write.add_argument(
         "--force", action="store_true", help="start the seed over; saved scores stay"
     )
+    rendered = beat_commands.add_parser(
+        "render", help="render a seed's newest score to <work>/beats/<seed>/: beat and stems"
+    )
+    rendered.add_argument("--seed", type=int, required=True, help="the beat's seed")
+    rendered.add_argument("--score", type=Path, help="a score file instead of the newest")
+    rendered.add_argument("--rate", type=int, default=48000, help="the render rate")
+    measured = beat_commands.add_parser(
+        "measure", help="measure a seed's render against the beat stems of references"
+    )
+    measured.add_argument("--seed", type=int, required=True, help="the beat's seed")
+    measured.add_argument(
+        "--ref", type=Path, nargs="+", required=True, help="reference files or a folder of them"
+    )
+    marked = beat_commands.add_parser(
+        "marks", help="mark a bar of a seed's newest score good or bad, or list the marks"
+    )
+    marked.add_argument("--seed", type=int, required=True, help="the beat's seed")
+    marked.add_argument("--bar", type=int, help="the bar, from 1")
+    marked.add_argument("verdict", nargs="?", choices=("good", "bad"), help="the mark")
+    marked.add_argument("--note", default="", help="why, in a few words")
+    marked.add_argument("--list", action="store_true", help="print the seed's marks")
+    studio = beat_commands.add_parser(
+        "studio", help="a page on this machine that edits, checks, saves and renders a seed"
+    )
+    studio.add_argument("--seed", type=int, required=True, help="the beat's seed")
+    studio.add_argument("--port", type=int, default=0, help="the port (default: a free one)")
+    studio.add_argument(
+        "--no-open",
+        "--no-browser",
+        dest="no_open",
+        action="store_true",
+        help="print the address, do not open it",
+    )
+    for command in (rendered, marked, studio):
+        command.add_argument(
+            "--root", type=Path, default=Path("private/beats"), help="the beats folder"
+        )
+    for command in (rendered, measured, studio):
+        command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     sounds = beat_commands.add_parser("sounds", help="the sample instruments: list, fetch")
     sounds_commands = sounds.add_subparsers(dest="sounds_command", metavar="command")
     listed = sounds_commands.add_parser(

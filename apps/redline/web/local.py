@@ -86,6 +86,7 @@ class LocalHandler(BaseHTTPRequestHandler):
     server: LocalServer  # pyright: ignore[reportIncompatibleVariableOverride]
     # a connection that sends nothing must not hold a thread for good
     timeout = 10
+    max_body = MAX_BODY
 
     def log_message(self, format: str, *args: Any) -> None:
         """Keep the console for the page address and what the page reports."""
@@ -157,7 +158,7 @@ class LocalHandler(BaseHTTPRequestHandler):
         length = self.headers.get("Content-Length", "")
         if not (length.isascii() and length.isdigit()):
             raise BadRequest(HTTPStatus.LENGTH_REQUIRED, "Content-Length is needed")
-        if int(length) > MAX_BODY:
+        if int(length) > self.max_body:
             self.close_connection = True
             raise BadRequest(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "the body is too large")
         try:

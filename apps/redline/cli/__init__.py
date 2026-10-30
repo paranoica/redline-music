@@ -65,7 +65,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
     if args.command in sound:
         return sound[args.command](args, separator)
     if args.command == "beat":
-        done = _beat(args)
+        done = _beat(args, separator)
         if done is not None:
             return done
     if args.command == "lyrics" and args.lyrics_command in lyrics:
