@@ -1105,9 +1105,9 @@ summary.issues__title {
   pointer-events: none;
 }
 
-/* ---------- up to 1439: the actions take a second row of the deck ---------- */
+/* ---------- up to 1599: the actions take a second row of the deck ---------- */
 
-@media (max-width: 1439px) {
+@media (max-width: 1599px) {
   .bdeck {
     grid-template-columns: auto auto 1fr;
     row-gap: var(--s2);
