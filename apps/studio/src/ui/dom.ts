@@ -2,6 +2,17 @@
 
 type Attrs = Record<string, string | number | boolean | undefined>;
 
+export function styleDeclarations(text: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const part of text.split(";")) {
+    const at = part.indexOf(":");
+    if (at < 0) continue;
+    const name = part.slice(0, at).trim();
+    if (name) out.push([name, part.slice(at + 1).trim()]);
+  }
+  return out;
+}
+
 export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   attrs: Attrs = {},
@@ -11,6 +22,8 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   for (const [key, value] of Object.entries(attrs)) {
     if (value === undefined || value === false) continue;
     if (key === "class") node.className = String(value);
+    // the page's policy blocks style attributes; the style object is not blocked
+    else if (key === "style") for (const [name, v] of styleDeclarations(String(value))) node.style.setProperty(name, v);
     else node.setAttribute(key, value === true ? "" : String(value));
   }
   for (const child of children) {
