@@ -22,8 +22,11 @@ class RedlineProcessor extends AudioWorkletProcessor {
       if (m.type === "wasm") {
         void this.#start(m.bytes);
       } else if (this.#engine) {
-        const engine = this.#engine;
-        this.#guard(() => engine.handle(m));
+        try {
+          this.#engine.handle(m);
+        } catch (error) {
+          this.#die(error);
+        }
       } else {
         this.#waiting.push(m);
       }
@@ -57,23 +60,24 @@ class RedlineProcessor extends AudioWorkletProcessor {
     if (!left) return true;
     const right = out[1] ?? this.#spare;
     const engine = this.#engine;
-    if (engine && !this.#dead && this.#guard(() => engine.render(left, right))) return true;
+    if (engine && !this.#dead) {
+      try {
+        engine.render(left, right);
+        return true;
+      } catch (error) {
+        this.#die(error);
+      }
+    }
     left.fill(0);
     right.fill(0);
     return true;
   }
 
-  #guard(f: () => void): boolean {
-    try {
-      f();
-      return true;
-    } catch (error) {
-      this.#dead = true;
-      this.#engine = null;
-      const message = error instanceof Error ? error.message : String(error);
-      this.port.postMessage({ type: "error", fatal: true, message });
-      return false;
-    }
+  #die(error: unknown): void {
+    this.#dead = true;
+    this.#engine = null;
+    const message = error instanceof Error ? error.message : String(error);
+    this.port.postMessage({ type: "error", fatal: true, message });
   }
 }
 
