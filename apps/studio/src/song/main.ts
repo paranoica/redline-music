@@ -195,9 +195,6 @@ export const mount: Mount = async (root, options) => {
         if (s.beat.kind === "own" && !s.beat.rendered) {
           return plain(needCard({ title: "Запись", what: "Бит ещё не отрендерен.", how: "Писать нужно под готовый бит: отрендери его на шаге «Бит».", actions: [goto("К биту", "beat")] }));
         }
-        if (s.text.version === null || s.text.version === undefined) {
-          return plain(needCard({ title: "Запись", what: "Не выбран текст.", how: "Текст виден рядом с кнопкой записи, чтобы петь по нему. Выбери его на шаге «Текст».", actions: [goto("К тексту", "text")] }));
-        }
         return createRecStation(ctx, createLyric(ctx, "read"), {
           snapshot: (snap) => {
             const changed = rec?.recording !== snap?.recording || rec?.stage !== snap?.stage || rec?.take !== snap?.take;
