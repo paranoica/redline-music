@@ -47,16 +47,40 @@ and a pause of 200 ms or longer ends a phrase. Throws, reverb and stutter all us
 The master clips the mix to the target with oversampling, so the peaks the references have
 squared off are squared off here too, at their loudness.
 
-## The engine and the studio
+## The Python engine
 
 The render runs in stages: chain, voice, layers, effects, rack, beat, master. Each stage's
 result is cached by the settings it depends on (up to 1.5 GB), so moving the master target
 re-runs only the master and an effect change does not redo the voice. A newer request cancels
 an older one between stages.
 
-A preview renders only the loop, padded on both sides by the longest effect tail, and takes the
-last whole render's master gain so that it sounds as loud as the whole would. The whole track
-renders on a button.
+## The live studio and the exact render
+
+The studio page plays the track through three racks in an AudioWorklet, on the Rust core built
+for WebAssembly (`apps/redline-dsp/wasm`): the vocal rack (the chain as rack effects: the fitted
+EQ, compressor, drive and clip, then voice, layers, effects and the user's rack), the beat rack
+(808 drive) and the master rack (the master gain and a clipper at the ceiling). The beat rack's
+output, delayed by its own latency, is the vocal rack's side signal; the two are mixed at equal
+latency and go through the master. `apps/redline/engine/live.py` turns settings into these racks.
+
+What needs the whole track stays on the server: the EQ fit toward the references, the tuning
+and the master gain for the current settings. The page asks for them again when a setting they
+depend on changes and keeps playing meanwhile.
+
+The exact render, `redline run` and `redline voice` run the same racks natively
+(`apps/redline/engine/racks_render.py`), so the file matches what the page played: a test drives
+the page's engine in node block by block and compares it with the file. Where they still differ:
+
+- `octave_down` and the doubles use signalsmith's FFT; the browser build rounds it differently,
+  about −89 dB under the signal.
+- automation is set every 512 frames in the file and every 128 on the page, so a smooth lane
+  steps a little differently.
+- the page fades in after a start or a seek and does not play the last frames of the track (the
+  racks' latency, about 0.1 s); the file has them.
+
+`--classic` renders with the staged Python engine below instead. The blind rounds, the automatic
+settings search and the studio's server analysis still use it, so they sound slightly different
+from the racks.
 
 ## The rack
 
@@ -92,13 +116,9 @@ does not click; a param that sizes a buffer, such as the limiter's lookahead, ta
 value at the start. Lanes are in seconds of the
 track only; sections of the lyrics are not supported.
 
-Offline-only effects (`reverse`, `reverse_reverb`) need audio ahead of the frame they play;
-both the render and the studio's preview have the whole piece in hand, so they work in both.
-A preview runs the rack on the loop padded by 10 s on each side, so tails from before the loop
-reach into it. It is close, not exact: an effect that counts from the start of its input (the
-grid of `chop`, `trance_gate` and `stutter`, the windows of `reverse`) counts from the start of
-the padded piece in a preview and from the start of the track in the render; the whole render
-is the one to judge.
+Offline-only effects (`reverse`, `reverse_reverb`) need audio ahead of the frame they play.
+The render has the whole piece in hand; the live page plays them with a long delay, so judge
+them in the exact render.
 
 The studio page talks to a server on `127.0.0.1` only. The address carries a token; the page
 drops it from the address bar and sends it with every call. The Host header must be this

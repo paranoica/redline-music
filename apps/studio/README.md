@@ -2,8 +2,8 @@
 
 The real-time studio: the vocal, beat and master racks run in an AudioWorklet on the
 `redline_dsp` core built for WebAssembly, so a moved control is heard at once. The exact
-render still goes through the Python engine on the server (`apps/redline/studio/server.py`),
-which serves the built page from `dist/`.
+render runs the same racks natively on the server (`apps/redline/engine/racks_render.py`);
+the server (`apps/redline/studio/server.py`) serves the built page from `dist/`.
 
 ## Build
 

@@ -27,7 +27,7 @@ it sounds better is for you to decide by ear.
 |---|---|
 | **Measure** | Splits the track and each reference into vocal and beat, measures loudness, dynamics, spectral tilt, stereo width, the low end, vocal tuning and reverb tails, and writes a report on where the track stands against the references. |
 | **Process** | Runs the vocal through a chain built from those measurements: EQ toward the references, compression, saturation, hard tune, formant shift, octave layers, doubles. Then delay throws, reverb and stutter at phrase ends, drive on the 808, and a clip master to the references' loudness. |
-| **Studio** | A local page that plays the track and re-renders a loop as you move a setting. A/B against the original and a reference at equal loudness, undo, presets. |
+| **Studio** | A local page that plays the track through the chain in real time: move a control and you hear it at once. The vocal, beat and master run in the browser on the same Rust code as the render. A/B against the original and a reference at equal loudness, automation lanes, undo, presets. |
 | **Batch** | Runs a saved studio preset over a whole folder of Suno takes in one command. |
 | **Lyrics** | Writes a new text from a style profile of the scene, measures your beat for tempo, bars and hardness so the lines fit it, checks every draft for copied lines, and prints a card ready to paste into Suno. You mark lines as cringe or good, and the next text takes those marks into account. |
 
@@ -52,14 +52,16 @@ are cached by content, so the second run on the same files starts at once.
 
 ## Quick start
 
-Linux, Python 3.12, [uv](https://docs.astral.sh/uv/) and a Rust toolchain (`cargo`): the master's
-inner loops are Rust, built by `uv sync`. A CUDA GPU speeds up separation; on a CPU it is
-slower but works.
+Linux, Python 3.12, [uv](https://docs.astral.sh/uv/), a Rust toolchain (`cargo`) and Node 22.18
+or newer. The sound core is Rust: `uv sync` builds it for Python, and its WebAssembly build for
+the studio is committed, so emscripten is needed only to change the core. A CUDA GPU speeds up
+separation; on a CPU it is slower but works.
 
 ```sh
 git clone https://github.com/paranoica/redline-music.git
 cd redline-music
 uv sync --extra separation        # add --extra stress for stress-aware rhymes
+npm --prefix apps/studio ci && npm --prefix apps/studio run build   # the studio page
 ```
 
 Put your files in place. These folders are ignored by git:
@@ -86,9 +88,16 @@ the same loudness, a `compare/` pair at equal loudness and a `report.md`.
 uv run redline studio --track input/track.wav --ref input/refs
 ```
 
-It opens a page on `127.0.0.1`. The loudest stretch of the track is looped; drag the red
-brackets to move the loop. A change re-renders only the loop, in about two seconds; the
-whole track renders on a button, in about twenty seconds for a three-minute song.
+It opens a page on `127.0.0.1`. The track plays through the vocal, beat and master racks in
+the browser, compiled to WebAssembly from the same Rust core the render uses, so a moved control
+is heard at once. The loudest stretch is looped; drag the red brackets to move the loop. What
+needs the whole track (the EQ fit toward the references, the master gain) is worked out again
+on the server when a setting it depends on changes; the page shows while it runs.
+
+**Exact render** renders the whole track on the server and plays it under **Render**. **Save**
+keeps the settings of the last exact render, so what is saved is what was rendered. A rack
+effect's automation shows under the waveform as lanes: click to add a point, drag to move,
+double-click to remove.
 
 | Key | |
 |---|---|
@@ -261,12 +270,12 @@ apps/
     measure/        separation, measurements, comparison, report
     vocal/          the vocal chain, timbre, effects, blind rounds
     master/         clip master, the final run
-    engine/         settings and the staged render with its cache
+    engine/         settings, the staged render with its cache, the racks the studio plays
     studio/         the studio's server
     lyrics/         text parsing, style profiles, the writer, Suno cards, marks
     web/            what the local pages share: token, host check, headers
     cli/            the command line
-  redline-dsp/      the Rust inner loops: oversampled clip, resampling, filters, loudness
+  redline-dsp/      the Rust sound core: effects, rack, master; built for Python and the browser
   studio/           the studio page, TypeScript
   lyrics-web/       the marks page
 tests/redline/      tests, on synthetic audio and invented texts
@@ -282,7 +291,12 @@ More detail: [docs/sound.md](docs/sound.md), [docs/lyrics.md](docs/lyrics.md),
 uv run pytest tests/redline -q        # tests
 uvx ruff check . && uvx black --check .
 uv run pyright apps/redline
+npm --prefix apps/studio test         # the studio page
+npm --prefix apps/studio run typecheck
 ```
+
+`apps/redline-dsp/wasm/build.sh` rebuilds the browser build of the core (needs emscripten); see
+[apps/studio/README.md](apps/studio/README.md).
 
 `plugins/` and `bench/` hold [bedrock](https://github.com/paranoica/bedrock), the development
 workflow this project is built with. They are not part of the program.
