@@ -4,6 +4,9 @@
 //! two paths cannot drift apart in their coefficients; only the loops live in the core. Each
 //! channel gets its own thread here, as the core has none.
 
+use redline_dsp_core::beat::events::EventTable;
+use redline_dsp_core::beat::instruments::instruments_json;
+use redline_dsp_core::beat::score::Score;
 use redline_dsp_core::effect::{effects_json, Rack, RackError, MAX_LANE_POINTS};
 use redline_dsp_core::{filters, loudness};
 
@@ -342,6 +345,36 @@ fn rack_effects() -> String {
     effects_json()
 }
 
+/// Every error of a beat score as "path: message"; empty when the score is valid.
+#[pyfunction]
+fn beat_check(score_json: &str) -> Vec<String> {
+    match Score::from_json(score_json) {
+        Ok(_) => Vec::new(),
+        Err(errors) => errors.iter().map(ToString::to_string).collect(),
+    }
+}
+
+/// The score's event table at the rate, as JSON (see `EventTable::to_json`).
+#[pyfunction]
+fn beat_events(score_json: &str, rate: f32) -> PyResult<String> {
+    if !(rate.is_finite() && rate > 0.0) {
+        return Err(PyValueError::new_err(format!(
+            "rate {rate} is not a positive number"
+        )));
+    }
+    let score = Score::from_json(score_json).map_err(|errors| {
+        let lines: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        PyValueError::new_err(lines.join("\n"))
+    })?;
+    Ok(EventTable::build(&score, rate).to_json(&score))
+}
+
+/// The beat instruments and their params, as a JSON list.
+#[pyfunction]
+fn beat_instruments() -> String {
+    instruments_json()
+}
+
 fn per_channel<T: Send>(channels: &[Vec<f32>], work: impl Fn(&[f32]) -> T + Sync) -> Vec<T> {
     std::thread::scope(|scope| {
         let handles: Vec<_> = channels
@@ -368,5 +401,8 @@ fn redline_dsp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rack_process_automated, m)?)?;
     m.add_function(wrap_pyfunction!(rack_effects, m)?)?;
     m.add_function(wrap_pyfunction!(rack_alignment, m)?)?;
+    m.add_function(wrap_pyfunction!(beat_check, m)?)?;
+    m.add_function(wrap_pyfunction!(beat_events, m)?)?;
+    m.add_function(wrap_pyfunction!(beat_instruments, m)?)?;
     Ok(())
 }

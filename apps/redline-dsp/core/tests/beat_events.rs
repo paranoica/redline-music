@@ -392,3 +392,38 @@ fn the_same_score_builds_the_same_table() {
     assert_eq!(a, b);
     assert!(!a.events.is_empty());
 }
+
+#[test]
+fn the_table_as_json_names_the_sounds_and_keeps_every_cut() {
+    let s = score(
+        json!({"b": {"instrument": "bass808"}, "h": {"instrument": "hat_open"}}),
+        json!({"p": {"bars": 1, "rows": {
+            "b": [{"step": 0, "len": 6, "note": "C1", "vel": 1.0},
+                  {"step": 4, "len": 4, "note": "G1", "vel": 0.5}],
+            "h": "x..............."
+        }}}),
+        json!([{"name": "a", "bars": 1, "play": ["p"]}]),
+    );
+    let t = table(&s);
+    let v: Value = serde_json::from_str(&t.to_json(&s)).unwrap();
+    assert_eq!(v["length"], json!(16 * STEP));
+    assert_eq!(v["rate"], json!(RATE));
+    assert_eq!(v["key"], json!({"tonic": 0, "mode": "minor"}));
+    assert_eq!(
+        v["sounds"],
+        json!([{"name": "b", "instrument": "bass808"}, {"name": "h", "instrument": "hat_open"}])
+    );
+    let events = v["events"].as_array().unwrap();
+    assert_eq!(events.len(), t.events.len());
+    let glide = events
+        .iter()
+        .find(|e| e["legato_from"] == json!(24.0))
+        .expect("the G1 glides from C1");
+    assert_eq!(glide["note"], json!(31.0));
+    assert_eq!(glide["start"], json!(4 * STEP));
+    let cut = events.iter().find(|e| e["note"] == json!(24.0)).unwrap();
+    assert_eq!(cut["end"], json!(4 * STEP));
+    assert_eq!(cut["legato_from"], Value::Null);
+    let hat = events.iter().find(|e| e["sound"] == json!(1)).unwrap();
+    assert_eq!(hat["off"], Value::Null);
+}

@@ -57,6 +57,16 @@ const MODES: [(&str, Mode); 8] = [
     ("harmonic_minor", Mode::HarmonicMinor),
 ];
 
+impl Mode {
+    pub fn name(self) -> &'static str {
+        MODES
+            .iter()
+            .find(|(_, m)| *m == self)
+            .map(|(name, _)| *name)
+            .expect("every mode is named")
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
     /// Pitch class, 0 for C.

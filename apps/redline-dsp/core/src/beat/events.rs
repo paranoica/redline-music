@@ -4,6 +4,7 @@
 
 use super::instruments::{Instrument, Kind};
 use super::score::{Pattern, Row, Score, STEPS_PER_BAR};
+use serde_json::json;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
@@ -60,6 +61,37 @@ pub fn unit(h: u64) -> f64 {
 }
 
 impl EventTable {
+    /// The table as JSON, for the checks in Python and the editor's drawing:
+    /// `{"length", "rate", "key": {"tonic", "mode"}, "sounds": [{"name", "instrument"}],
+    /// "events": [{every field of Event}]}`.
+    pub fn to_json(&self, score: &Score) -> String {
+        let sounds: Vec<_> = score
+            .sounds
+            .iter()
+            .map(|s| json!({"name": s.name, "instrument": s.instrument.name}))
+            .collect();
+        let events: Vec<_> = self
+            .events
+            .iter()
+            .map(|e| {
+                json!({
+                    "id": e.id, "sound": e.sound, "start": e.start, "off": e.off, "end": e.end,
+                    "note": e.note, "vel": e.vel, "decay": e.decay, "roll": e.roll,
+                    "legato_from": e.legato_from, "section": e.section, "bar": e.bar,
+                    "step": e.step,
+                })
+            })
+            .collect();
+        json!({
+            "length": self.length,
+            "rate": self.rate,
+            "key": {"tonic": score.key.tonic, "mode": score.key.mode.name()},
+            "sounds": sounds,
+            "events": events,
+        })
+        .to_string()
+    }
+
     pub fn build(score: &Score, rate: f32) -> EventTable {
         // frames a 16th
         let step = rate as f64 * 60.0 / score.bpm / 4.0;
