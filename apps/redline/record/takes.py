@@ -20,13 +20,18 @@ def next_take(folder: Path) -> Path:
 
 
 def write_sidecar(
-    report: TakeReport, round_trip: RoundTrip, quantum: int, quantum_now: int | None = None
+    report: TakeReport,
+    round_trip: RoundTrip,
+    quantum: int,
+    quantum_now: int | None = None,
+    quantum_unchecked: bool = False,
 ) -> Path:
     """Write the take's log next to it and return its path.
 
     quantum_now is the graph's quantum after the take when it is not the one the session
     started at: the log is then marked "quantum_changed", and the take's offset and
-    dropouts are not to be trusted.
+    dropouts are not to be trusted. quantum_unchecked marks it the same way, with no
+    quantum_now, when the quantum could not be read after the take.
 
     "dropouts" holds the [start, end) frame ranges that were filled with silence, as
     `redline.takes.rank.read_dropouts` reads them; an xrun that lost no frames is counted
@@ -44,7 +49,7 @@ def write_sidecar(
         "offset_source": round_trip.source,
         "complete": True,
     }
-    if quantum_now is not None:
+    if quantum_now is not None or quantum_unchecked:
         data |= {"quantum_changed": True, "quantum_now": quantum_now}
     sidecar = report.path.with_suffix(".json")
     sidecar.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")

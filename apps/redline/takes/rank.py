@@ -379,6 +379,12 @@ def read_dropouts(take: Path, rate: int) -> tuple[int | None, float | None, str 
             raise ValueError("not an object")
         if data.get("quantum_changed") is True:
             now = data.get("quantum_now")
+            if now is None:
+                return (
+                    None,
+                    None,
+                    "the graph's quantum could not be checked after it; dropouts unknown",
+                )
             return None, None, f"the graph's quantum changed to {now} during it; dropouts unknown"
         if data.get("complete") is False:
             error = data.get("error") or "no reason logged"

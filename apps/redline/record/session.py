@@ -38,6 +38,10 @@ class Engine(Protocol):
         """Peaks, counters and the graph's quantum now."""
         ...
 
+    def exited(self) -> bool:
+        """Whether the engine has ended."""
+        ...
+
 
 def quantum_warning(quantum: int) -> str | None:
     """The plain warning when the granted quantum cannot give a monitor under 10 ms."""
@@ -138,13 +142,16 @@ class Session:
         try:
             return self.engine.meters().recording
         except EngineError:
-            return False
+            # a live engine that missed one reply may still be finishing the take
+            return not self.engine.exited()
 
     def _log(self, report: TakeReport) -> None:
         try:
             now = self.engine.meters().quantum
         except EngineError:
-            write_sidecar(report, self.round_trip, self.quantum, None)
+            write_sidecar(
+                report, self.round_trip, self.quantum, quantum_unchecked=not self.engine.exited()
+            )
             raise
         moved = now if now is not None and now != self.quantum else None
         write_sidecar(report, self.round_trip, self.quantum, moved)

@@ -354,6 +354,9 @@ class QuantumEngine:
     def close(self):
         pass
 
+    def exited(self):
+        return False
+
     def meters(self):
         from redline.record.protocol import Meters
 
@@ -557,6 +560,9 @@ class DiesAfterStop(TakingEngine):
     def meters(self):
         raise EngineError("the engine stopped")
 
+    def exited(self):
+        return True
+
 
 def test_a_stopped_take_keeps_its_log_when_the_engine_dies_right_after(tmp_path):
     session = Session(DiesAfterStop(64), tmp_path, RoundTrip(300, "calibrated"), 64)
@@ -582,3 +588,56 @@ def test_discard_while_a_take_is_still_finishing_keeps_the_takes_before_it(tmp_p
     message = session.discard_last()
     assert first.exists()
     assert "finishing" in message
+
+
+class StalledMeters(LateEngine):
+    """Alive, but its meters reply fails once, right after the stop timed out."""
+
+    def __init__(self, second):
+        super().__init__(second)
+        self.fail_meters = False
+
+    def stop(self):
+        try:
+            return super().stop()
+        finally:
+            self.fail_meters = self.stops == 1
+
+    def meters(self):
+        if self.fail_meters:
+            self.fail_meters = False
+            raise EngineError("no meters reply within 5 s")
+        return super().meters()
+
+
+def test_a_failed_meters_read_on_a_live_engine_keeps_waiting_for_the_take(tmp_path):
+    take = (tmp_path / "take-01.wav").resolve()
+    engine = StalledMeters(late_report(take))
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError, match="did not finish"):
+        session.toggle()
+    assert session.pending == take
+    session.toggle()
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert data["complete"] is True
+
+
+class MetersFailAfterStop(TakingEngine):
+    """Alive, its stop answers, and the meters read after it fails."""
+
+    def meters(self):
+        raise EngineError("no meters reply within 5 s")
+
+
+def test_a_take_whose_quantum_could_not_be_checked_is_not_trusted(tmp_path):
+    session = Session(MetersFailAfterStop(64), tmp_path, RoundTrip(300, "calibrated"), 64)
+    engine = session.engine
+    engine.start((tmp_path / "take-01.wav").resolve(), 0)
+    session.current = engine.started[-1]
+    with pytest.raises(EngineError):
+        session.toggle()
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert data["quantum_changed"] is True and data["quantum_now"] is None
+    count, _, note = read_dropouts(tmp_path / "take-01.wav", RATE)
+    assert count is None and "could not be checked" in note
