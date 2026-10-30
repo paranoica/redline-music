@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from redline.core.private import write_private
 from redline.record.latency import RoundTrip
 from redline.record.protocol import TakeReport
 from redline.takes.rank import TAKE_NAME
@@ -12,6 +13,7 @@ from redline.takes.rank import TAKE_NAME
 def next_take(folder: Path) -> Path:
     """The path of the next take: one past the highest number in the folder, made if missing."""
     folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o700)
     numbers = [
         int(match[1])
         for p in folder.iterdir()
@@ -65,7 +67,7 @@ def write_sidecar(
     if quantum_now is not None or quantum_unchecked:
         data |= {"quantum_changed": True, "quantum_now": quantum_now}
     sidecar = report.path.with_suffix(".json")
-    sidecar.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    write_private(sidecar, json.dumps(data, indent=1) + "\n")
     return sidecar
 
 
@@ -86,7 +88,7 @@ def write_incomplete_sidecar(
         "beat_sha256": beat_sha256,
     }
     sidecar = take.with_suffix(".json")
-    sidecar.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    write_private(sidecar, json.dumps(data, indent=1) + "\n")
     return sidecar
 
 

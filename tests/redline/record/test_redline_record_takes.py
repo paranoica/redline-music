@@ -119,3 +119,15 @@ def test_the_file_hash_is_sha256_of_its_bytes_across_block_boundaries(tmp_path):
     assert file_sha256(path) == hashlib.sha256(data).hexdigest()
     path.write_bytes(b"")
     assert file_sha256(path) == hashlib.sha256(b"").hexdigest()
+
+
+def test_sidecars_and_the_takes_folder_are_the_owners_only(tmp_path):
+    folder = tmp_path / "song"
+    take = next_take(folder)
+    done = write_sidecar(report(take, []), RoundTrip(300, "calibrated"), 64)
+    broken = write_incomplete_sidecar(
+        folder / "take-02.wav", "no reply", RoundTrip(300, "calibrated"), 64
+    )
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert done.stat().st_mode & 0o777 == 0o600
+    assert broken.stat().st_mode & 0o777 == 0o600
