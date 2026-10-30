@@ -68,6 +68,10 @@ class EngineError(Exception):
     """The engine did not start, stopped, or refused a command; the message says why."""
 
 
+class EngineDesync(EngineError):
+    """A reply came late, unreadable or to another command: a stale one may still be queued."""
+
+
 class WrongRate(EngineError):
     """The engine refused a beat at beat_rate: the audio graph runs at rate."""
 

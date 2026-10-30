@@ -14,6 +14,7 @@ from typing import Any, TextIO
 
 import redline
 from redline.record.protocol import (
+    EngineDesync,
     EngineError,
     Meters,
     Startup,
@@ -166,7 +167,7 @@ class EngineProcess:
         try:
             line = self._lines.get(timeout=timeout)
         except queue.Empty:
-            raise EngineError(
+            raise EngineDesync(
                 f"the engine did not answer {command['cmd']} in {timeout:g} s"
             ) from None
         if line is None:
@@ -174,11 +175,11 @@ class EngineProcess:
         try:
             reply = json.loads(line)
         except json.JSONDecodeError:
-            raise EngineError(f"the engine said something unreadable: {line[:200]}") from None
+            raise EngineDesync(f"the engine said something unreadable: {line[:200]}") from None
         if reply.get("reply") == "error":
             raise EngineError(str(reply.get("error")))
         if reply.get("reply") != answer:
-            raise EngineError(f"the engine answered {reply.get('reply')!r} to {command['cmd']}")
+            raise EngineDesync(f"the engine answered {reply.get('reply')!r} to {command['cmd']}")
         return reply
 
     def start(self, path: Path, offset: int) -> TakeReport | str | None:
