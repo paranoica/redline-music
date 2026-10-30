@@ -7,7 +7,8 @@ import pytest
 import soundfile as sf
 from redline.record.latency import RoundTrip
 from redline.record.process import EngineError, EngineProcess, engine_argv, parse_startup
-from redline.record.session import Session, monitor_ms, quantum_warning
+from redline.record.protocol import WrongRate
+from redline.record.session import Session, budget_frames, monitor_ms, quantum_warning
 from redline.takes.rank import read_dropouts
 
 FAKE = [sys.executable, str(Path(__file__).with_name("fake_rec.py"))]
@@ -29,34 +30,89 @@ def engine(beat):
     process.close()
 
 
+def started(**changes):
+    """A startup line as redline-rec writes it (rec/src/protocol.rs, Startup)."""
+    line = {
+        "event": "started",
+        "client": "redline-rec",
+        "rate": 48000,
+        "quantum": 64,
+        "requested_quantum": 64,
+        "latency_request": "64/48000",
+        "capture_latency": [64, 96],
+        "playback_latency": [128, 192],
+        "round_trip": 288,
+        "round_trip_ms": 6.0,
+        "round_trip_source": "port_latency_estimate",
+        "under_10ms": True,
+        "monitor_budget": 192,
+        "mic": "a:capture_1",
+        "left": "b:playback_1",
+        "right": "b:playback_2",
+        "beat_frames": 96000,
+    }
+    line.update(changes)
+    return json.dumps(line)
+
+
 def test_the_startup_line_gives_rate_quantum_ports_and_the_port_estimate():
-    startup = parse_startup(
-        '{"ready": true, "rate": 48000, "quantum": 64, "devices": ["a:in", "b:out"],'
-        ' "latency": {"capture": [64, 96], "playback": [128, 192]}}'
-    )
+    startup = parse_startup(started())
     assert (startup.rate, startup.quantum) == (48000, 64)
-    assert startup.devices == ("a:in", "b:out")
+    assert startup.devices == ("a:capture_1", "b:playback_1", "b:playback_2")
     # the worst of each range, in and out
     assert startup.estimate == 96 + 192
 
 
-def test_a_startup_line_with_a_plain_round_trip_estimate():
-    startup = parse_startup('{"rate": 44100, "quantum": 128, "latency_estimate": 512}')
-    assert (startup.rate, startup.quantum, startup.estimate) == (44100, 128, 512)
-    assert startup.devices == ()
+def test_a_round_trip_passed_to_the_engine_is_not_taken_for_the_port_estimate():
+    startup = parse_startup(started(round_trip=500, round_trip_source="calibrated"))
+    assert startup.estimate == 96 + 192
 
 
-def test_a_startup_line_without_latency_has_no_estimate():
-    assert parse_startup('{"rate": 48000, "quantum": 64}').estimate is None
+def test_ports_left_unconnected_are_not_part_of_the_devices():
+    assert parse_startup(started(mic=None, left=None, right=None)).devices == ()
+    assert parse_startup(started(right=None)).devices == ("a:capture_1", "b:playback_1")
+
+
+def test_ports_that_report_no_latency_give_no_estimate():
+    line = started(capture_latency=[0, 0], playback_latency=[0, 0], round_trip=0)
+    assert parse_startup(line).estimate is None
 
 
 @pytest.mark.parametrize(
     "line",
-    ["not json", "[]", '{"quantum": 64}', '{"rate": 0, "quantum": 64}', '{"rate": 48000}'],
+    [
+        "not json",
+        "[]",
+        '{"rate": 48000, "quantum": 64, "latency_estimate": 512}',
+        started(event="ready"),
+        started(rate=0),
+        started(quantum=None),
+        started(round_trip_source="guessed"),
+        started(capture_latency=[64]),
+        started(playback_latency=None),
+    ],
 )
-def test_a_startup_line_without_rate_or_quantum_is_refused(line):
+def test_a_startup_line_not_in_the_engine_format_is_refused(line):
     with pytest.raises(EngineError):
         parse_startup(line)
+
+
+def test_the_wrong_rate_line_carries_the_graph_rate():
+    with pytest.raises(WrongRate) as refused:
+        parse_startup('{"event": "wrong_rate", "rate": 44100, "beat_rate": 48000}')
+    assert (refused.value.rate, refused.value.beat_rate) == (44100, 48000)
+    assert isinstance(refused.value, EngineError)
+
+
+def test_the_beat_is_the_engine_positional_argument(beat):
+    assert engine_argv(["redline-rec"], beat, 64) == ["redline-rec", str(beat), "--quantum", "64"]
+
+
+def test_a_beat_off_the_graph_rate_stops_the_launch_with_that_rate(beat, monkeypatch):
+    monkeypatch.setenv("FAKE_REC_RATE", "44100")
+    with pytest.raises(WrongRate) as refused:
+        EngineProcess.launch(engine_argv(FAKE, beat, 64))
+    assert (refused.value.rate, refused.value.beat_rate) == (44100, RATE)
 
 
 def test_an_error_reply_at_startup_is_the_engine_message():
@@ -68,7 +124,7 @@ def test_the_engine_starts_and_reports_what_it_was_granted(engine):
     assert engine.startup.rate == RATE
     assert engine.startup.quantum == 64
     assert engine.startup.estimate == 64 + 256
-    assert engine.startup.devices == ("fake:capture_1", "fake:playback_1")
+    assert engine.startup.devices == ("fake:capture_1", "fake:playback_1", "fake:playback_2")
 
 
 def test_no_jack_is_a_clear_engine_error(beat, monkeypatch):
@@ -197,3 +253,12 @@ def test_the_quantum_warning_starts_above_128():
 def test_monitor_latency_adds_the_rack_to_the_round_trip():
     assert monitor_ms(RoundTrip(240, "calibrated"), 240, 48000) == pytest.approx(10.0)
     assert monitor_ms(RoundTrip(None, "unknown"), 240, 48000) is None
+
+
+def test_only_a_calibrated_round_trip_sets_the_monitor_budget():
+    # 10 ms at 48 kHz is 480 frames
+    assert budget_frames(RoundTrip(300, "calibrated"), RATE) == 180
+    assert budget_frames(RoundTrip(600, "calibrated"), RATE) == 0
+    # the engine applies its own port-estimate budget when none is sent
+    assert budget_frames(RoundTrip(300, "estimate"), RATE) is None
+    assert budget_frames(RoundTrip(None, "unknown"), RATE) is None

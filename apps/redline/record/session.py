@@ -53,8 +53,11 @@ def monitor_ms(round_trip: RoundTrip, rack_latency: int, rate: int) -> float | N
 
 
 def budget_frames(round_trip: RoundTrip, rate: int) -> int | None:
-    """Frames the monitor rack may add within 10 ms; None when the round trip is unknown."""
-    if round_trip.frames is None:
+    """Frames the monitor rack may add within 10 ms of a calibrated round trip.
+
+    None otherwise: the engine then holds the rack to its own budget from the port estimate.
+    """
+    if round_trip.source != "calibrated" or round_trip.frames is None:
         return None
     return max(0, round(MONITOR_BUDGET_MS * rate / 1000) - round_trip.frames)
 

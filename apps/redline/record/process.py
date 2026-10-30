@@ -64,13 +64,12 @@ def build_binary(dsp_root: Path = DSP_ROOT) -> Path:
 
 
 def engine_argv(binary: Sequence[str], beat: Path, quantum: int) -> list[str]:
-    """The engine's command line: the beat, already at the graph rate, and the quantum asked."""
-    return [*binary, "--beat", str(beat), "--quantum", str(quantum)]
+    """The engine's command line: the beat, already at the graph rate, and the quantum asked.
 
-
-def engine_env(rate: int, quantum: int) -> dict[str, str]:
-    """The environment that asks PipeWire's JACK for this quantum."""
-    return {**os.environ, "PIPEWIRE_QUANTUM": f"{quantum}/{rate}"}
+    The engine asks PipeWire for the quantum itself, as a latency rather than a forced
+    quantum, so the environment is passed through unchanged.
+    """
+    return [*binary, str(beat), "--quantum", str(quantum)]
 
 
 def _pump(stream: TextIO, sink: Any) -> None:
@@ -100,6 +99,7 @@ class EngineProcess:
         """Start the engine and read its startup line.
 
         Raises:
+            WrongRate: The beat is not at the graph's rate, which the error carries.
             EngineError: The engine cannot be run, stopped before it was ready (no JACK, no
                 mic), or said nothing usable in time.
         """

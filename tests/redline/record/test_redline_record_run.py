@@ -10,6 +10,7 @@ from redline.engine.settings import Settings
 from redline.record import run, terminal
 from redline.record.latency import LatencyKey, round_trip
 from redline.record.process import EngineError
+from redline.record.protocol import WrongRate
 from redline.record.session import Session
 from redline.record.sweep import CalibrationError
 
@@ -66,13 +67,57 @@ def test_the_engine_ends_up_with_the_beat_at_the_rate_it_was_granted(
         engine.close()
 
 
+@pytest.fixture
+def launches(monkeypatch):
+    seen = []
+    launch = run.EngineProcess.launch
+
+    def counted(argv, env=None, **kwargs):
+        seen.append((list(argv), env))
+        return launch(argv, env, **kwargs)
+
+    monkeypatch.setattr(run.EngineProcess, "launch", counted)
+    return seen
+
+
+def test_a_graph_at_another_rate_restarts_the_engine_on_the_resampled_beat(
+    beat, tmp_path, monkeypatch, launches
+):
+    monkeypatch.setenv("FAKE_REC_RATE", "44100")
+    folder = tmp_path / "work" / "record"
+    engine = run.open_engine(FAKE, lambda rate: run.prepare_beat(beat, rate, folder))
+    engine.close()
+    assert engine.startup.rate == 44100
+    assert [argv[len(FAKE)] for argv, _ in launches] == [
+        str(folder / "beat-48000.wav"),
+        str(folder / "beat-44100.wav"),
+    ]
+    # the graph's quantum and rate are left to PipeWire and the engine
+    assert all(env is None or "PIPEWIRE_QUANTUM" not in env for _, env in launches)
+
+
+def test_a_graph_at_the_guessed_rate_starts_once(beat, tmp_path, launches):
+    engine = run.open_engine(FAKE, lambda rate: run.prepare_beat(beat, rate, tmp_path))
+    engine.close()
+    assert len(launches) == 1
+
+
+def test_a_second_rate_mismatch_is_an_engine_error(beat, tmp_path, monkeypatch, launches):
+    monkeypatch.setenv("FAKE_REC_RATE", "44100")
+    # a beat that stays at 48 kHz whatever rate is asked for
+    with pytest.raises(EngineError, match="44100") as refused:
+        run.open_engine(FAKE, lambda rate: run.prepare_beat(beat, RATE, tmp_path))
+    assert not isinstance(refused.value, WrongRate)
+    assert len(launches) == 2
+
+
 def test_the_latency_key_is_the_ports_rate_and_quantum(beat, tmp_path):
     engine = run.open_engine(FAKE, lambda rate: run.prepare_beat(beat, rate, tmp_path))
     try:
         key = run.latency_key(engine.startup)
     finally:
         engine.close()
-    assert key == LatencyKey(("fake:capture_1", "fake:playback_1"), RATE, 64)
+    assert key == LatencyKey(("fake:capture_1", "fake:playback_1", "fake:playback_2"), RATE, 64)
 
 
 def test_calibration_finds_the_engine_round_trip_and_stores_it_keyed(tmp_path, monkeypatch):

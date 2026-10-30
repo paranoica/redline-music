@@ -1,7 +1,9 @@
-"""A stand-in for the redline-rec binary: the same JSON-lines protocol, no audio device.
+"""A stand-in for the redline-rec binary: the same command line and JSON-lines protocol as
+apps/redline-dsp/rec, no audio device.
 
 Configured through the environment:
-FAKE_REC_RATE      the graph rate it reports (default 48000)
+FAKE_REC_RATE      the graph rate (default 48000); a beat at another rate gets the binary's
+                   wrong_rate line and exit 2
 FAKE_REC_FAIL      "nojack": say JACK is missing and exit 2 before the startup line
 FAKE_REC_DROPOUTS  JSON list of dropouts put in every take report
 FAKE_REC_TONE      "sweep:<frames>": a stopped take holds the beat delayed by that many frames;
@@ -93,24 +95,56 @@ class Fake:
         )
 
 
+def startup(rate, quantum, round_trip, connect, beat_frames):
+    capture, playback = [quantum, quantum], [128, 256]
+    source = "calibrated" if round_trip is not None else "port_latency_estimate"
+    if round_trip is None:
+        round_trip = capture[1] + playback[1]
+    whole = round(0.010 * rate)
+    ports = ("fake:capture_1", "fake:playback_1", "fake:playback_2") if connect else (None,) * 3
+    reply(
+        event="started",
+        client="redline-rec",
+        rate=rate,
+        quantum=quantum,
+        requested_quantum=quantum,
+        latency_request=f"{quantum}/{rate}",
+        capture_latency=capture,
+        playback_latency=playback,
+        round_trip=round_trip,
+        round_trip_ms=round_trip * 1000 / rate,
+        round_trip_source=source,
+        under_10ms=round_trip < whole,
+        monitor_budget=max(0, whole - round_trip),
+        mic=ports[0],
+        left=ports[1],
+        right=ports[2],
+        beat_frames=beat_frames,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--beat", required=True)
+    parser.add_argument("beat")
     parser.add_argument("--quantum", type=int, default=64)
+    parser.add_argument("--round-trip", type=int)
+    parser.add_argument("--no-connect", action="store_true")
     args = parser.parse_args()
     if os.environ.get("FAKE_REC_FAIL") == "nojack":
         print("redline-rec: cannot connect to JACK: is PipeWire running?", file=sys.stderr)
         sys.exit(2)
     rate = int(os.environ.get("FAKE_REC_RATE", "48000"))
+    beat = sf.info(args.beat)
+    beat_rate = beat.samplerate
+    if beat_rate != rate:
+        reply(event="wrong_rate", rate=rate, beat_rate=beat_rate)
+        print(
+            f"redline-rec: the beat is at {beat_rate} Hz and the audio graph runs at {rate} Hz",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     quantum = int(os.environ.get("FAKE_REC_QUANTUM", args.quantum))
-    reply(
-        ready=True,
-        rate=rate,
-        quantum=quantum,
-        latency={"capture": [quantum, quantum], "playback": [128, 256]},
-        devices=["fake:capture_1", "fake:playback_1"],
-        beat_rate=sf.info(args.beat).samplerate,
-    )
+    startup(rate, quantum, args.round_trip, not args.no_connect, beat.frames)
     fake = Fake(args.beat, rate)
     handlers = {
         "start": fake.start,

@@ -26,10 +26,9 @@ from redline.record.process import (
     EngineProcess,
     build_binary,
     engine_argv,
-    engine_env,
     find_binary,
 )
-from redline.record.protocol import Startup
+from redline.record.protocol import Startup, WrongRate
 from redline.record.sweep import Delay, exp_sweep, find_delay
 from redline.takes.rank import TakesError, find_takes
 
@@ -87,24 +86,19 @@ def open_engine(
         quantum: The quantum to ask for.
 
     Raises:
-        EngineError: The engine did not start, or changed rate between two starts.
+        EngineError: The engine did not start, or the graph changed rate between two starts.
     """
-    engine = EngineProcess.launch(
-        engine_argv(command, make_beat(GUESS_RATE), quantum), engine_env(GUESS_RATE, quantum)
-    )
-    rate = engine.startup.rate
-    if rate == GUESS_RATE:
-        return engine
-    engine.close()
-    engine = EngineProcess.launch(
-        engine_argv(command, make_beat(rate), quantum), engine_env(rate, quantum)
-    )
-    if engine.startup.rate != rate:
-        engine.close()
+    try:
+        return EngineProcess.launch(engine_argv(command, make_beat(GUESS_RATE), quantum))
+    except WrongRate as wrong:
+        rate = wrong.rate
+    try:
+        return EngineProcess.launch(engine_argv(command, make_beat(rate), quantum))
+    except WrongRate as again:
         raise EngineError(
-            f"the graph's rate moved from {rate} to {engine.startup.rate} Hz between two starts"
-        )
-    return engine
+            f"the beat was resampled to {rate} Hz, but the audio graph now runs at "
+            f"{again.rate} Hz; keep the graph at one rate and start again"
+        ) from None
 
 
 def latency_key(startup: Startup) -> LatencyKey:

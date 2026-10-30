@@ -48,7 +48,8 @@ class Meters:
 class Startup:
     """What the engine was granted: rate, quantum, its ports, and the ports' round trip.
 
-    estimate is the JACK ports' latency in and out, in frames; None when not reported.
+    estimate is the JACK ports' latency in and out, in frames; None when they report none.
+    devices are the ports the engine connected to: mic, left, right.
     """
 
     rate: int
@@ -61,51 +62,69 @@ class EngineError(Exception):
     """The engine did not start, stopped, or refused a command; the message says why."""
 
 
+class WrongRate(EngineError):
+    """The engine refused a beat at beat_rate: the audio graph runs at rate."""
+
+    def __init__(self, rate: int, beat_rate: int) -> None:
+        """Carry both rates."""
+        super().__init__(f"the beat is at {beat_rate} Hz and the audio graph runs at {rate} Hz")
+        self.rate = rate
+        self.beat_rate = beat_rate
+
+
 def _positive(value: Any, name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise EngineError(f"the engine's startup line has no usable {name}: {value!r}")
     return value
 
 
-def _estimate(data: dict[str, Any]) -> int | None:
-    if isinstance(data.get("latency_estimate"), int):
-        return int(data["latency_estimate"])
-    ranges = data.get("latency")
-    if not isinstance(ranges, dict):
-        return None
-    try:
-        # a JACK latency range is [min, max]; the worst of each way
-        return int(max(ranges["capture"])) + int(max(ranges["playback"]))
-    except (KeyError, TypeError, ValueError):
-        return None
+def _frames(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def parse_startup(line: str) -> Startup:
-    """Read the engine's first line: the rate and quantum granted, ports and latency.
+    """Read the engine's first line: the rate and quantum granted, its ports and latency.
 
-    Accepted: {"rate": N, "quantum": N} with either "latency_estimate": frames (the round
-    trip) or "latency": {"capture": [min, max], "playback": [min, max]}, and "devices": a
-    list of port names or an object of them. Anything else in the line is ignored.
+    The line is {"event": "started", ...} as rec/src/protocol.rs writes it. The estimate is
+    the ports' worst capture plus worst playback latency, as the engine computes it when no
+    round trip is passed in; the devices are the ports it connected to.
 
     Raises:
-        EngineError: The line is not such an object, or is the engine's error reply.
+        WrongRate: The engine refused the beat ({"event": "wrong_rate", ...}).
+        EngineError: The line is not the engine's startup line, or is its error reply.
     """
+    shown = line.strip()[:200]
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
-        raise EngineError(f"the engine did not start: {line.strip()[:200]}") from None
+        raise EngineError(f"the engine did not start: {shown}") from None
     if not isinstance(data, dict):
-        raise EngineError(f"the engine's startup line is not an object: {line.strip()[:200]}")
+        raise EngineError(f"the engine's startup line is not an object: {shown}")
     if data.get("reply") == "error":
         raise EngineError(str(data.get("error")))
-    devices = data.get("devices", [])
-    if isinstance(devices, dict):
-        devices = list(devices.values())
+    if data.get("event") == "wrong_rate":
+        raise WrongRate(
+            _positive(data.get("rate"), "rate"), _positive(data.get("beat_rate"), "beat rate")
+        )
+    if data.get("event") != "started":
+        raise EngineError(f"the engine's first line is not its startup line: {shown}")
+    ranges: list[Any] = [data.get("capture_latency"), data.get("playback_latency")]
+    if not all(isinstance(r, list) and len(r) == 2 and all(map(_frames, r)) for r in ranges):
+        raise EngineError(f"the engine's startup line has no usable port latency: {shown}")
+    source = data.get("round_trip_source")
+    if source not in ("port_latency_estimate", "calibrated") or not _frames(data.get("round_trip")):
+        raise EngineError(f"the engine's startup line has no usable round trip: {shown}")
+    if source == "port_latency_estimate":
+        estimate = data["round_trip"]
+    else:
+        estimate = ranges[0][1] + ranges[1][1]
+    ports = (data.get(name) for name in ("mic", "left", "right"))
     return Startup(
         _positive(data.get("rate"), "rate"),
         _positive(data.get("quantum"), "quantum"),
-        _estimate(data),
-        tuple(str(d) for d in devices) if isinstance(devices, list) else (),
+        # ports that report no latency say nothing about the round trip
+        estimate or None,
+        tuple(port for port in ports if isinstance(port, str) and port),
     )
 
 
