@@ -393,12 +393,12 @@ kbd {
   font-weight: 600;
 }
 
-#render {
+.deck__render {
   position: relative;
   overflow: hidden;
 }
 
-#render::after {
+.deck__render::after {
   content: "";
   position: absolute;
   left: 0;
@@ -411,7 +411,8 @@ kbd {
   transition: opacity var(--quick);
 }
 
-body[data-rendering="true"] #render::after {
+.studio-app[data-rendering="true"] .deck__render::after,
+.beat-app[data-rendering="true"] .deck__render::after {
   opacity: 1;
   animation: sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
@@ -471,10 +472,10 @@ body[data-rendering="true"] #render::after {
   }
 }
 
-body[data-state="loading"] .tools,
-body[data-state="loading"] .layout,
-body[data-state="failed"] .tools,
-body[data-state="failed"] .layout {
+.studio-app[data-state="loading"] .tools,
+.studio-app[data-state="loading"] .layout,
+.studio-app[data-state="failed"] .tools,
+.studio-app[data-state="failed"] .layout {
   opacity: 0.3;
   pointer-events: none;
 }
@@ -924,8 +925,8 @@ body[data-state="failed"] .layout {
   }
 }
 
-body[data-view="quick"] .panel[data-basic="false"],
-body[data-view="quick"] .is-detail {
+.studio-app[data-view="quick"] .panel[data-basic="false"],
+.studio-app[data-view="quick"] .is-detail {
   display: none;
 }
 
@@ -1566,7 +1567,8 @@ body[data-view="quick"] .is-detail {
     animation: none !important;
   }
 
-  body[data-rendering="true"] #render::after {
+  .studio-app[data-rendering="true"] .deck__render::after,
+  .beat-app[data-rendering="true"] .deck__render::after {
     transform: none;
   }
 }

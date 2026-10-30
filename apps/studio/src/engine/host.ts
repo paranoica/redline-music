@@ -6,6 +6,16 @@ import { EngineClient, type PortLike } from "./client.ts";
 export interface Host {
   ctx: AudioContext;
   client: EngineClient;
+  // stops the sound and closes the context with its worklet
+  dispose(): Promise<void>;
+}
+
+export async function closeGraph(ctx: AudioContext, node: AudioWorkletNode): Promise<void> {
+  node.port.onmessage = null;
+  node.onprocessorerror = null;
+  node.disconnect();
+  node.port.close();
+  if (ctx.state !== "closed") await ctx.close();
 }
 
 export async function startHost(rate: number, catalogue: Catalogue): Promise<Host> {
@@ -18,6 +28,15 @@ export async function startHost(rate: number, catalogue: Catalogue): Promise<Hos
     outputChannelCount: [2],
   });
   node.connect(ctx.destination);
+  try {
+    return await connect(ctx, node, catalogue);
+  } catch (error) {
+    await closeGraph(ctx, node).catch(() => {});
+    throw error;
+  }
+}
+
+async function connect(ctx: AudioContext, node: AudioWorkletNode, catalogue: Catalogue): Promise<Host> {
   const response = await fetch(new URL("redline_dsp.wasm", document.baseURI));
   if (!response.ok) throw new Error(`the engine's wasm did not load (${response.status})`);
   const bytes = await response.arrayBuffer();
@@ -48,5 +67,5 @@ export async function startHost(rate: number, catalogue: Catalogue): Promise<Hos
     },
   };
   client = new EngineClient(port, catalogue);
-  return { ctx, client };
+  return { ctx, client, dispose: () => closeGraph(ctx, node) };
 }

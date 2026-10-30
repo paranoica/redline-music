@@ -4,9 +4,11 @@
 
 import { formatNumber } from "../core/format.ts";
 import { History } from "../core/history.ts";
-import { byId, h } from "../ui/dom.ts";
-import { Refused, api, type BeatSession, type Caution, type Mark } from "./api.ts";
-import { startBeat, type BeatClient, type BeatPosition, type BeatResult } from "./client.ts";
+import { KeySurface, Scope } from "../core/lifecycle.ts";
+import type { Mount } from "../core/mount.ts";
+import { closeDismissables, h, insertMarkup, refsIn } from "../ui/dom.ts";
+import { Refused, createApi, type Api, type BeatSession, type Caution, type Mark } from "./api.ts";
+import { startBeat, type BeatClient, type BeatHost, type BeatPosition, type BeatResult } from "./client.ts";
 import { Checker, FrameLoop, Latest, type Outcome } from "./flow.ts";
 import { beatKey, type Zone } from "./keys.ts";
 import {
@@ -37,6 +39,7 @@ import {
   type PlayingRow,
   type Score,
 } from "./model.ts";
+import { beatMarkup } from "./markup.ts";
 import { Tables } from "./tables.ts";
 import { pathText, sourceText, warningText, whereText } from "./warnings.ts";
 import { Grid, type Selection } from "./ui/grid.ts";
@@ -48,36 +51,41 @@ import { SongStrip, marksByBar } from "./ui/strip.ts";
 const CHECK_WAIT_MS = 300;
 const RENDER_POLL_MS = 500;
 
-const ui = {
-  seed: byId<HTMLElement>("seed-name"),
-  status: byId<HTMLElement>("status"),
-  play: byId<HTMLButtonElement>("play"),
-  playFrom: byId<HTMLButtonElement>("play-from"),
-  loop: byId<HTMLButtonElement>("loop"),
-  pos: byId<HTMLElement>("pos"),
-  bars: byId<HTMLElement>("bars"),
-  tempo: byId<HTMLElement>("tempo"),
-  key: byId<HTMLElement>("key"),
-  meterSlot: byId<HTMLElement>("meter-slot"),
-  check: byId<HTMLElement>("check-state"),
-  undo: byId<HTMLButtonElement>("undo"),
-  redo: byId<HTMLButtonElement>("redo"),
-  render: byId<HTMLButtonElement>("render"),
-  save: byId<HTMLButtonElement>("save"),
-  issues: byId<HTMLElement>("issues"),
-  renderOut: byId<HTMLElement>("render-out"),
-  songSlot: byId<HTMLElement>("song-slot"),
-  main: byId<HTMLElement>("work-main"),
-  sideSlot: byId<HTMLElement>("side-slot"),
-};
-
 type Tone = "plain" | "busy" | "error" | "done";
 
-function status(text: string, tone: Tone = "plain", kind = ""): void {
-  if (ui.status.dataset.kind === "engine") return;
-  ui.status.textContent = text;
-  ui.status.dataset.tone = tone;
-  ui.status.dataset.kind = kind;
+function lookups(nodes: readonly Node[]) {
+  const ref = refsIn(nodes);
+  return {
+    seed: ref<HTMLElement>("seed-name"),
+    status: ref<HTMLElement>("status"),
+    play: ref<HTMLButtonElement>("play"),
+    playFrom: ref<HTMLButtonElement>("play-from"),
+    loop: ref<HTMLButtonElement>("loop"),
+    pos: ref<HTMLElement>("pos"),
+    bars: ref<HTMLElement>("bars"),
+    tempo: ref<HTMLElement>("tempo"),
+    key: ref<HTMLElement>("key"),
+    meterSlot: ref<HTMLElement>("meter-slot"),
+    check: ref<HTMLElement>("check-state"),
+    undo: ref<HTMLButtonElement>("undo"),
+    redo: ref<HTMLButtonElement>("redo"),
+    render: ref<HTMLButtonElement>("render"),
+    save: ref<HTMLButtonElement>("save"),
+    issues: ref<HTMLElement>("issues"),
+    renderOut: ref<HTMLElement>("render-out"),
+    songSlot: ref<HTMLElement>("song-slot"),
+    main: ref<HTMLElement>("work-main"),
+    sideSlot: ref<HTMLElement>("side-slot"),
+  };
+}
+
+type Ui = ReturnType<typeof lookups>;
+
+interface Parts {
+  root: HTMLElement;
+  ui: Ui;
+  api: Api;
+  scope: Scope;
 }
 
 // replaceChildren takes no nulls, unlike h()
@@ -96,6 +104,10 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 class Editor {
+  readonly #root: HTMLElement;
+  readonly #ui: Ui;
+  readonly #api: Api;
+  readonly #scope: Scope;
   readonly #session: BeatSession;
   readonly #client: BeatClient;
   readonly #ctx: AudioContext;
@@ -122,8 +134,8 @@ class Editor {
   #solo: ReadonlySet<string> = new Set();
   #glides: readonly Glide[] = [];
   #tableQueued = false;
-  readonly #checker: Checker<Score, Awaited<ReturnType<typeof api.check>>>;
-  readonly #loop = new FrameLoop((fn) => requestAnimationFrame(fn));
+  readonly #checker: Checker<Score, Awaited<ReturnType<Api["check"]>>>;
+  readonly #loop = new FrameLoop((fn) => this.#scope.requestFrame(fn));
   #errors: string[] = [];
   #faults: Faults = { rows: new Set(), notes: new Map(), steps: new Map() };
   #warnings: Caution[] = [];
@@ -137,7 +149,11 @@ class Editor {
   #renderUrl: string | null = null;
   #rendering = false;
 
-  constructor(session: BeatSession, client: BeatClient, ctx: AudioContext, tables: Tables | null) {
+  constructor(parts: Parts, session: BeatSession, client: BeatClient, ctx: AudioContext, tables: Tables | null) {
+    this.#root = parts.root;
+    this.#ui = parts.ui;
+    this.#api = parts.api;
+    this.#scope = parts.scope;
     this.#session = session;
     this.#client = client;
     this.#ctx = ctx;
@@ -152,10 +168,10 @@ class Editor {
 
     this.#live = new Latest((text) => this.#sendLive(text));
     this.#checker = new Checker({
-      run: (score) => api.check(score),
+      run: (score) => this.#api.check(score),
       apply: (score, outcome) => this.#applyCheck(score, outcome),
-      setTimer: (fn, wait) => window.setTimeout(fn, wait),
-      clearTimer: (id) => clearTimeout(id),
+      setTimer: (fn, wait) => this.#scope.setTimeout(fn, wait),
+      clearTimer: (id) => this.#scope.clearTimeout(id),
     });
     this.#strip = new SongStrip({
       select: (bar) => this.#select(bar),
@@ -193,15 +209,30 @@ class Editor {
         this.#live.replacePending(serialize(this.#heard()));
       },
     });
-    ui.songSlot.replaceWith(this.#strip.root);
-    ui.main.append(this.#grid.root, this.#lane.root);
-    ui.sideSlot.append(this.#side.root);
-    ui.meterSlot.replaceWith(this.#meter.root);
+    this.#ui.songSlot.replaceWith(this.#strip.root);
+    this.#ui.main.append(this.#grid.root, this.#lane.root);
+    this.#ui.sideSlot.append(this.#side.root);
+    this.#ui.meterSlot.replaceWith(this.#meter.root);
     this.#meter.show(0, 0, false);
-    ui.seed.textContent = `бит · сид ${session.seed}`;
+    this.#ui.seed.textContent = `бит · сид ${session.seed}`;
     if (session.events) this.#glides = glideCurves(session.events, session.score, session.instruments);
     this.#select(0);
     this.#wire();
+  }
+
+  dispose(): void {
+    if (this.#renderUrl) URL.revokeObjectURL(this.#renderUrl);
+    this.#renderUrl = null;
+    this.#client.onEnded = () => {};
+    this.#client.onFatal = () => {};
+  }
+
+  #status(text: string, tone: Tone = "plain", kind = ""): void {
+    const el = this.#ui.status;
+    if (el.dataset.kind === "engine") return;
+    el.textContent = text;
+    el.dataset.tone = tone;
+    el.dataset.kind = kind;
   }
 
   async start(): Promise<void> {
@@ -210,7 +241,7 @@ class Editor {
     await this.#loadZones();
     this.#queueTable();
     this.#scheduleCheck(0);
-    if (loaded.ok) status("Готово. Пробел — играть. Клик по шагу меняет его, звук слышен сразу.", "done");
+    if (loaded.ok) this.#status("Готово. Пробел — играть. Клик по шагу меняет его, звук слышен сразу.", "done");
   }
 
   // ---------- edits ----------
@@ -257,9 +288,9 @@ class Editor {
       const made = makeUnique(this.#score, at.section, pattern);
       if (this.#sel?.pattern === pattern) this.#sel = { ...this.#sel, pattern: made.name };
       this.#change(made.score, true);
-      status(`Секция «${this.#score.sections[at.section]?.name ?? ""}» теперь играет свою копию: ${made.name}. Другие секции остались на ${pattern}.`, "done");
+      this.#status(`Секция «${this.#score.sections[at.section]?.name ?? ""}» теперь играет свою копию: ${made.name}. Другие секции остались на ${pattern}.`, "done");
     } catch (error) {
-      status(`Копия не сделана: ${message(error)}`, "error");
+      this.#status(`Копия не сделана: ${message(error)}`, "error");
     }
   }
 
@@ -281,14 +312,14 @@ class Editor {
   #showLive(result: BeatResult, what: string): void {
     if (!result.ok) {
       this.#liveError = true;
-      status(`${what}: ${result.errors.slice(0, 3).join("; ")}`, "error", "live");
+      this.#status(`${what}: ${result.errors.slice(0, 3).join("; ")}`, "error", "live");
       return;
     }
     if (this.#liveError) {
       this.#liveError = false;
-      status(result.warnings.length ? `Звук снова идёт; ${result.warnings.join("; ")}` : "Звук снова идёт.", "done");
+      this.#status(result.warnings.length ? `Звук снова идёт; ${result.warnings.join("; ")}` : "Звук снова идёт.", "done");
     } else if (result.warnings.length) {
-      status(result.warnings.join("; "), "plain");
+      this.#status(result.warnings.join("; "), "plain");
     }
   }
 
@@ -297,7 +328,7 @@ class Editor {
   #queueTable(): void {
     if (this.#tableQueued || !this.#tables) return;
     this.#tableQueued = true;
-    requestAnimationFrame(() => {
+    this.#scope.requestFrame(() => {
       this.#tableQueued = false;
       const tables = this.#tables;
       if (!tables) return;
@@ -317,7 +348,7 @@ class Editor {
     this.#checker.schedule(() => this.#score, wait);
   }
 
-  #applyCheck(score: Score, outcome: Outcome<Awaited<ReturnType<typeof api.check>>>): void {
+  #applyCheck(score: Score, outcome: Outcome<Awaited<ReturnType<Api["check"]>>>): void {
     this.#checking = false;
     if (outcome.ok) {
       this.#warnings = outcome.value.warnings;
@@ -340,7 +371,7 @@ class Editor {
   }
 
   #showCheck(): void {
-    const el = ui.check;
+    const el = this.#ui.check;
     const e = this.#errors.length;
     const w = this.#warnings.length;
     this.#showSave();
@@ -360,7 +391,7 @@ class Editor {
   }
 
   #showIssues(): void {
-    const box = ui.issues;
+    const box = this.#ui.issues;
     if (!this.#errors.length && !this.#warnings.length) {
       box.hidden = true;
       box.replaceChildren();
@@ -481,25 +512,25 @@ class Editor {
     const drum = row && raw !== undefined && !isNoteRow(raw);
     this.#lane.show(drum && row ? { score, pattern: row.pattern, sound: row.sound, patternBar: row.patternBar, column: this.#column } : null);
     this.#side.show(score, this.#sel?.sound ?? null, this.#instruments, this.#session.libraries);
-    ui.undo.disabled = !this.#history.canUndo;
-    ui.redo.disabled = !this.#history.canRedo;
+    this.#ui.undo.disabled = !this.#history.canUndo;
+    this.#ui.redo.disabled = !this.#history.canRedo;
     const next = nextScoreName(this.#base) ?? "новый файл";
-    ui.save.disabled = !dirty;
+    this.#ui.save.disabled = !dirty;
     this.#showSave();
-    ui.save.textContent = dirty ? `Сохранить → ${next}` : "Сохранено";
-    ui.save.title = dirty ? `Проверить и сохранить как ${next}; ${this.#base} останется как был` : `Правок нет: открыт ${this.#base}`;
-    ui.render.title = dirty ? `Рендер сохранённого ${this.#base}: несохранённых правок в нём не будет` : `Рендер ${this.#base} через Python, точно как выйдет файл`;
-    document.body.dataset.dirty = String(dirty);
-    ui.tempo.textContent = `${formatNumber(score.bpm, 0)} BPM`;
-    ui.key.textContent = score.key;
-    ui.bars.textContent = String(songBars(score));
+    this.#ui.save.textContent = dirty ? `Сохранить → ${next}` : "Сохранено";
+    this.#ui.save.title = dirty ? `Проверить и сохранить как ${next}; ${this.#base} останется как был` : `Правок нет: открыт ${this.#base}`;
+    this.#ui.render.title = dirty ? `Рендер сохранённого ${this.#base}: несохранённых правок в нём не будет` : `Рендер ${this.#base} через Python, точно как выйдет файл`;
+    this.#root.dataset.dirty = String(dirty);
+    this.#ui.tempo.textContent = `${formatNumber(score.bpm, 0)} BPM`;
+    this.#ui.key.textContent = score.key;
+    this.#ui.bars.textContent = String(songBars(score));
   }
 
   // with errors the save is not the page's main action: the server would refuse it
   #showSave(): void {
     const blocked = !this.#checking && this.#errors.length > 0;
-    ui.save.classList.toggle("btn--signal", !blocked);
-        if (blocked && !ui.save.disabled) ui.save.title = `Не сохранится, пока есть ошибки (${this.#errors.length}): список под строкой статуса`;
+    this.#ui.save.classList.toggle("btn--signal", !blocked);
+        if (blocked && !this.#ui.save.disabled) this.#ui.save.title = `Не сохранится, пока есть ошибки (${this.#errors.length}): список под строкой статуса`;
   }
 
   // ---------- transport ----------
@@ -514,31 +545,30 @@ class Editor {
     c.onFatal = (reason) => {
       this.#playing = false;
       this.#showPlay();
-      ui.play.disabled = true;
-      ui.playFrom.disabled = true;
-      status(`Движок звука остановился: ${reason}. Обнови страницу; несохранённые правки пропадут — сначала сохрани.`, "error", "engine");
+      this.#ui.play.disabled = true;
+      this.#ui.playFrom.disabled = true;
+      this.#status(`Движок звука остановился: ${reason}. Обнови страницу; несохранённые правки пропадут — сначала сохрани.`, "error", "engine");
     };
-    ui.play.addEventListener("click", () => void this.#togglePlay());
-    ui.playFrom.addEventListener("click", () => void this.#playFrom(this.#bar));
-    ui.loop.addEventListener("click", () => {
+    this.#ui.play.addEventListener("click", () => void this.#togglePlay());
+    this.#ui.playFrom.addEventListener("click", () => void this.#playFrom(this.#bar));
+    this.#ui.loop.addEventListener("click", () => {
       this.#loopOn = !this.#loopOn;
-      ui.loop.setAttribute("aria-pressed", String(this.#loopOn));
+      this.#ui.loop.setAttribute("aria-pressed", String(this.#loopOn));
       void this.#applyLoop();
     });
-    ui.undo.addEventListener("click", () => this.#step(this.#history.undo()));
-    ui.redo.addEventListener("click", () => this.#step(this.#history.redo()));
-    ui.save.addEventListener("click", () => void this.#save());
-    ui.render.addEventListener("click", () => void this.#exactRender());
-    ui.check.addEventListener("click", () => {
-      if (ui.issues.hidden) return;
-      ui.issues.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-      const first = ui.issues.querySelector<HTMLElement>('.issue[data-kind="error"] .issue__go') ?? ui.issues.querySelector<HTMLElement>(".issue__go, summary");
-      (first ?? ui.issues).focus({ preventScroll: true });
+    this.#ui.undo.addEventListener("click", () => this.#step(this.#history.undo()));
+    this.#ui.redo.addEventListener("click", () => this.#step(this.#history.redo()));
+    this.#ui.save.addEventListener("click", () => void this.#save());
+    this.#ui.render.addEventListener("click", () => void this.#exactRender());
+    this.#ui.check.addEventListener("click", () => {
+      if (this.#ui.issues.hidden) return;
+      this.#ui.issues.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      const first = this.#ui.issues.querySelector<HTMLElement>('.issue[data-kind="error"] .issue__go') ?? this.#ui.issues.querySelector<HTMLElement>(".issue__go, summary");
+      (first ?? this.#ui.issues).focus({ preventScroll: true });
     });
-    document.addEventListener("keydown", (e) => this.#key(e));
-  }
+      }
 
-  #key(e: KeyboardEvent): void {
+  key(e: KeyboardEvent): void {
     const t = e.target as HTMLElement | null;
     const typing = !!t && (t.isContentEditable || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement);
     let zone: Zone = "other";
@@ -548,7 +578,7 @@ class Editor {
     const action = beatKey(e, zone, typing);
     if (!action) return;
     // a focused button takes Space as its own press, but steps and bars are played over
-    if (action.type === "play" && t instanceof HTMLButtonElement && t !== ui.play && zone === "other") return;
+    if (action.type === "play" && t instanceof HTMLButtonElement && t !== this.#ui.play && zone === "other") return;
     if (action.type === "play" && t?.closest(".drop__list, .adder")) return;
     switch (action.type) {
       case "play":
@@ -557,11 +587,11 @@ class Editor {
         return;
       case "undo":
         e.preventDefault();
-        ui.undo.click();
+        this.#ui.undo.click();
         return;
       case "redo":
         e.preventDefault();
-        ui.redo.click();
+        this.#ui.redo.click();
         return;
       case "bar": {
         e.preventDefault();
@@ -595,8 +625,9 @@ class Editor {
   }
 
   async #togglePlay(): Promise<void> {
-    if (this.#client.dead) return;
-    await this.#ctx.resume();
+    if (this.#client.dead || this.#scope.closed) return;
+    await this.#resume();
+    if (this.#scope.closed) return;
     this.#toggledAt = performance.now();
     if (this.#playing) {
       this.#playing = false;
@@ -611,10 +642,18 @@ class Editor {
     this.#tick();
   }
 
+  async #resume(): Promise<void> {
+    await this.#ctx.resume().catch((error: unknown) => {
+      if (!this.#scope.closed) throw error;
+    });
+  }
+
   async #playFrom(bar: number): Promise<void> {
     if (this.#client.dead) return;
+    if (this.#scope.closed) return;
     this.#select(bar);
-    await this.#ctx.resume();
+    await this.#resume();
+    if (this.#scope.closed) return;
     const frame = barFrame(this.#bar, this.#score.bpm, this.#rate);
     this.#frame = frame;
     this.#anchor = { frame, at: this.#ctx.currentTime };
@@ -630,7 +669,7 @@ class Editor {
 
   async #applyLoop(): Promise<void> {
     if (!this.#loopOn) {
-      ui.loop.title = "Крутить выбранную секцию по кругу";
+      this.#ui.loop.title = "Крутить выбранную секцию по кругу";
       await this.#client.loop(null);
       return;
     }
@@ -639,14 +678,14 @@ class Editor {
     if (!at || !s) return;
     const start = barFrame(at.start, this.#score.bpm, this.#rate);
     const end = barFrame(at.start + s.bars, this.#score.bpm, this.#rate);
-    ui.loop.title = `По кругу: «${s.name}», такты ${at.start + 1}–${at.start + s.bars}`;
+    this.#ui.loop.title = `По кругу: «${s.name}», такты ${at.start + 1}–${at.start + s.bars}`;
     await this.#client.loop({ start, end });
   }
 
   #showPlay(): void {
-    ui.play.setAttribute("aria-pressed", String(this.#playing));
-    ui.play.setAttribute("aria-label", this.#playing ? "Стоп (пробел)" : "Играть (пробел)");
-    document.body.dataset.playing = String(this.#playing);
+    this.#ui.play.setAttribute("aria-pressed", String(this.#playing));
+    this.#ui.play.setAttribute("aria-label", this.#playing ? "Стоп (пробел)" : "Играть (пробел)");
+    this.#root.dataset.playing = String(this.#playing);
   }
 
   #position(p: BeatPosition): void {
@@ -675,7 +714,7 @@ class Editor {
     const bpm = this.#score.bpm;
     const total = songBars(this.#score);
     const at = position(frame, bpm, this.#rate);
-    ui.pos.textContent = `${Math.min(at.bar, Math.max(1, total))}:${at.beat}`;
+    this.#ui.pos.textContent = `${Math.min(at.bar, Math.max(1, total))}:${at.beat}`;
     const bars = frame / (STEPS_PER_BAR * stepFrames(bpm, this.#rate));
     this.#strip.setPlayhead(this.#playing || frame > 0 ? bars : null, total);
     const bar = barAtFrame(frame, bpm, this.#rate);
@@ -689,16 +728,17 @@ class Editor {
     const libs = this.#session.libraries.filter((l) => l.fetched && l.zones.length);
     const missing = this.#session.libraries.filter((l) => !l.fetched);
     if (!libs.length) {
-      if (missing.length) status(`Сэмплер без звука: библиотека ${missing.map((l) => l.name).join(", ")} не скачана — команда в панели звука.`, "error");
+      if (missing.length) this.#status(`Сэмплер без звука: библиотека ${missing.map((l) => l.name).join(", ")} не скачана — команда в панели звука.`, "error");
       return;
     }
     const all = libs.flatMap((l) => l.zones);
     let done = 0;
     const problems: string[] = [];
     for (const zone of all) {
-      status(`Загружаю сэмплы: ${done + 1} из ${all.length}…`, "busy");
+      if (this.#scope.closed) return;
+      this.#status(`Загружаю сэмплы: ${done + 1} из ${all.length}…`, "busy");
       try {
-        const data = await api.zone(zone.library, zone.file);
+        const data = await this.#api.zone(zone.library, zone.file);
         const result = await this.#client.loadZone({
           library: zone.library,
           root: data.root,
@@ -714,38 +754,39 @@ class Editor {
       }
       done++;
     }
+    if (this.#scope.closed) return;
     const rebuilt = await this.#client.rebuildSamplers();
     if (!rebuilt.ok) problems.push(...rebuilt.errors);
-    if (problems.length) status(`Не все сэмплы загрузились: ${problems.slice(0, 3).join("; ")}`, "error");
+    if (problems.length) this.#status(`Не все сэмплы загрузились: ${problems.slice(0, 3).join("; ")}`, "error");
   }
 
   // ---------- save, render, marks ----------
 
   async #save(): Promise<void> {
     const score = this.#score;
-    ui.save.disabled = true;
-    status("Проверяю и сохраняю…", "busy");
+    this.#ui.save.disabled = true;
+    this.#status("Проверяю и сохраняю…", "busy");
     try {
-      const { file, warnings } = await api.save(score, this.#base);
+      const { file, warnings } = await this.#api.save(score, this.#base);
       this.#base = file;
       this.#savedKey = serialize(score);
       this.#warnings = warnings;
       this.#setErrors([], this.#score);
       this.#showCheck();
       this.#showIssues();
-      status(`Сохранено: ${file}.${warnings.length ? ` Предупреждений: ${warnings.length} — список выше.` : ""}`, "done");
+      this.#status(`Сохранено: ${file}.${warnings.length ? ` Предупреждений: ${warnings.length} — список выше.` : ""}`, "done");
     } catch (error) {
       if (error instanceof Refused && error.status === 422) {
         this.#checking = false;
         this.#setErrors(error.errors, this.#score);
         this.#showCheck();
         this.#showIssues();
-        status(`Не сохранено: ошибок ${error.errors.length}. Клик по ошибке покажет её место.`, "error");
-        ui.issues.querySelector<HTMLElement>(".issue__go")?.focus();
+        this.#status(`Не сохранено: ошибок ${error.errors.length}. Клик по ошибке покажет её место.`, "error");
+        this.#ui.issues.querySelector<HTMLElement>(".issue__go")?.focus();
       } else if (error instanceof Refused && error.status === 409) {
-        status(`Не сохранено: на диске есть сохранение новее ${this.#base}. Обнови страницу (правки отсюда пропадут).`, "error");
+        this.#status(`Не сохранено: на диске есть сохранение новее ${this.#base}. Обнови страницу (правки отсюда пропадут).`, "error");
       } else {
-        status(`Не сохранено: ${message(error)}`, "error");
+        this.#status(`Не сохранено: ${message(error)}`, "error");
       }
     } finally {
       this.#refresh();
@@ -754,16 +795,16 @@ class Editor {
 
   async #mark(bar: number, verdict: "good" | "bad", note: string): Promise<boolean> {
     try {
-      const mark = await api.mark(bar + 1, verdict, note, this.#base);
+      const mark = await this.#api.mark(bar + 1, verdict, note, this.#base);
       this.#marks = [...this.#marks, mark];
       this.#refresh();
-      status(`Такт ${bar + 1}: ${verdict === "good" ? "хорошо" : "плохо"} — отметка в ${mark.score}.`, "done");
+      this.#status(`Такт ${bar + 1}: ${verdict === "good" ? "хорошо" : "плохо"} — отметка в ${mark.score}.`, "done");
       return true;
     } catch (error) {
       if (error instanceof Refused && error.status === 409) {
-        status(`Отметка не легла: на диске есть сохранение новее ${this.#base}. Обнови страницу.`, "error");
+        this.#status(`Отметка не легла: на диске есть сохранение новее ${this.#base}. Обнови страницу.`, "error");
       } else {
-        status(`Отметка не легла: ${message(error)}`, "error");
+        this.#status(`Отметка не легла: ${message(error)}`, "error");
       }
       return false;
     }
@@ -773,23 +814,24 @@ class Editor {
     if (this.#rendering) return;
     const file = this.#base;
     this.#rendering = true;
-    document.body.dataset.rendering = "true";
-    ui.render.setAttribute("aria-busy", "true");
+    this.#root.dataset.rendering = "true";
+    this.#ui.render.setAttribute("aria-busy", "true");
     const began = performance.now();
-    const out = ui.renderOut;
+    const out = this.#ui.renderOut;
     const line = h("p", { class: "render-out__line" });
     out.replaceChildren(line);
     out.hidden = false;
     const dirtyNote = serialize(this.#score) !== this.#savedKey ? " Несохранённых правок в нём нет." : "";
     try {
-      let s = await api.render(file);
+      let s = await this.#api.render(file);
       while (s.state === "running") {
         line.textContent = `Рендер ${file}: ${Math.round((performance.now() - began) / 1000)} с…${dirtyNote}`;
-        await new Promise((r) => setTimeout(r, RENDER_POLL_MS));
-        s = await api.renderStatus();
+        await this.#scope.sleep(RENDER_POLL_MS);
+        if (this.#scope.closed) return;
+        s = await this.#api.renderStatus();
       }
       if (s.state !== "done") throw new Error(s.error ?? "рендер не закончился");
-      const blob = await api.renderFile("beat.wav");
+      const blob = await this.#api.renderFile("beat.wav");
       if (this.#renderUrl) URL.revokeObjectURL(this.#renderUrl);
       this.#renderUrl = URL.createObjectURL(blob);
       const seconds = s.seconds ?? 0;
@@ -806,37 +848,87 @@ class Editor {
         s.non_commercial?.length ? h("p", { class: "render-out__warn" }, `Не для коммерции: ${s.non_commercial.join(", ")}.`) : null,
         ),
       );
-      status(`Точный рендер ${file} готов. Сравнивай с живым звуком на одной громкости.`, "done");
+      this.#status(`Точный рендер ${file} готов. Сравнивай с живым звуком на одной громкости.`, "done");
     } catch (error) {
       line.textContent = `Рендер ${file} не прошёл: ${message(error)}`;
-      status(`Рендер не прошёл: ${message(error)}`, "error");
+      this.#status(`Рендер не прошёл: ${message(error)}`, "error");
     } finally {
       this.#rendering = false;
-      document.body.dataset.rendering = "false";
-      ui.render.removeAttribute("aria-busy");
+      this.#root.dataset.rendering = "false";
+      this.#ui.render.removeAttribute("aria-busy");
     }
   }
 }
 
-async function boot(): Promise<void> {
-  document.body.dataset.state = "loading";
-  status("Загружаю бит…", "busy");
-  const session = await api.session();
-  status("Запускаю движок…", "busy");
-  const [host, tables] = await Promise.all([
-    startBeat(session.rate),
-    Tables.start(session.rate).catch((error: unknown) => {
-      console.warn(`event tables are off: ${message(error)}`);
-      return null;
-    }),
-  ]);
-  const editor = new Editor(session, host.client, host.ctx, tables);
-  if (session.events_error) status(`Партитура не проходит проверку движка: ${session.events_error}`, "error");
-  await editor.start();
-  document.body.dataset.state = "ready";
-}
+export const mount: Mount = async (root, options) => {
+  const scope = new Scope();
+  const api = createApi({ base: options.base, token: options.token });
+  const nodes = insertMarkup(root, beatMarkup);
+  const flags = ["state", "playing", "rendering", "dirty"] as const;
+  root.classList.add("beat-app");
+  root.dataset.state = "loading";
+  root.dataset.playing = "false";
+  scope.add(() => {
+    root.classList.remove("beat-app");
+    if (!root.classList.length) root.removeAttribute("class");
+    for (const flag of flags) delete root.dataset[flag];
+    for (const node of nodes) node.remove();
+  });
+  const ui = lookups(nodes);
+  const status = (text: string, tone: Tone): void => {
+    ui.status.textContent = text;
+    ui.status.dataset.tone = tone;
+    ui.status.dataset.kind = "";
+  };
 
-boot().catch((error: unknown) => {
-  document.body.dataset.state = "failed";
-  status(`Редактор не загрузился: ${message(error)}`, "error");
-});
+  let editor: Editor | null = null;
+  const keys = new KeySurface(root.ownerDocument, (e) => editor?.key(e));
+  keys.setActive(options.active ?? true);
+  let host: BeatHost | null = null;
+
+  const boot = async (): Promise<void> => {
+    status("Загружаю бит…", "busy");
+    const session = await api.session();
+    status("Запускаю движок…", "busy");
+    const [started, tables] = await Promise.all([
+      startBeat(session.rate).then(
+        (made) => ({ made }),
+        (error: unknown) => ({ error }),
+      ),
+      Tables.start(session.rate).catch((error: unknown) => {
+        console.warn(`event tables are off: ${message(error)}`);
+        return null;
+      }),
+    ]);
+    if ("error" in started) throw started.error;
+    host = started.made;
+    if (scope.closed) {
+      await host.dispose();
+      host = null;
+      return;
+    }
+    editor = new Editor({ root, ui, api, scope }, session, host.client, host.ctx, tables);
+    if (session.events_error) status(`Партитура не проходит проверку движка: ${session.events_error}`, "error");
+    await editor.start();
+    if (!scope.closed) root.dataset.state = "ready";
+  };
+
+  void boot().catch((error: unknown) => {
+    if (scope.closed) return;
+    root.dataset.state = "failed";
+    status(`Редактор не загрузился: ${message(error)}`, "error");
+  });
+
+  return {
+    setActive: (on) => keys.setActive(on && !scope.closed),
+    dispose: async () => {
+      if (scope.closed) return;
+      keys.setActive(false);
+      api.close();
+      closeDismissables(root);
+      editor?.dispose();
+      scope.dispose();
+      await host?.dispose();
+    },
+  };
+};

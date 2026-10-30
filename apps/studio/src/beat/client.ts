@@ -2,6 +2,7 @@
 // the position and meters to subscribers, and the node made as the studio's host does.
 
 import type { PortLike } from "../engine/client.ts";
+import { closeGraph } from "../engine/host.ts";
 import type { BeatCommand, BeatPosition, BeatResult, FromBeat, Zone } from "./protocol.ts";
 
 export type { BeatPosition, BeatResult, Zone } from "./protocol.ts";
@@ -129,6 +130,8 @@ export interface BeatHost {
   ctx: AudioContext;
   node: AudioWorkletNode;
   client: BeatClient;
+  // stops the sound and closes the context with its worklet
+  dispose(): Promise<void>;
 }
 
 // the context runs at the rate the scores are rendered at, so the page hears the render
@@ -141,6 +144,15 @@ export async function startBeat(rate = 48000): Promise<BeatHost> {
     outputChannelCount: [2],
   });
   node.connect(ctx.destination);
+  try {
+    return await connect(ctx, node);
+  } catch (error) {
+    await closeGraph(ctx, node).catch(() => {});
+    throw error;
+  }
+}
+
+async function connect(ctx: AudioContext, node: AudioWorkletNode): Promise<BeatHost> {
   const response = await fetch(new URL("redline_dsp.wasm", document.baseURI));
   if (!response.ok) throw new Error(`the beat engine's wasm did not load (${response.status})`);
   const bytes = await response.arrayBuffer();
@@ -171,5 +183,5 @@ export async function startBeat(rate = 48000): Promise<BeatHost> {
     },
   };
   client = new BeatClient(port);
-  return { ctx, node, client };
+  return { ctx, node, client, dispose: () => closeGraph(ctx, node) };
 }

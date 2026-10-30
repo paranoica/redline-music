@@ -18,12 +18,12 @@ async function copyStatic() {
 
 const common = { bundle: true, format: "esm", target: "es2022", logLevel: "info", legalComments: "none" };
 const builds = [
-  { ...common, entryPoints: ["src/main.ts"], outfile: "dist/app.js", platform: "browser" },
+  { ...common, entryPoints: ["src/page.ts"], outfile: "dist/app.js", platform: "browser" },
   // the emscripten glue has a node branch that imports node: modules; it never runs in a worklet
   { ...common, entryPoints: ["src/worklet/processor.ts"], outfile: "dist/worklet.js", platform: "browser", external: ["node:*"] },
   { ...common, entryPoints: ["src/worklet/beat-processor.ts"], outfile: "dist/beat-worklet.js", platform: "browser", external: ["node:*"] },
   // the page makes event tables on its own copy of the wasm, through the same glue
-  { ...common, entryPoints: ["src/beat/main.ts"], outfile: "dist/beat.js", platform: "browser", external: ["node:*"] },
+  { ...common, entryPoints: ["src/beat/page.ts"], outfile: "dist/beat.js", platform: "browser", external: ["node:*"] },
   { ...common, entryPoints: ["src/styles/main.css"], outfile: "dist/styles.css", format: undefined },
   { ...common, entryPoints: ["src/styles/beat.css"], outfile: "dist/beat.css", format: undefined },
 ];

@@ -36,14 +36,39 @@ export function icon(d: string, className = "icon"): SVGSVGElement {
   return svg;
 }
 
-export function byId<T extends HTMLElement>(id: string): T {
-  const node = document.getElementById(id);
-  if (!node) throw new Error(`the page has no #${id}`);
-  return node as T;
+// puts the markup into root; returns the nodes made, to look inside and to take out again
+export function insertMarkup(root: HTMLElement, html: string): ChildNode[] {
+  const template = root.ownerDocument.createElement("template");
+  template.innerHTML = html;
+  const nodes = [...template.content.childNodes];
+  root.append(template.content);
+  return nodes;
+}
+
+// finds [data-ref=name] among the inserted nodes only
+export function refsIn(nodes: readonly Node[]): <T extends HTMLElement>(name: string) => T {
+  return <T extends HTMLElement>(name: string): T => {
+    const selector = `[data-ref="${name}"]`;
+    for (const node of nodes) {
+      if (node.nodeType !== 1) continue;
+      const element = node as Element;
+      const hit = element.matches(selector) ? element : element.querySelector(selector);
+      if (hit) return hit as T;
+    }
+    throw new Error(`the markup has no [data-ref=${name}]`);
+  };
+}
+
+const openPanels = new Set<{ opener: HTMLElement; finish: () => void }>();
+
+// closes the panels opened from inside root, so their document listeners go
+export function closeDismissables(root: HTMLElement): void {
+  for (const panel of [...openPanels]) if (root.contains(panel.opener)) panel.finish();
 }
 
 // closes on Escape and on a press outside; returns the closer
 export function dismissable(panel: HTMLElement, opener: HTMLElement, close: () => void): () => void {
+  const doc = opener.ownerDocument;
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.stopPropagation();
@@ -55,13 +80,16 @@ export function dismissable(panel: HTMLElement, opener: HTMLElement, close: () =
     const target = e.target as Node;
     if (!panel.contains(target) && !opener.contains(target)) finish();
   };
+  const entry = { opener, finish: () => finish() };
   const finish = () => {
-    document.removeEventListener("keydown", onKey, true);
-    document.removeEventListener("pointerdown", onPress, true);
+    openPanels.delete(entry);
+    doc.removeEventListener("keydown", onKey, true);
+    doc.removeEventListener("pointerdown", onPress, true);
     close();
   };
-  document.addEventListener("keydown", onKey, true);
-  document.addEventListener("pointerdown", onPress, true);
+  openPanels.add(entry);
+  doc.addEventListener("keydown", onKey, true);
+  doc.addEventListener("pointerdown", onPress, true);
   return finish;
 }
 

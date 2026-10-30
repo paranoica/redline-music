@@ -32,13 +32,23 @@ export class Waveform {
   #loopOn = true;
   #dirty = true;
   #frame = 0;
+  readonly #resize: ResizeObserver;
+  #disposed = false;
 
   constructor(root: HTMLElement, canvas: HTMLCanvasElement, on: WaveformEvents) {
     this.#root = root;
     this.#canvas = canvas;
     this.#on = on;
-    new ResizeObserver(() => this.#invalidate()).observe(canvas);
+    this.#resize = new ResizeObserver(() => this.#invalidate());
+    this.#resize.observe(canvas);
     this.#wire();
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    this.#resize.disconnect();
+    cancelAnimationFrame(this.#frame);
+    this.#frame = 0;
   }
 
   setAudio(x: Float32Array, rate: number): void {
@@ -80,7 +90,7 @@ export class Waveform {
 
   #invalidate(): void {
     this.#dirty = true;
-    if (!this.#frame) this.#frame = requestAnimationFrame(() => this.#draw());
+    if (!this.#frame && !this.#disposed) this.#frame = requestAnimationFrame(() => this.#draw());
   }
 
   #toSeconds(clientX: number): number {

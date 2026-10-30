@@ -46,13 +46,23 @@ export class LanesView {
   #loop: Loop = { start: 0, end: 0 };
   #loopOn = true;
   #frame = 0;
+  readonly #resize: ResizeObserver;
+  #disposed = false;
 
   constructor(root: HTMLElement, effects: readonly EffectSpec[], duration: number, on: Handlers<UserEffect[]>) {
     this.#root = root;
     this.#specs = new Map(effects.map((e) => [e.effect, e]));
     this.#duration = Math.max(1e-3, duration);
     this.#on = on;
-    new ResizeObserver(() => this.#invalidate()).observe(root);
+    this.#resize = new ResizeObserver(() => this.#invalidate());
+    this.#resize.observe(root);
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+    this.#resize.disconnect();
+    cancelAnimationFrame(this.#frame);
+    this.#frame = 0;
   }
 
   show(rack: readonly UserEffect[]): void {
@@ -243,7 +253,7 @@ export class LanesView {
   }
 
   #invalidate(): void {
-    if (!this.#frame) this.#frame = requestAnimationFrame(() => this.#draw());
+    if (!this.#frame && !this.#disposed) this.#frame = requestAnimationFrame(() => this.#draw());
   }
 
   #draw(): void {

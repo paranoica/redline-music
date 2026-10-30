@@ -1097,10 +1097,10 @@ summary.issues__title {
   max-width: calc(100vw - 48px);
 }
 
-body.beat[data-state="loading"] .work,
-body.beat[data-state="loading"] .song,
-body.beat[data-state="failed"] .work,
-body.beat[data-state="failed"] .song {
+.beat-app[data-state="loading"] .work,
+.beat-app[data-state="loading"] .song,
+.beat-app[data-state="failed"] .work,
+.beat-app[data-state="failed"] .song {
   opacity: 0.3;
   pointer-events: none;
 }
