@@ -53,7 +53,8 @@ export function takeRows(ranking: Ranking): TakeRow[] {
   return ranking.takes.map((t: RankedTake) => {
     const m = t.metrics;
     return {
-      name: t.name,
+      // the server's take routes take the file name; the ranking names takes by their stem
+      name: t.file.split(/[\\/]/).pop() ?? t.name,
       label: takeLabel(t.name),
       place: t.rank === null ? dash : String(t.rank),
       points: ranking.ranked ? pointsWord(t.total) : dash,
