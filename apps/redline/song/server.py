@@ -20,8 +20,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import numpy as np
+from scipy.signal import resample_poly
+
 from redline.beat.server import BEAT_MAX_BODY, BeatStudio, beat_get, beat_post
-from redline.core.audio import AudioError, decode
+from redline.core.audio import AudioError, Decoded, decode
 from redline.core.private import make_private_dir, write_private
 from redline.engine.settings import Settings, from_dict, to_dict
 from redline.record.process import EngineError
@@ -150,6 +153,23 @@ def default_assets(lyrics: Path, build: Path) -> tuple[Any, Any, Any]:
         return stresser()(text)
 
     return index, profile, mark
+
+
+# the beat sits under the voice when a take is auditioned
+BEAT_UNDER_DB = -6.0
+
+
+def _over_beat(take: np.ndarray, beat: Decoded, rate: int) -> np.ndarray:
+    """The take with the beat under it from frame 0, as the engine lined them up."""
+    under = beat.samples
+    if beat.rate != rate:
+        divisor = math.gcd(rate, beat.rate)
+        under = resample_poly(under, rate // divisor, beat.rate // divisor, axis=0)
+    mixed = take.copy()
+    count = min(len(take), len(under))
+    mixed[:count] += under[:count] * 10 ** (BEAT_UNDER_DB / 20)
+    peak = float(np.max(np.abs(mixed)))
+    return mixed / peak * 0.99 if peak > 0.99 else mixed
 
 
 def job_argv(kind: str, name: str, seed: int, result: Path) -> list[str]:
@@ -686,11 +706,19 @@ class SongApp:
             path = model.take_file(song, name or "", self.root)
         except model.SongError as error:
             raise ApiError(HTTPStatus.NOT_FOUND, str(error), "no_take") from None
+        over = _one(query, "with")
+        if over not in (None, "beat"):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "with is beat or nothing")
         try:
             decoded = decode(path)
-        except AudioError as error:
+            samples = decoded.samples
+            if over == "beat":
+                samples = _over_beat(
+                    samples, decode(model.beat_file(song, self.root)), decoded.rate
+                )
+        except (AudioError, model.SongError) as error:
             raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
-        return reply_bytes(HTTPStatus.OK, wav_bytes(decoded.samples, decoded.rate), "audio/wav")
+        return reply_bytes(HTTPStatus.OK, wav_bytes(samples, decoded.rate), "audio/wav")
 
     def get_jobs(self) -> Reply:
         """The song's jobs and the beat render, as a list."""

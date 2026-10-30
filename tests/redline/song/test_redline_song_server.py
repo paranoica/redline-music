@@ -611,3 +611,24 @@ def test_a_job_command_keeps_a_dash_name_a_name():
     argv = job_argv("auto", "-h", 7, Path("/r/out.json"))
     args = build_parser().parse_args(argv[argv.index("song") :])
     assert (args.name, args.kind, args.seed, args.result) == ("-h", "auto", 7, Path("/r/out.json"))
+
+
+def test_a_take_plays_over_the_beat_from_its_first_frame(made, root):
+    rate = 8000
+    beat = np.zeros((2 * rate, 2), dtype=np.float32)
+    beat[0, :], beat[rate // 2, :] = 0.8, 0.8
+    sf.write(root / "input" / "beat.wav", beat, rate)
+    take = np.zeros(rate, dtype=np.float32)
+    take[100] = 0.9
+    sf.write(root / "input" / "takes" / NAME / "take-01.wav", take, rate)
+    status, _, body = call(made, "GET", "/api/takes/audio?name=take-01.wav&with=beat")
+    assert status == 200
+    mixed, got = sf.read(io.BytesIO(body), always_2d=True)
+    assert got == rate and len(mixed) == rate
+    assert np.max(np.abs(mixed)) <= 1.0
+    # the beat's clicks at 0 and 0.5 s and the take's at frame 100, nothing else
+    loud = sorted(set(np.flatnonzero(np.abs(mixed[:, 0]) > 0.05)))
+    assert loud == [0, 100, rate // 2]
+    alone = sf.read(io.BytesIO(call(made, "GET", "/api/takes/audio?name=take-01.wav")[2]))[0]
+    assert np.flatnonzero(np.abs(np.atleast_2d(alone.T)[0]) > 0.05).tolist() == [100]
+    assert call(made, "GET", "/api/takes/audio?name=take-01.wav&with=other")[0] == 400
