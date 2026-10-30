@@ -233,6 +233,16 @@ def test_the_new_calls_refuse_a_foreign_host(server, method, path, body, host):
     assert call(server, method, path, body, host=host)[0] == 403
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [b'{"settings": {"vocal_db": 1' + b"0" * 400 + b"}}", b"[" * 60_000],
+    ids=["huge number", "deep nesting"],
+)
+def test_the_analysis_answers_400_to_json_python_cannot_hold(server, raw):
+    status, _, data = call(server, "POST", "/api/analysis", raw)
+    assert status == 400 and json.loads(data)["error"]
+
+
 def test_the_analysis_takes_only_small_json(server):
     plain = {"Content-Type": "text/plain"}
     assert call(server, "POST", "/api/analysis", b"{}", headers=plain)[0] == 415

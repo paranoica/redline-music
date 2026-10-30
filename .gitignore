@@ -64,3 +64,6 @@ spectrogram*.png
 *.npy
 *.npz
 /.claude/cache/
+
+# browser automation snapshots of local pages
+/.playwright-mcp/

@@ -52,6 +52,7 @@ def test_every_setting_has_a_spec_with_its_default_in_range():
         {"bitcrush_bits": 4.5},
         {"voice_octave": 0.5},
         {"vocal_db": True},
+        {"vocal_db": 10**400},
         {"volume": 3},
     ],
 )

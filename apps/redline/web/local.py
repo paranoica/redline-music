@@ -162,7 +162,7 @@ class LocalHandler(BaseHTTPRequestHandler):
             raise BadRequest(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "the body is too large")
         try:
             body = json.loads(self.rfile.read(int(length)))
-        except ValueError as error:
+        except (ValueError, RecursionError) as error:
             raise BadRequest(HTTPStatus.BAD_REQUEST, "the body is not JSON") from error
         if not isinstance(body, dict):
             raise BadRequest(HTTPStatus.BAD_REQUEST, "the body is a JSON object")

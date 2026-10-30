@@ -165,6 +165,11 @@ def test_params_and_points_at_the_ends_of_their_ranges_are_allowed():
             "seconds from 0",
         ),
         (
+            v2({"effect": "gain", "automation": [{"param": "db", "points": [[10**400, 0]]}]}),
+            "seconds from 0",
+        ),
+        (v2({"effect": "gain", "params": {"db": -(10**400)}}), "db takes a number"),
+        (
             v2({"effect": "gain", "automation": [{"param": "db", "points": [[0]]}]}),
             r"\[seconds, value\]",
         ),

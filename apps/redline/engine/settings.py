@@ -544,13 +544,23 @@ SPECS = {key: replace(spec, basic=key in BASIC) for key, spec in SPECS.items()}
 KINDS: dict[str, type] = {f.name: f.type for f in fields(Settings) if isinstance(f.type, type)}
 
 
+def _is_number(raw: Any) -> bool:
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return False
+    try:
+        return math.isfinite(raw)
+    except OverflowError:
+        # an int too large for a float
+        return False
+
+
 def _value(key: str, raw: Any) -> Any:
     spec, kind = SPECS[key], KINDS[key]
     if kind is bool:
         if not isinstance(raw, bool):
             raise ValueError(f"{key} takes true or false")
         return raw
-    if isinstance(raw, bool) or not isinstance(raw, int | float) or not math.isfinite(raw):
+    if not _is_number(raw):
         raise ValueError(f"{key} takes a number")
     if not spec.low <= raw <= spec.high:
         raise ValueError(f"{key} takes {spec.low:g} to {spec.high:g}")
@@ -564,7 +574,7 @@ def _value(key: str, raw: Any) -> Any:
 
 
 def _number(what: str, raw: Any, low: float, high: float) -> float:
-    if isinstance(raw, bool) or not isinstance(raw, int | float) or not math.isfinite(raw):
+    if not _is_number(raw):
         raise ValueError(f"{what} takes a number")
     if not low <= raw <= high:
         raise ValueError(f"{what} takes {low:g} to {high:g}")
@@ -613,11 +623,7 @@ def _points(what: str, spec: dict[str, Any], points: list[Any]) -> tuple[tuple[f
         if not isinstance(point, list) or len(point) != 2:
             raise ValueError(f"{what}: a point is [seconds, value]")
         seconds = point[0]
-        if (
-            isinstance(seconds, bool)
-            or not isinstance(seconds, int | float)
-            or not 0 <= seconds < math.inf
-        ):
+        if not _is_number(seconds) or seconds < 0:
             raise ValueError(f"{what}: points take seconds from 0, not {seconds!r}")
         if out and seconds < out[-1][0]:
             raise ValueError(f"{what}: points go in order of time")
