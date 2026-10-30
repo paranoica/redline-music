@@ -855,7 +855,7 @@
   gap: var(--s2);
 }
 
-.bar {
+.distbar {
   position: relative;
   height: 4px;
   background: var(--well);
@@ -863,7 +863,7 @@
   overflow: hidden;
 }
 
-.bar::after {
+.distbar::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -1061,7 +1061,7 @@
   color: var(--muted);
 }
 
-.pad__dist .bar {
+.pad__dist .distbar {
   grid-column: 1 / -1;
 }
 
@@ -1777,4 +1777,9 @@
 
 .sdeck__jobs .link {
   padding: 0;
+}
+
+/* a mounted app keeps its own subtitle; the page already carries the brand */
+.surface .deck__brand .brand {
+  display: none;
 }

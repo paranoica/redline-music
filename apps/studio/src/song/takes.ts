@@ -261,7 +261,7 @@ export function createTakesStation(ctx: Ctx, lyric: StationView): StationView {
           { "data-take": row.name, "data-playing": String(player.name === row.name) },
           h("td", { class: "takes__c-take" }, h("span", { class: "takes__row-take" }, playButton(row.label, player.name === row.name, () => void player.toggle(row.name)), h("span", { class: "takes__name" }, row.label), h("span", { class: "takes__progress", "aria-hidden": "true", style: "transform: scaleX(0)" }))),
           h("td", { class: "takes__c-place" }, h("span", { class: "takes__place" }, row.place)),
-          h("td", { class: "takes__c-score" }, h("span", { class: "takes__score" }, h("span", { class: "num" }, row.points), h("span", { class: "bar", style: `--v: ${row.bar.toFixed(2)}`, "aria-hidden": "true" }))),
+          h("td", { class: "takes__c-score" }, h("span", { class: "takes__score" }, h("span", { class: "num" }, row.points), h("span", { class: "distbar", style: `--v: ${row.bar.toFixed(2)}`, "aria-hidden": "true" }))),
           h("td", { class: "num takes__c-m" }, row.timing),
           h("td", { class: "num takes__c-m" }, row.clips),
           h("td", { class: "num takes__c-m" }, row.noise),

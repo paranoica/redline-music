@@ -121,7 +121,7 @@ export function createPads(onSelect: (index: number) => void): PadsView {
           { class: "pad__dist" },
           h("span", {}, "до референсов ", h("span", { class: "num" }, pad.distance === null ? "—" : decimal(pad.distance))),
           pad.relation !== null && pad.kept ? h("span", { class: "pad__kept" }, "оставлен") : near,
-          pad.bar === null ? null : h("span", { class: "bar", style: `--v: ${pad.bar.toFixed(2)}`, "aria-hidden": "true" }),
+          pad.bar === null ? null : h("span", { class: "distbar", style: `--v: ${pad.bar.toFixed(2)}`, "aria-hidden": "true" }),
         ),
       );
       button.addEventListener("click", () => onSelect(pad.index));
