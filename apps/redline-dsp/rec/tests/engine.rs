@@ -216,6 +216,47 @@ fn a_rack_over_the_budget_loses_effects_from_its_end() {
     assert!(err.unwrap_err().contains("nope"));
 }
 
+#[test]
+fn a_rack_sent_without_a_budget_is_held_to_the_default_one_and_a_sent_budget_wins() {
+    let (_e, mut c) = setup(48000);
+    let rack: serde_json::Value = serde_json::from_str(
+        r#"{"effects": [
+            {"effect": "limiter", "params": {"lookahead": 1}},
+            {"effect": "limiter", "params": {"lookahead": 2}}
+        ]}"#,
+    )
+    .unwrap();
+    let set = |c: &mut Control, budget: Option<usize>| {
+        c.handle(Command::SetRack {
+            rack: rack.clone(),
+            budget,
+        })
+    };
+    // no default yet: the whole rack plays
+    assert_eq!(
+        set(&mut c, None),
+        Reply::SetRack {
+            latency: 144,
+            dropped: vec![]
+        }
+    );
+    c.set_default_budget(Some(100));
+    assert_eq!(
+        set(&mut c, None),
+        Reply::SetRack {
+            latency: 48,
+            dropped: vec!["limiter".into()]
+        }
+    );
+    assert_eq!(
+        set(&mut c, Some(47)),
+        Reply::SetRack {
+            latency: 0,
+            dropped: vec!["limiter".into(), "limiter".into()]
+        }
+    );
+}
+
 /// Cycles of 64 frames at the counter `start + at` for each `at`, over `mic` indexed by the
 /// counter from `start`; the take with its report.
 fn record(

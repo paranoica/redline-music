@@ -53,3 +53,24 @@ fn a_rack_without_latency_fits_a_budget_of_zero() {
     r.reset(48000.0).unwrap();
     assert!(fit_latency(&mut r, 0).is_empty());
 }
+
+#[test]
+fn the_monitor_gets_ten_ms_less_the_round_trip() {
+    use redline_rec::budget::monitor_budget;
+    assert_eq!(monitor_budget(48000, 0), 480);
+    assert_eq!(monitor_budget(48000, 256), 224);
+    assert_eq!(monitor_budget(48000, 479), 1);
+    assert_eq!(monitor_budget(48000, 480), 0);
+    // a round trip over 10 ms leaves nothing, not a wrapped number
+    assert_eq!(monitor_budget(48000, 600), 0);
+    assert_eq!(monitor_budget(44100, 0), 441);
+    assert_eq!(monitor_budget(96000, 128), 832);
+}
+
+#[test]
+fn the_round_trip_estimate_is_the_longest_capture_plus_the_longest_playback() {
+    use redline_rec::budget::round_trip_estimate;
+    assert_eq!(round_trip_estimate((64, 64), (128, 128)), 192);
+    assert_eq!(round_trip_estimate((32, 64), (96, 160)), 224);
+    assert_eq!(round_trip_estimate((0, 0), (0, 0)), 0);
+}

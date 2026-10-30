@@ -443,6 +443,7 @@ pub struct Control {
     recording: bool,
     stopping: bool,
     rack_latency: usize,
+    default_budget: Option<usize>,
 }
 
 /// The two sides of an engine at `config.rate`, monitoring the mic dry until a rack is set.
@@ -501,6 +502,7 @@ pub fn engine(config: Config) -> Result<(Engine, Control), String> {
         recording: false,
         stopping: false,
         rack_latency: 0,
+        default_budget: None,
     };
     Ok((engine, control))
 }
@@ -546,6 +548,11 @@ impl Control {
         self.racks_out += 1;
         self.rack_latency = latency;
         Ok((latency, dropped))
+    }
+
+    /// The budget a `set_rack` command without one is held to.
+    pub fn set_default_budget(&mut self, budget: Option<usize>) {
+        self.default_budget = budget;
     }
 
     /// Records the mic into a new file at `path` from the next period on, beat frame 0 at
@@ -633,13 +640,12 @@ impl Control {
                 self.start(&path, offset).map(|()| Reply::Start { path })
             }
             Command::Stop => self.stop().map(|take| Reply::Stop { take }),
-            Command::SetRack { rack, budget } => {
-                self.set_rack_json(&rack.to_string(), budget)
-                    .map(|(latency, dropped)| Reply::SetRack {
-                        latency,
-                        dropped: dropped.into_iter().map(String::from).collect(),
-                    })
-            }
+            Command::SetRack { rack, budget } => self
+                .set_rack_json(&rack.to_string(), budget.or(self.default_budget))
+                .map(|(latency, dropped)| Reply::SetRack {
+                    latency,
+                    dropped: dropped.into_iter().map(String::from).collect(),
+                }),
             Command::Meters => Ok(Reply::Meters(self.meters())),
             Command::Quit => {
                 if self.recording && !self.stopping {

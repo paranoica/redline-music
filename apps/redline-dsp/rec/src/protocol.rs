@@ -5,10 +5,13 @@
 //!   the hardware round trip in frames, so the take's frame 0 is the beat's frame 0.
 //! - `{"cmd": "stop"}`: finish the take; the reply carries its [`TakeReport`].
 //! - `{"cmd": "set_rack", "rack": {...}, "budget": N}`: a new monitor rack, its effects
-//!   switched off from the end until its latency fits `budget` frames, when given.
+//!   switched off from the end until its latency fits `budget` frames, or the backend's
+//!   default budget when none is given.
 //! - `{"cmd": "meters"}`: peaks since the last call, xruns, overflows, frames since the take
 //!   started (the round trip included), the monitor rack's latency.
 //! - `{"cmd": "quit"}`.
+//!
+//! Before any reply the backend writes one [`Startup`] line, `{"event": "started", ...}`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,4 +112,50 @@ pub enum Reply {
 /// The reply as one line, without the newline.
 pub fn format(reply: &Reply) -> String {
     serde_json::to_string(reply).expect("replies serialise")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoundTripSource {
+    /// Measured through the singer's path and passed in.
+    Calibrated,
+    /// The ports' latency ranges: what the drivers claim, not a measurement.
+    PortLatencyEstimate,
+}
+
+/// What the backend got from the audio graph; latencies in frames.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Startup {
+    pub client: String,
+    pub rate: u32,
+    /// The period the graph granted.
+    pub quantum: u32,
+    pub requested_quantum: u32,
+    /// The latency asked of PipeWire, when the backend set it.
+    pub latency_request: Option<String>,
+    /// Min and max, as the mic port reports it.
+    pub capture_latency: [u32; 2],
+    /// Min and max, as the output ports report it.
+    pub playback_latency: [u32; 2],
+    pub round_trip: u64,
+    pub round_trip_ms: f64,
+    pub round_trip_source: RoundTripSource,
+    pub under_10ms: bool,
+    /// The latency a monitor rack may add; a `set_rack` without a budget is held to it.
+    pub monitor_budget: usize,
+    pub mic: Option<String>,
+    pub left: Option<String>,
+    pub right: Option<String>,
+    pub beat_frames: u64,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+enum Event<'a> {
+    Started(&'a Startup),
+}
+
+/// The startup line, without the newline.
+pub fn format_startup(startup: &Startup) -> String {
+    serde_json::to_string(&Event::Started(startup)).expect("the startup line serialises")
 }
