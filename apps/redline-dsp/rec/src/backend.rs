@@ -173,15 +173,19 @@ pub fn pick_ports(
     })
 }
 
+pub fn check_rate(beat_rate: u32, graph_rate: u32) -> Result<(), String> {
+    if beat_rate != graph_rate {
+        return Err(format!(
+            "the beat is at {beat_rate} Hz and the audio graph runs at {graph_rate} Hz; resample the beat to {graph_rate} Hz"
+        ));
+    }
+    Ok(())
+}
+
 /// The beat as stereo frames, refused unless it is at the graph's rate: Python resamples
 /// it before the start, and playing it at another rate would shift every take.
 pub fn beat_frames(wav: &Wav, graph_rate: u32) -> Result<Vec<[f32; 2]>, String> {
-    if wav.rate != graph_rate {
-        return Err(format!(
-            "the beat is at {} Hz and the audio graph runs at {graph_rate} Hz; resample the beat to {graph_rate} Hz",
-            wav.rate
-        ));
-    }
+    check_rate(wav.rate, graph_rate)?;
     match wav.channels {
         1 => Ok(wav.samples.iter().map(|&v| [v, v]).collect()),
         2 => Ok(wav.samples.chunks_exact(2).map(|f| [f[0], f[1]]).collect()),

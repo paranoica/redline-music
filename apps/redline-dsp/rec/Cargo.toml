@@ -13,3 +13,13 @@ name = "redline_rec"
 redline-dsp-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+jack = { version = "0.13", default-features = false, features = ["dynamic_loading"], optional = true }
+
+[features]
+# the JACK backend; without it the crate builds and tests with no audio library
+jack = ["dep:jack"]
+
+[[bin]]
+name = "redline-rec"
+path = "src/main.rs"
+required-features = ["jack"]
