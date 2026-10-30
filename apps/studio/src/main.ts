@@ -100,6 +100,8 @@ class Studio {
   #playing = false;
   #toggledAt = 0;
   #anchor = { frame: 0, at: 0 };
+  // after a seek or a play the clock waits until the engine says the output is heard
+  #held = false;
   #frame = 0;
   #side: Source = "result";
   readonly #lufs: Record<Source, number | null> = { result: null, original: null, reference: null, render: null };
@@ -388,6 +390,7 @@ class Studio {
     this.#playing = !this.#playing;
     this.#toggledAt = performance.now();
     this.#anchor = { frame: this.#frame, at: this.#ctx.currentTime };
+    this.#held = this.#playing;
     this.#client.play(this.#playing);
     this.#showPlay();
     if (this.#playing) this.#tick();
@@ -406,6 +409,7 @@ class Studio {
     const frame = intoLoop(Math.round(seconds * this.#rate), this.#loopOn, loop);
     this.#frame = frame;
     this.#anchor = { frame, at: this.#ctx.currentTime };
+    this.#held = true;
     this.#client.seek(frame);
     this.#showPosition(frame / this.#rate);
   }
@@ -421,6 +425,7 @@ class Studio {
     if (this.#loopOn && (frame < loop.start * this.#rate || frame >= loop.end * this.#rate)) {
       this.#frame = Math.round(loop.start * this.#rate);
       this.#anchor = { frame: this.#frame, at: this.#ctx.currentTime };
+      this.#held = true;
       this.#showPosition(loop.start);
     }
     this.#client.loop(this.#loopOn, Math.round(loop.start * this.#rate), Math.round(loop.end * this.#rate));
@@ -439,6 +444,8 @@ class Studio {
   #levels(l: Levels): void {
     this.#frame = l.frame;
     this.#anchor = { frame: l.frame, at: this.#ctx.currentTime };
+    // the report of the stop before a play does not start the clock
+    if (l.playing) this.#held = l.held;
     // a report from before the last press of play may still be on its way
     const settled = performance.now() - this.#toggledAt > 150;
     if (settled && this.#playing && !l.playing) {
@@ -460,7 +467,8 @@ class Studio {
   #tick(): void {
     if (!this.#playing) return;
     const latency = this.#ctx.outputLatency || 0;
-    let frame = this.#anchor.frame + (this.#ctx.currentTime - this.#anchor.at - latency) * this.#rate;
+    const since = this.#held ? 0 : this.#ctx.currentTime - this.#anchor.at;
+    let frame = this.#anchor.frame + (since - latency) * this.#rate;
     if (this.#loopOn && frame >= this.#loop.end * this.#rate) {
       const start = this.#loop.start * this.#rate;
       frame = start + ((frame - start) % ((this.#loop.end - this.#loop.start) * this.#rate));

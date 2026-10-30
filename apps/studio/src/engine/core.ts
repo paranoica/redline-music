@@ -174,7 +174,13 @@ export class Engine {
   readonly #heardSide = new History();
   readonly #heardMix = new History();
   readonly #meter: LoudnessMeter;
+  // frames metered and frames played since the last report
   #window = 0;
+  #since = 0;
+  // a report goes out after this block
+  #due = false;
+  // the last block ended inside the hold
+  #holding = false;
   #levels = { vocal: accum(), beat: accum(), pre: accum(), master: accum() };
 
   constructor(dsp: Dsp, rate: number, post: (m: FromEngine) => void) {
@@ -218,6 +224,8 @@ export class Engine {
       case "play":
         if (m.playing && !this.#stems) return;
         if (m.playing && !this.#running) this.#snapUnheard();
+        // the page's clock waits for a report after a play
+        if (m.playing) this.#due = true;
         this.#want = m.playing;
         this.#wantAtEnd = m.playing;
         if (m.playing) this.#running = true;
@@ -245,7 +253,10 @@ export class Engine {
   render(left: Float32Array, right: Float32Array): void {
     for (let at = 0; at < left.length; at += BLOCK) {
       this.#skip();
-      this.#block(left, right, at, Math.min(BLOCK, left.length - at));
+      const n = Math.min(BLOCK, left.length - at);
+      this.#block(left, right, at, n);
+      this.#since += n;
+      if (this.#running && (this.#due || this.#since >= this.#rate / LEVELS_PER_S)) this.#report();
     }
   }
 
@@ -395,7 +406,9 @@ export class Engine {
   }
 
   #caughtUp(): void {
-    if (this.#seeks === 0) this.#seq = this.#asked;
+    if (this.#seeks > 0) return;
+    this.#seq = this.#asked;
+    this.#due = true;
   }
 
   // the frame the output will go on from: past the pre-roll when one is under way
@@ -684,6 +697,8 @@ export class Engine {
     const envStep = 1 / DIP;
     const gainStep = 1 / (AB_RAMP_S * this.#rate);
     const openFrom = this.#want && this.#jobs.length === 0 ? heardFrom : n;
+    if (this.#holding && heardFrom < n) this.#due = true;
+    this.#holding = heardFrom === n;
     this.#hold = Math.max(0, this.#hold - n);
     for (let i = 0; i < n; i++) {
       this.#env = approach(this.#env, i >= openFrom ? 1 : 0, envStep);
@@ -711,7 +726,6 @@ export class Engine {
     }
 
     this.#window += n - heardFrom;
-    if (this.#window >= this.#rate / LEVELS_PER_S) this.#report();
     // the fade out starts on the next block, which is silent: this one still has the end in it
     if (!this.#loop.on && this.#read >= last && !this.#ending && this.#seeks === 0) {
       this.#ending = true;
@@ -757,6 +771,7 @@ export class Engine {
       // through a pre-roll and the latency after it, the frame that will be heard first
       frame: this.#heard(this.#read + this.#hold),
       seq: this.#seq,
+      held: this.#hold > 0,
       playing: this.#running,
       vocal: level(L.vocal),
       beat: level(L.beat),
@@ -765,6 +780,8 @@ export class Engine {
       latency: this.#total,
     });
     this.#window = 0;
+    this.#since = 0;
+    this.#due = false;
     this.#levels = { vocal: accum(), beat: accum(), pre: accum(), master: accum() };
   }
 }

@@ -95,7 +95,7 @@ export class Meters {
 
   idle(): void {
     const zero = { peak: 0, rms: 0 };
-    this.show({ type: "levels", frame: 0, seq: 0, playing: false, vocal: zero, beat: zero, master: { ...zero, gr: null }, lufs: -Infinity, latency: 0 });
+    this.show({ type: "levels", frame: 0, seq: 0, held: false, playing: false, vocal: zero, beat: zero, master: { ...zero, gr: null }, lufs: -Infinity, latency: 0 });
     this.#grText.textContent = "—";
   }
 }

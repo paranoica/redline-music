@@ -704,3 +704,54 @@ test("a rack of another latency built between a paused seek and the play keeps t
     }
   }
 });
+
+// eight limiters of 10 ms: a hold longer than the time between two reports
+const slow = rack(...Array.from({ length: 8 }, () => ({ effect: "limiter", params: { ceiling: 0, lookahead: 10 } })));
+
+// block by block from now to the first frame heard after a silence: the reports posted on the way, and on its block
+function untilHeard(engine, posted) {
+  const l = new Float32Array(BLOCK);
+  const r = new Float32Array(BLOCK);
+  const reports = [];
+  let quiet = false;
+  for (let k = 1; k < 4 * RATE / BLOCK; k++) {
+    const n0 = posted.length;
+    engine.render(l, r);
+    const heard = quiet && r.some((v) => Math.abs(v) > 1e-4);
+    quiet ||= r.every((v) => v === 0);
+    for (const m of posted.slice(n0)) if (m.type === "levels") reports.push({ block: k, heard, frame: m.frame, held: m.held });
+    if (heard) return reports;
+  }
+  return null;
+}
+
+for (const when of ["stopped", "playing"]) {
+  test(`through the hold after a seek while ${when} reports keep coming with the frame sought, and one comes as it is heard`, () => {
+    const frames = 4 * RATE;
+    const { engine, posted } = setup({ frames, vocal: indexed(frames), racks: { master: slow } });
+    assert.ok(posted.some((m) => m.type === "rack" && m.track === "master" && m.latency >= 3000));
+    if (when === "playing") {
+      engine.handle({ type: "play", playing: true });
+      run(engine, 9600);
+    }
+    engine.handle({ type: "seek", frame: 96000, seq: 1 });
+    if (when === "stopped") engine.handle({ type: "play", playing: true });
+    posted.length = 0;
+    const reports = untilHeard(engine, posted);
+    assert.ok(reports, "nothing was heard");
+    const held = reports.filter((m) => !m.heard);
+    const last = reports.at(-1);
+    // no gap longer than a report's period, a block over it at most
+    let at = 0;
+    for (const m of reports) {
+      assert.ok((m.block - at) * BLOCK <= RATE / 30 + BLOCK, `a gap of ${(m.block - at) * BLOCK} frames: ${JSON.stringify(reports)}`);
+      at = m.block;
+    }
+    assert.ok(held.length >= 2, JSON.stringify(reports));
+    for (const m of held) {
+      if (m.frame === 96000) assert.equal(m.held, true, JSON.stringify(m));
+    }
+    assert.ok(held.slice(-2).every((m) => m.frame === 96000 && m.held === true), JSON.stringify(reports));
+    assert.ok(last.heard && last.held === false && last.frame > 96000 && last.frame <= 96000 + BLOCK, JSON.stringify(last));
+  });
+}

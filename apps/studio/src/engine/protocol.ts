@@ -30,6 +30,8 @@ export interface Levels {
   frame: number;
   // the last seek or loop the frame has caught up with
   seq: number;
+  // nothing is heard yet after a seek or a play while the racks fill: the frame stays put
+  held: boolean;
   playing: boolean;
   vocal: Level;
   beat: Level;
