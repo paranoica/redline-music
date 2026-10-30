@@ -271,6 +271,26 @@ def _seq(body: dict) -> int:
     return seq
 
 
+Reply = tuple[int, bytes, dict[str, str]]
+
+
+def reply_bytes(status: int, body: bytes, kind: str, extra: dict[str, str] | None = None) -> Reply:
+    """An answer as data: the status, the body and the headers, Content-Type among them."""
+    return status, body, {"Content-Type": kind, **(extra or {})}
+
+
+def reply_json(status: int, data: Any) -> Reply:
+    """A JSON answer as data."""
+    return reply_bytes(status, json.dumps(data, ensure_ascii=False).encode(), "application/json")
+
+
+def send_reply(handler: LocalHandler, reply: Reply) -> None:
+    """Write an answer made by a route function."""
+    status, body, headers = reply
+    kind = headers.get("Content-Type", "application/octet-stream")
+    handler.send(status, body, kind, {k: v for k, v in headers.items() if k != "Content-Type"})
+
+
 class Handler(LocalHandler):
     """Answers the page; the studio and the token sit on the server."""
 
@@ -299,209 +319,236 @@ class Handler(LocalHandler):
 
     def api_get(self, path: str, query: dict[str, list[str]]) -> None:
         """The session, the stems, the references, and the old page's calls."""
-        studio = self.server.studio
-        if path == "/api/session":
-            return self.json(HTTPStatus.OK, self._session())
-        if path == "/api/stem":
-            return self._stem(query.get("name", []))
-        if path == "/api/schema":
-            return self.json(HTTPStatus.OK, self._schema())
-        if path == "/api/presets":
-            return self.json(HTTPStatus.OK, studio.presets())
-        if path == "/api/effects":
-            # empty without the Rust module: the page then says the rack is not available
-            return self.json(HTTPStatus.OK, native.rack_effects() or [])
-        if path == "/api/references":
-            return self.json(HTTPStatus.OK, self._references())
-        if path == "/api/reference":
-            return self._reference(query.get("i", []))
-        if path == "/api/reference_span":
-            return self._reference_span(query)
-        if path == "/api/original":
-            return self.send(
-                HTTPStatus.OK,
-                wav_bytes(studio.original, studio.rate),
-                "audio/wav",
-                {"X-Lufs": f"{studio.original_lufs:.2f}"},
-            )
-        return self.error(HTTPStatus.NOT_FOUND, "no such call")
-
-    def _session(self) -> dict[str, Any]:
-        studio = self.server.studio
-        settings = studio.current()
-        numbers = studio.analysis(settings, newest_only=False)
-        frames = len(studio.engine.vocal)
-        return {
-            "track": {
-                "name": studio.track_key,
-                "rate": studio.rate,
-                "frames": frames,
-                "seconds": frames / studio.rate,
-            },
-            "settings": to_dict(settings),
-            # empty without the Rust module: the page then says the rack is not available
-            "schema": {**schema(), "effects": native.rack_effects() or []},
-            "analysis": numbers,
-            "stale": {name: sorted(keys) for name, keys in live.STALE_AFTER.items()},
-            "presets": studio.presets(),
-            "references": self._references(),
-            **self._racks(settings, numbers),
-        }
-
-    def _racks(self, settings: Settings, numbers: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return {"racks": live.racks(settings, numbers)}
-        except ValueError as error:
-            # saved settings the engine renders but the live racks cannot hold still open
-            return {"racks": None, "racks_error": str(error)}
-
-    def _references(self) -> list[dict[str, Any]]:
-        return [
-            {"index": i, "name": name, "seconds": len(x) / rate, "lufs": lufs}
-            for i, (name, x, rate, lufs) in enumerate(self.server.studio.references)
-        ]
-
-    def _stem(self, asked: list[str]) -> None:
-        if len(asked) != 1 or asked[0] not in STEMS:
-            return self.error(HTTPStatus.BAD_REQUEST, f"a stem is one of {', '.join(STEMS)}")
-        studio = self.server.studio
-        samples = studio.stem(asked[0])
-        return self.send(
-            HTTPStatus.OK,
-            float_wav_bytes(samples, studio.rate),
-            "audio/wav",
-            {"X-Lufs": f"{integrated_lufs(samples, studio.rate):.2f}"},
-        )
-
-    def _which(self, asked: list[str]) -> int | None:
-        given = asked[0] if len(asked) == 1 else ""
-        if not (given.isascii() and given.isdigit() and len(given) < 4):
-            return None
-        return int(given) if int(given) < len(self.server.studio.references) else None
-
-    def _reference_span(self, query: dict[str, list[str]]) -> None:
-        which = self._which(query.get("i", []))
-        try:
-            start, end = float(query["start"][0]), float(query["end"][0])
-        except (KeyError, ValueError):
-            return self.error(HTTPStatus.BAD_REQUEST, "start and end are seconds")
-        if which is None:
-            return self.error(HTTPStatus.BAD_REQUEST, "no such reference")
-        _, samples, rate, _ = self.server.studio.references[which]
-        if not (
-            math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= len(samples) / rate
-        ):
-            return self.error(HTTPStatus.BAD_REQUEST, "the span lies outside the reference")
-        lufs = integrated_lufs(samples[int(start * rate) : int(end * rate)], rate)
-        return self.json(HTTPStatus.OK, {"lufs": lufs if math.isfinite(lufs) else None})
-
-    def _reference(self, asked: list[str]) -> None:
-        which = self._which(asked)
-        if which is None:
-            return self.error(HTTPStatus.BAD_REQUEST, "no such reference")
-        _, samples, rate, lufs = self.server.studio.references[which]
-        return self.send(
-            HTTPStatus.OK, wav_bytes(samples, rate), "audio/wav", {"X-Lufs": f"{lufs:.2f}"}
-        )
-
-    def _schema(self) -> dict:
-        studio = self.server.studio
-        saved = studio.folder / studio.track_key / "settings.json"
-        current = studio.current()
-        ctx = studio.engine.context
-        return {
-            **schema(),
-            "current": to_dict(current),
-            "track": {
-                "seconds": len(studio.original) / studio.rate,
-                "rate": studio.rate,
-                "tuning_cents": ctx.tuning_cents,
-                "master_lufs": ctx.master_lufs,
-                "original_lufs": studio.original_lufs,
-                "saved": str(saved),
-            },
-        }
+        send_reply(self, studio_get(self.server.studio, path, query))
 
     def api_post(self, path: str, body: dict) -> None:
         """Analyses, renders, saves and presets."""
-        if path == "/api/analysis":
-            return self._analysis(body)
-        if path == "/api/preview":
-            return self._preview(body)
-        if path == "/api/render":
-            return self._render(body)
-        if path == "/api/save":
-            only(body, "settings")
-            saved = self.server.studio.save(_settings(body))
-            return self.json(HTTPStatus.OK, {"path": str(saved)})
-        if path == "/api/preset":
-            only(body, "name", "settings")
-            name = body.get("name")
-            if not isinstance(name, str):
-                raise BadRequest(HTTPStatus.BAD_REQUEST, "a preset needs a name")
-            self.server.studio.save_preset(name, _settings(body))
-            return self.json(HTTPStatus.OK, {"name": name})
-        return self.error(HTTPStatus.NOT_FOUND, "no such call")
+        send_reply(self, studio_post(self.server.studio, path, body))
 
-    def _analysis(self, body: dict) -> None:
+
+def studio_get(studio: Studio, path: str, query: dict[str, list[str]]) -> Reply:
+    """The studio's read-only calls, for the studio given.
+
+    Raises:
+        BadRequest: The request is refused; the status is the error's.
+    """
+    if path == "/api/session":
+        return reply_json(HTTPStatus.OK, _session(studio))
+    if path == "/api/stem":
+        return _stem(studio, query.get("name", []))
+    if path == "/api/schema":
+        return reply_json(HTTPStatus.OK, _schema(studio))
+    if path == "/api/presets":
+        return reply_json(HTTPStatus.OK, studio.presets())
+    if path == "/api/effects":
+        # empty without the Rust module: the page then says the rack is not available
+        return reply_json(HTTPStatus.OK, native.rack_effects() or [])
+    if path == "/api/references":
+        return reply_json(HTTPStatus.OK, _references(studio))
+    if path == "/api/reference":
+        return _reference(studio, query.get("i", []))
+    if path == "/api/reference_span":
+        return _reference_span(studio, query)
+    if path == "/api/original":
+        return reply_bytes(
+            HTTPStatus.OK,
+            wav_bytes(studio.original, studio.rate),
+            "audio/wav",
+            {"X-Lufs": f"{studio.original_lufs:.2f}"},
+        )
+    return reply_json(HTTPStatus.NOT_FOUND, {"error": "no such call"})
+
+
+def _error(status: int, message: str) -> Reply:
+    return reply_json(status, {"error": message})
+
+
+def _session(studio: Studio) -> dict[str, Any]:
+    settings = studio.current()
+    numbers = studio.analysis(settings, newest_only=False)
+    frames = len(studio.engine.vocal)
+    return {
+        "track": {
+            "name": studio.track_key,
+            "rate": studio.rate,
+            "frames": frames,
+            "seconds": frames / studio.rate,
+        },
+        "settings": to_dict(settings),
+        # empty without the Rust module: the page then says the rack is not available
+        "schema": {**schema(), "effects": native.rack_effects() or []},
+        "analysis": numbers,
+        "stale": {name: sorted(keys) for name, keys in live.STALE_AFTER.items()},
+        "presets": studio.presets(),
+        "references": _references(studio),
+        **_racks(settings, numbers),
+    }
+
+
+def _racks(settings: Settings, numbers: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"racks": live.racks(settings, numbers)}
+    except ValueError as error:
+        # saved settings the engine renders but the live racks cannot hold still open
+        return {"racks": None, "racks_error": str(error)}
+
+
+def _references(studio: Studio) -> list[dict[str, Any]]:
+    return [
+        {"index": i, "name": name, "seconds": len(x) / rate, "lufs": lufs}
+        for i, (name, x, rate, lufs) in enumerate(studio.references)
+    ]
+
+
+def _stem(studio: Studio, asked: list[str]) -> Reply:
+    if len(asked) != 1 or asked[0] not in STEMS:
+        return _error(HTTPStatus.BAD_REQUEST, f"a stem is one of {', '.join(STEMS)}")
+    samples = studio.stem(asked[0])
+    return reply_bytes(
+        HTTPStatus.OK,
+        float_wav_bytes(samples, studio.rate),
+        "audio/wav",
+        {"X-Lufs": f"{integrated_lufs(samples, studio.rate):.2f}"},
+    )
+
+
+def _which(studio: Studio, asked: list[str]) -> int | None:
+    given = asked[0] if len(asked) == 1 else ""
+    if not (given.isascii() and given.isdigit() and len(given) < 4):
+        return None
+    return int(given) if int(given) < len(studio.references) else None
+
+
+def _reference_span(studio: Studio, query: dict[str, list[str]]) -> Reply:
+    which = _which(studio, query.get("i", []))
+    try:
+        start, end = float(query["start"][0]), float(query["end"][0])
+    except (KeyError, ValueError):
+        return _error(HTTPStatus.BAD_REQUEST, "start and end are seconds")
+    if which is None:
+        return _error(HTTPStatus.BAD_REQUEST, "no such reference")
+    _, samples, rate, _ = studio.references[which]
+    if not (
+        math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= len(samples) / rate
+    ):
+        return _error(HTTPStatus.BAD_REQUEST, "the span lies outside the reference")
+    lufs = integrated_lufs(samples[int(start * rate) : int(end * rate)], rate)
+    return reply_json(HTTPStatus.OK, {"lufs": lufs if math.isfinite(lufs) else None})
+
+
+def _reference(studio: Studio, asked: list[str]) -> Reply:
+    which = _which(studio, asked)
+    if which is None:
+        return _error(HTTPStatus.BAD_REQUEST, "no such reference")
+    _, samples, rate, lufs = studio.references[which]
+    return reply_bytes(
+        HTTPStatus.OK, wav_bytes(samples, rate), "audio/wav", {"X-Lufs": f"{lufs:.2f}"}
+    )
+
+
+def _schema(studio: Studio) -> dict:
+    saved = studio.folder / studio.track_key / "settings.json"
+    current = studio.current()
+    ctx = studio.engine.context
+    return {
+        **schema(),
+        "current": to_dict(current),
+        "track": {
+            "seconds": len(studio.original) / studio.rate,
+            "rate": studio.rate,
+            "tuning_cents": ctx.tuning_cents,
+            "master_lufs": ctx.master_lufs,
+            "original_lufs": studio.original_lufs,
+            "saved": str(saved),
+        },
+    }
+
+
+def studio_post(studio: Studio, path: str, body: dict) -> Reply:
+    """The studio's analyses, renders, saves and presets, for the studio given.
+
+    Raises:
+        BadRequest: The request is refused; the status is the error's.
+    """
+    if path == "/api/analysis":
+        return _analysis(studio, body)
+    if path == "/api/preview":
+        return _preview(studio, body)
+    if path == "/api/render":
+        return _render(studio, body)
+    if path == "/api/save":
         only(body, "settings")
-        settings = _settings(body)
-        numbers = self.server.studio.analysis(settings)
-        try:
-            racks = live.racks(settings, numbers)
-        except ValueError as error:
-            raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
-        lanes = live.vocal_lanes(settings, numbers)
-        return self.json(HTTPStatus.OK, {"analysis": numbers, "racks": racks, "lanes": lanes})
+        saved = studio.save(_settings(body))
+        return reply_json(HTTPStatus.OK, {"path": str(saved)})
+    if path == "/api/preset":
+        only(body, "name", "settings")
+        name = body.get("name")
+        if not isinstance(name, str):
+            raise BadRequest(HTTPStatus.BAD_REQUEST, "a preset needs a name")
+        studio.save_preset(name, _settings(body))
+        return reply_json(HTTPStatus.OK, {"name": name})
+    return _error(HTTPStatus.NOT_FOUND, "no such call")
 
-    def _preview(self, body: dict) -> None:
-        only(body, "settings", "seq", "start", "end")
-        studio = self.server.studio
-        settings, seq = _settings(body), _seq(body)
-        start, end = body.get("start"), body.get("end")
-        total = len(studio.original) / studio.rate
-        if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (start, end)):
-            raise BadRequest(HTTPStatus.BAD_REQUEST, "start and end are seconds")
-        if not 0 <= start < end <= total:  # type: ignore[operator]
-            raise BadRequest(HTTPStatus.BAD_REQUEST, f"the loop lies within 0-{total:.2f} s")
-        first, last = int(start * studio.rate), int(end * studio.rate)  # type: ignore[operator]
-        began = time.monotonic()
-        samples = studio.preview(settings, seq, first, last)
-        if samples is None:
-            return self.error(HTTPStatus.CONFLICT, "a newer request came in")
-        took = (time.monotonic() - began) * 1000
-        print(f"preview {end - start:.1f} s in {took:.0f} ms")  # type: ignore[operator]
-        lufs = integrated_lufs(studio.original[first:last], studio.rate)
-        self.send(
-            HTTPStatus.OK,
-            wav_bytes(samples, studio.rate),
-            "audio/wav",
-            {
-                "X-Render-Ms": f"{took:.0f}",
-                "X-Lufs": f"{integrated_lufs(samples, studio.rate):.2f}",
-                "X-Original-Lufs": f"{lufs:.2f}",
-            },
-        )
 
-    def _render(self, body: dict) -> None:
-        only(body, "settings", "seq")
-        studio = self.server.studio
-        settings, seq = _settings(body), _seq(body)
-        began = time.monotonic()
-        rendered = studio.render(settings, seq)
-        if rendered is None:
-            return self.error(HTTPStatus.CONFLICT, "a newer request came in")
-        took = (time.monotonic() - began) * 1000
-        print(f"exact render in {took:.0f} ms")
-        self.send(
-            HTTPStatus.OK,
-            wav_bytes(rendered.final, studio.rate),
-            "audio/wav",
-            {
-                "X-Render-Ms": f"{took:.0f}",
-                "X-Lufs": f"{integrated_lufs(rendered.final, studio.rate):.2f}",
-            },
-        )
+def _analysis(studio: Studio, body: dict) -> Reply:
+    only(body, "settings")
+    settings = _settings(body)
+    numbers = studio.analysis(settings)
+    try:
+        racks = live.racks(settings, numbers)
+    except ValueError as error:
+        raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
+    lanes = live.vocal_lanes(settings, numbers)
+    return reply_json(HTTPStatus.OK, {"analysis": numbers, "racks": racks, "lanes": lanes})
+
+
+def _preview(studio: Studio, body: dict) -> Reply:
+    only(body, "settings", "seq", "start", "end")
+    settings, seq = _settings(body), _seq(body)
+    start, end = body.get("start"), body.get("end")
+    total = len(studio.original) / studio.rate
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (start, end)):
+        raise BadRequest(HTTPStatus.BAD_REQUEST, "start and end are seconds")
+    if not 0 <= start < end <= total:  # type: ignore[operator]
+        raise BadRequest(HTTPStatus.BAD_REQUEST, f"the loop lies within 0-{total:.2f} s")
+    first, last = int(start * studio.rate), int(end * studio.rate)  # type: ignore[operator]
+    began = time.monotonic()
+    samples = studio.preview(settings, seq, first, last)
+    if samples is None:
+        return _error(HTTPStatus.CONFLICT, "a newer request came in")
+    took = (time.monotonic() - began) * 1000
+    print(f"preview {end - start:.1f} s in {took:.0f} ms")  # type: ignore[operator]
+    lufs = integrated_lufs(studio.original[first:last], studio.rate)
+    return reply_bytes(
+        HTTPStatus.OK,
+        wav_bytes(samples, studio.rate),
+        "audio/wav",
+        {
+            "X-Render-Ms": f"{took:.0f}",
+            "X-Lufs": f"{integrated_lufs(samples, studio.rate):.2f}",
+            "X-Original-Lufs": f"{lufs:.2f}",
+        },
+    )
+
+
+def _render(studio: Studio, body: dict) -> Reply:
+    only(body, "settings", "seq")
+    settings, seq = _settings(body), _seq(body)
+    began = time.monotonic()
+    rendered = studio.render(settings, seq)
+    if rendered is None:
+        return _error(HTTPStatus.CONFLICT, "a newer request came in")
+    took = (time.monotonic() - began) * 1000
+    print(f"exact render in {took:.0f} ms")
+    return reply_bytes(
+        HTTPStatus.OK,
+        wav_bytes(rendered.final, studio.rate),
+        "audio/wav",
+        {
+            "X-Render-Ms": f"{took:.0f}",
+            "X-Lufs": f"{integrated_lufs(rendered.final, studio.rate):.2f}",
+        },
+    )
 
 
 class StudioServer(LocalServer):

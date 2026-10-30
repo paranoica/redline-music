@@ -36,7 +36,15 @@ from redline.beat.render import (
     notes_used,
     render_seed,
 )
-from redline.studio.server import PAGE_KINDS, POLICY, SITE
+from redline.studio.server import (
+    PAGE_KINDS,
+    POLICY,
+    SITE,
+    Reply,
+    reply_bytes,
+    reply_json,
+    send_reply,
+)
 from redline.web.local import BadRequest, LocalHandler, LocalServer, only
 
 PAGE = "beat.html"
@@ -46,6 +54,8 @@ FILE_ID = re.compile(r"\d{1,5}")
 STEM = re.compile(r"[A-Za-z0-9_-]{1,64}")
 RENDER_FILES = ("beat.wav", "render.json")
 MAX_NOTE = 2000
+# a score with per-step lanes on every row of 64 patterns runs to a few megabytes
+BEAT_MAX_BODY = 4 * 1024 * 1024
 
 Render = Callable[..., Rendered]
 
@@ -431,8 +441,7 @@ class Handler(LocalHandler):
     """Answers the beat page; the seed and the token sit on the server."""
 
     server: "BeatServer"  # pyright: ignore[reportIncompatibleVariableOverride]
-    # a score with per-step lanes on every row of 64 patterns runs to a few megabytes
-    max_body = 4 * 1024 * 1024
+    max_body = BEAT_MAX_BODY
 
     def send(self, status: int, body: bytes, kind: str, extra: dict | None = None) -> None:
         """Answer with the guard headers and the studio's page policy on."""
@@ -456,85 +465,96 @@ class Handler(LocalHandler):
 
     def api_get(self, path: str, query: dict[str, list[str]]) -> None:
         """The session, a zone's samples, the render's state and files."""
-        self._answered(lambda: self._get(path, query))
+        beat = self.server.beat
+        self._answered(lambda: beat_get(beat, path, query))
 
     def api_post(self, path: str, body: dict) -> None:
         """Check, save, render and mark."""
-        self._answered(lambda: self._post(path, body))
+        beat = self.server.beat
+        self._answered(lambda: beat_post(beat, path, body))
 
-    def _answered(self, call: Callable[[], None]) -> None:
+    def _answered(self, call: Callable[[], Reply]) -> None:
         try:
-            call()
+            send_reply(self, call())
         except BadRequest:
             raise
         except Exception as error:  # noqa: BLE001
             # the page shows a JSON error; a dropped connection tells it nothing
             self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
 
-    def _get(self, path: str, query: dict[str, list[str]]) -> None:
-        beat = self.server.beat
-        if path == "/api/beat/session":
-            return self.json(HTTPStatus.OK, beat.session())
-        if path == "/api/beat/zone":
-            pcm, rate, channels, frames, root = beat.zone(
-                _one(query, "library"), _one(query, "file")
-            )
-            headers = {
-                "X-Rate": str(rate),
-                "X-Channels": str(channels),
-                "X-Frames": str(frames),
-                "X-Root": str(root),
-            }
-            return self.send(HTTPStatus.OK, pcm, "application/octet-stream", headers)
-        if path == "/api/beat/render/status":
-            return self.json(HTTPStatus.OK, beat.render_status())
-        if path == "/api/beat/render":
-            data, kind = beat.render_file(_one(query, "file"))
-            return self.send(HTTPStatus.OK, data, kind)
-        return self.error(HTTPStatus.NOT_FOUND, "no such call")
 
-    def _post(self, path: str, body: dict) -> None:
-        beat = self.server.beat
-        if path == "/api/beat/check":
-            only(body, "score")
-            errors, warnings = beat.check(_score(body))
-            return self.json(HTTPStatus.OK, {"errors": list(errors), "warnings": warnings})
-        if path == "/api/beat/save":
-            only(body, "score", "base")
-            base = body.get("base")
-            if not isinstance(base, str):
-                raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name")
-            try:
-                name, warnings = beat.save(_score(body), base)
-            except Refused as refused:
-                return self.json(
-                    refused.status, {"error": str(refused), "errors": list(refused.errors)}
-                )
-            return self.json(HTTPStatus.OK, {"file": name, "warnings": warnings})
-        if path == "/api/beat/render":
-            only(body, "score_file")
-            score_file = body.get("score_file")
-            if not isinstance(score_file, str):
-                raise BadRequest(HTTPStatus.BAD_REQUEST, "score_file is a saved score's name")
-            beat.start_render(score_file)
-            return self.json(HTTPStatus.ACCEPTED, beat.render_status())
-        if path == "/api/beat/mark":
-            return self._mark(body)
-        return self.error(HTTPStatus.NOT_FOUND, "no such call")
+def beat_get(beat: BeatStudio, path: str, query: dict[str, list[str]]) -> Reply:
+    """The beat editor's read-only calls, for the BeatStudio given.
 
-    def _mark(self, body: dict) -> None:
-        only(body, "bar", "verdict", "note", "base")
-        bar, verdict, note = body.get("bar"), body.get("verdict"), body.get("note", "")
+    Raises:
+        BadRequest: The request is refused; the status is the error's.
+    """
+    if path == "/api/beat/session":
+        return reply_json(HTTPStatus.OK, beat.session())
+    if path == "/api/beat/zone":
+        pcm, rate, channels, frames, root = beat.zone(_one(query, "library"), _one(query, "file"))
+        headers = {
+            "X-Rate": str(rate),
+            "X-Channels": str(channels),
+            "X-Frames": str(frames),
+            "X-Root": str(root),
+        }
+        return reply_bytes(HTTPStatus.OK, pcm, "application/octet-stream", headers)
+    if path == "/api/beat/render/status":
+        return reply_json(HTTPStatus.OK, beat.render_status())
+    if path == "/api/beat/render":
+        data, kind = beat.render_file(_one(query, "file"))
+        return reply_bytes(HTTPStatus.OK, data, kind)
+    return reply_json(HTTPStatus.NOT_FOUND, {"error": "no such call"})
+
+
+def beat_post(beat: BeatStudio, path: str, body: dict) -> Reply:
+    """The beat editor's calls that change something, for the BeatStudio given.
+
+    Raises:
+        BadRequest: The request is refused; the status is the error's.
+    """
+    if path == "/api/beat/check":
+        only(body, "score")
+        errors, warnings = beat.check(_score(body))
+        return reply_json(HTTPStatus.OK, {"errors": list(errors), "warnings": warnings})
+    if path == "/api/beat/save":
+        only(body, "score", "base")
         base = body.get("base")
         if not isinstance(base, str):
             raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name")
-        if not isinstance(bar, int) or isinstance(bar, bool):
-            raise BadRequest(HTTPStatus.BAD_REQUEST, "bar is a whole number from 1")
-        if not isinstance(verdict, str) or not isinstance(note, str):
-            raise BadRequest(HTTPStatus.BAD_REQUEST, "verdict and note are text")
-        if len(note) > MAX_NOTE:
-            raise BadRequest(HTTPStatus.BAD_REQUEST, f"a note is at most {MAX_NOTE} characters")
-        return self.json(HTTPStatus.OK, self.server.beat.mark(bar, verdict, note, base))
+        try:
+            name, warnings = beat.save(_score(body), base)
+        except Refused as refused:
+            return reply_json(
+                refused.status, {"error": str(refused), "errors": list(refused.errors)}
+            )
+        return reply_json(HTTPStatus.OK, {"file": name, "warnings": warnings})
+    if path == "/api/beat/render":
+        only(body, "score_file")
+        score_file = body.get("score_file")
+        if not isinstance(score_file, str):
+            raise BadRequest(HTTPStatus.BAD_REQUEST, "score_file is a saved score's name")
+        beat.start_render(score_file)
+        return reply_json(HTTPStatus.ACCEPTED, beat.render_status())
+    if path == "/api/beat/mark":
+        return _mark(beat, body)
+    return reply_json(HTTPStatus.NOT_FOUND, {"error": "no such call"})
+
+
+def _mark(beat: BeatStudio, body: dict) -> Reply:
+    only(body, "bar", "verdict", "note", "base")
+    bar, verdict, note = body.get("bar"), body.get("verdict"), body.get("note", "")
+    base = body.get("base")
+    if not isinstance(base, str):
+        raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name")
+    if not isinstance(bar, int) or isinstance(bar, bool):
+        raise BadRequest(HTTPStatus.BAD_REQUEST, "bar is a whole number from 1")
+    if not isinstance(verdict, str) or not isinstance(note, str):
+        raise BadRequest(HTTPStatus.BAD_REQUEST, "verdict and note are text")
+    if len(note) > MAX_NOTE:
+        raise BadRequest(HTTPStatus.BAD_REQUEST, f"a note is at most {MAX_NOTE} characters")
+    return reply_json(HTTPStatus.OK, beat.mark(bar, verdict, note, base))
 
 
 class BeatServer(LocalServer):
