@@ -1,7 +1,9 @@
 """The studio: a page on 127.0.0.1 that plays the track and re-renders it as settings move.
 
 One render runs at a time and the newest request wins: an older one stops between stages.
-The guards of the page's server live in `redline.web.local`.
+The page itself runs the chain live in the browser (see `redline.engine.live`); the server
+hands it the stems, the numbers only the whole track gives, and the exact render. The guards
+of the page's server live in `redline.web.local`.
 """
 
 import contextlib
@@ -15,6 +17,7 @@ from collections.abc import Sequence
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
 import numpy.typing as npt
@@ -22,20 +25,52 @@ import soundfile as sf
 
 from redline.core import native
 from redline.core.loudness import integrated_lufs
+from redline.engine import live
 from redline.engine.render import Cancelled, Engine, Rendered
 from redline.engine.settings import PRESET_NAME, VERSION, Settings, from_dict, schema, to_dict
-from redline.web.local import BadRequest, LocalHandler, LocalServer, only, site_files
+from redline.web.local import KINDS, BadRequest, LocalHandler, LocalServer, only
 
 Samples = npt.NDArray[np.floating]
 
-# the page lives next to the package, in apps/studio-web
-SITE = Path(__file__).resolve().parents[2] / "studio-web"
+# the page's own build writes it next to the package
+SITE = Path(__file__).resolve().parents[2] / "studio" / "dist"
+NOT_BUILT = "the studio page is not built: run `npm --prefix apps/studio run build`"
+PAGE_KINDS = {**KINDS, ".wasm": "application/wasm"}
+STEMS = ("vocal", "beat", "original")
+# 'wasm-unsafe-eval' lets the page compile its WebAssembly without allowing eval of
+# JavaScript; worker-src keeps workers to the page's own files (an AudioWorklet's module
+# falls under script-src, so 'self' covers it); fonts stay the only outside source.
+POLICY = (
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
+    "media-src 'self' blob:; img-src 'self' data:; "
+    "style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
+)
+
+
+def page_files(root: Path) -> dict[str, tuple[Path, str]]:
+    """Every file of the built page by its URL path; empty while index.html is missing."""
+    if not (root / "index.html").is_file():
+        return {}
+    files = {
+        "/" + path.relative_to(root).as_posix(): (path, PAGE_KINDS[path.suffix])
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.suffix in PAGE_KINDS
+    }
+    files["/"] = files["/index.html"]
+    return files
 
 
 def wav_bytes(samples: Samples, rate: int) -> bytes:
     """16-bit WAV in memory: enough to listen to, half the bytes of float."""
     buffer = io.BytesIO()
     sf.write(buffer, np.clip(samples, -1.0, 1.0), rate, format="WAV", subtype="PCM_16")
+    return buffer.getvalue()
+
+
+def float_wav_bytes(samples: Samples, rate: int) -> bytes:
+    """32-bit float WAV in memory: the samples as they are, past full scale too."""
+    buffer = io.BytesIO()
+    sf.write(buffer, samples, rate, format="WAV", subtype="FLOAT")
     return buffer.getvalue()
 
 
@@ -76,6 +111,7 @@ class Studio:
         # a whole render takes a minute; a preview must not queue behind it
         self._render_lock = threading.Lock()
         self._preview_lock = threading.Lock()
+        self._analysis_lock = threading.Lock()
 
     def _claim(self, seq: int) -> bool:
         with self._seq_lock:
@@ -107,6 +143,37 @@ class Studio:
         return self._run(
             seq, lambda _: self.engine.preview(settings, start, end), self._preview_lock
         )
+
+    def current(self) -> Settings:
+        """The settings saved for the track, or the defaults when none are or they do not load."""
+        saved = self.folder / self.track_key / "settings.json"
+        if saved.exists():
+            with contextlib.suppress(ValueError):
+                data = json.loads(saved.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return from_dict(data)
+        return Settings()
+
+    def stem(self, name: str) -> Samples:
+        """The vocal or the beat as the engine holds them, or the two summed as the original."""
+        engine = self.engine
+        if name == "vocal":
+            return engine.vocal
+        if name == "beat":
+            return engine.beat
+        return engine.vocal + engine.beat
+
+    def analysis(self, settings: Settings) -> dict[str, Any]:
+        """What `live.analysis` measures for these settings.
+
+        Raises:
+            BadRequest: The engine cannot measure these settings.
+        """
+        with self._analysis_lock:
+            try:
+                return live.analysis(self.engine, settings)
+            except ValueError as error:
+                raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
 
     def save(self, settings: Settings) -> Path:
         """Write the settings the last exact render was made with."""
@@ -174,9 +241,34 @@ class Handler(LocalHandler):
 
     server: "StudioServer"  # pyright: ignore[reportIncompatibleVariableOverride]
 
+    def send(self, status: int, body: bytes, kind: str, extra: dict | None = None) -> None:
+        """Answer with the guard headers and the studio's own policy on."""
+        super().send(status, body, kind, {"Content-Security-Policy": POLICY, **(extra or {})})
+
+    def do_GET(self) -> None:
+        """The page once it is built, a note on how to build it until then, and the API."""
+        url = urlsplit(self.path)
+        given = parse_qs(url.query).get("t", [None])[0]
+        if (
+            url.path in ("/", "/index.html")
+            and "/" not in self.server.files
+            and self._host_ok()
+            and self._token_ok(given)
+        ):
+            # built after the server started: picked up on reload
+            self.server.files = page_files(self.server.site)
+            if "/" not in self.server.files:
+                body = NOT_BUILT.encode()
+                return self.send(HTTPStatus.SERVICE_UNAVAILABLE, body, "text/plain; charset=utf-8")
+        return super().do_GET()
+
     def api_get(self, path: str, query: dict[str, list[str]]) -> None:
-        """Schema, presets, the original and the references."""
+        """The session, the stems, the references, and the old page's calls."""
         studio = self.server.studio
+        if path == "/api/session":
+            return self.json(HTTPStatus.OK, self._session())
+        if path == "/api/stem":
+            return self._stem(query.get("name", []))
         if path == "/api/schema":
             return self.json(HTTPStatus.OK, self._schema())
         if path == "/api/presets":
@@ -185,13 +277,7 @@ class Handler(LocalHandler):
             # empty without the Rust module: the page then says the rack is not available
             return self.json(HTTPStatus.OK, native.rack_effects() or [])
         if path == "/api/references":
-            return self.json(
-                HTTPStatus.OK,
-                [
-                    {"index": i, "name": name, "seconds": len(x) / rate, "lufs": lufs}
-                    for i, (name, x, rate, lufs) in enumerate(studio.references)
-                ],
-            )
+            return self.json(HTTPStatus.OK, self._references())
         if path == "/api/reference":
             return self._reference(query.get("i", []))
         if path == "/api/reference_span":
@@ -204,6 +290,53 @@ class Handler(LocalHandler):
                 {"X-Lufs": f"{studio.original_lufs:.2f}"},
             )
         return self.error(HTTPStatus.NOT_FOUND, "no such call")
+
+    def _session(self) -> dict[str, Any]:
+        studio = self.server.studio
+        settings = studio.current()
+        numbers = studio.analysis(settings)
+        frames = len(studio.engine.vocal)
+        return {
+            "track": {
+                "name": studio.track_key,
+                "rate": studio.rate,
+                "frames": frames,
+                "seconds": frames / studio.rate,
+            },
+            "settings": to_dict(settings),
+            # empty without the Rust module: the page then says the rack is not available
+            "schema": {**schema(), "effects": native.rack_effects() or []},
+            "analysis": numbers,
+            "stale": {name: sorted(keys) for name, keys in live.STALE_AFTER.items()},
+            "presets": studio.presets(),
+            "references": self._references(),
+            **self._racks(settings, numbers),
+        }
+
+    def _racks(self, settings: Settings, numbers: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return {"racks": live.racks(settings, numbers)}
+        except ValueError as error:
+            # saved settings the engine renders but the live racks cannot hold still open
+            return {"racks": None, "racks_error": str(error)}
+
+    def _references(self) -> list[dict[str, Any]]:
+        return [
+            {"index": i, "name": name, "seconds": len(x) / rate, "lufs": lufs}
+            for i, (name, x, rate, lufs) in enumerate(self.server.studio.references)
+        ]
+
+    def _stem(self, asked: list[str]) -> None:
+        if len(asked) != 1 or asked[0] not in STEMS:
+            return self.error(HTTPStatus.BAD_REQUEST, f"a stem is one of {', '.join(STEMS)}")
+        studio = self.server.studio
+        samples = studio.stem(asked[0])
+        return self.send(
+            HTTPStatus.OK,
+            float_wav_bytes(samples, studio.rate),
+            "audio/wav",
+            {"X-Lufs": f"{integrated_lufs(samples, studio.rate):.2f}"},
+        )
 
     def _which(self, asked: list[str]) -> int | None:
         given = asked[0] if len(asked) == 1 else ""
@@ -239,12 +372,7 @@ class Handler(LocalHandler):
     def _schema(self) -> dict:
         studio = self.server.studio
         saved = studio.folder / studio.track_key / "settings.json"
-        current = Settings()
-        if saved.exists():
-            with contextlib.suppress(ValueError):
-                data = json.loads(saved.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    current = from_dict(data)
+        current = studio.current()
         ctx = studio.engine.context
         return {
             **schema(),
@@ -260,7 +388,9 @@ class Handler(LocalHandler):
         }
 
     def api_post(self, path: str, body: dict) -> None:
-        """Renders, saves and presets."""
+        """Analyses, renders, saves and presets."""
+        if path == "/api/analysis":
+            return self._analysis(body)
         if path == "/api/preview":
             return self._preview(body)
         if path == "/api/render":
@@ -277,6 +407,17 @@ class Handler(LocalHandler):
             self.server.studio.save_preset(name, _settings(body))
             return self.json(HTTPStatus.OK, {"name": name})
         return self.error(HTTPStatus.NOT_FOUND, "no such call")
+
+    def _analysis(self, body: dict) -> None:
+        only(body, "settings")
+        settings = _settings(body)
+        numbers = self.server.studio.analysis(settings)
+        try:
+            racks = live.racks(settings, numbers)
+        except ValueError as error:
+            raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
+        lanes = live.vocal_lanes(settings, numbers)
+        return self.json(HTTPStatus.OK, {"analysis": numbers, "racks": racks, "lanes": lanes})
 
     def _preview(self, body: dict) -> None:
         only(body, "settings", "seq", "start", "end")
@@ -331,12 +472,15 @@ class Handler(LocalHandler):
 class StudioServer(LocalServer):
     """The HTTP server with the studio and its token."""
 
-    def __init__(self, address: tuple[str, int], studio: Studio, token: str) -> None:
-        """Bind and keep the studio."""
-        super().__init__(address, Handler, token, site_files(SITE))
+    def __init__(self, address: tuple[str, int], studio: Studio, token: str, site: Path) -> None:
+        """Bind and keep the studio and where its page is built."""
+        super().__init__(address, Handler, token, page_files(site))
         self.studio = studio
+        self.site = site
 
 
-def make_server(studio: Studio, token: str, port: int = 0) -> StudioServer:
-    """A server on 127.0.0.1 only; port 0 takes a free one."""
-    return StudioServer(("127.0.0.1", port), studio, token)
+def make_server(
+    studio: Studio, token: str, port: int = 0, site: Path | None = None
+) -> StudioServer:
+    """A server on 127.0.0.1 only; port 0 takes a free one, site defaults to SITE."""
+    return StudioServer(("127.0.0.1", port), studio, token, SITE if site is None else site)

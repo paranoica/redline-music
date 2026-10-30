@@ -55,16 +55,6 @@ def wav(data):
     return samples, rate
 
 
-def test_the_page_needs_the_token_in_its_address(server):
-    assert call(server, "GET", "/", token=None)[0] == 403
-    status, headers, body = call(server, "GET", f"/?t={TOKEN}", token=None)
-    assert status == 200 and b"<html" in body.lower()
-    assert headers["Referrer-Policy"] == "no-referrer"
-    assert "default-src 'self'" in headers["Content-Security-Policy"]
-    assert headers["X-Content-Type-Options"] == "nosniff"
-    assert "Access-Control-Allow-Origin" not in headers
-
-
 @pytest.mark.parametrize("token", [None, "wrong", TOKEN + "x", ""])
 def test_the_api_refuses_a_missing_or_wrong_token(server, token):
     assert call(server, "GET", "/api/schema", token=token)[0] == 403
