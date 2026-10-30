@@ -63,6 +63,8 @@ interface Pending {
   ready: boolean;
 }
 
+type BlockViews = { heap: Float32Array | null; n: number; vocal: Float32Array; beat: Float32Array; mix: Float32Array };
+
 class Rack {
   current: Inst | null = null;
   pending: Pending | null = null;
@@ -150,6 +152,14 @@ export class Engine {
   readonly #gain: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   #target: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   readonly #pad = { vocal: new DelayLine(DELAY_CAPACITY), beat: new DelayLine(DELAY_CAPACITY) };
+  // views into the heap for one block size; rebuilt only if the heap or the size changes
+  #views: BlockViews = {
+    heap: null,
+    n: 0,
+    vocal: new Float32Array(0),
+    beat: new Float32Array(0),
+    mix: new Float32Array(0),
+  };
   readonly #late = { original: new DelayLine(DELAY_CAPACITY), render: new DelayLine(DELAY_CAPACITY) };
   #total = 0;
   readonly #original = new Float32Array(2 * BLOCK);
@@ -448,6 +458,20 @@ export class Engine {
     return this.#dsp.HEAPF32;
   }
 
+  #blockViews(heap: Float32Array, n: number, v: number, b: number, x: number): BlockViews {
+    const w = this.#views;
+    if (w.heap !== heap || w.n !== n) {
+      this.#views = {
+        heap,
+        n,
+        vocal: heap.subarray(v, v + 2 * n),
+        beat: heap.subarray(b, b + 2 * n),
+        mix: heap.subarray(x, x + 2 * n),
+      };
+    }
+    return this.#views;
+  }
+
   // a stem's frames [from, from + n) into the heap at ptr, silent outside the track
   #fill(stem: Float32Array, ptr: number, from: number, n: number, add = false): void {
     const heap = this.#heap();
@@ -618,9 +642,10 @@ export class Engine {
     this.#heardSide.write(heap, side, this.#pos, n);
     this.#track(this.#racks.vocal, vocal, side, n, start);
     heap = this.#heap();
-    this.#pad.vocal.process(heap.subarray(v, v + 2 * n), n);
-    this.#pad.beat.process(heap.subarray(b, b + 2 * n), n);
     const x = mix >> 2;
+    const views = this.#blockViews(heap, n, v, b, x);
+    this.#pad.vocal.process(views.vocal, n);
+    this.#pad.beat.process(views.beat, n);
     const L = this.#levels;
     // a pre-roll is not heard, so it is not metered either
     const metered = this.#hold <= 0;
@@ -639,7 +664,7 @@ export class Engine {
     this.#heardMix.write(heap, mix, this.#pos, n);
     this.#track(this.#racks.master, mix, 0, n, start);
     heap = this.#heap();
-    const result = heap.subarray(x, x + 2 * n);
+    const result = this.#blockViews(heap, n, v, b, x).mix;
     if (metered) this.#meter.push(result, n);
     this.#late.original.process(this.#original, n);
     this.#late.render.process(this.#renderBlock, n);
