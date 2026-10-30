@@ -360,3 +360,13 @@ def test_a_flip_is_mastered_to_the_source_loudness_under_the_ceiling():
     assert float(np.abs(out).max()) <= 10 ** (render.CEILING_DB / 20) + 1e-4
     # at least the loudness gap: the limiter takes some back
     assert info["gain_db"] >= 9.0
+
+
+def test_ours_match_what_they_replace_where_it_plays_not_across_its_silences():
+    n = 4 * RATE
+    # the replaced part plays only in the first of four bars, ours in all four
+    replaced = np.zeros((n, 2), np.float32)
+    replaced[: RATE] = 0.2
+    ours = np.full((n, 2), 0.6, np.float32)
+    fitted = render._at_level_of(ours, replaced)
+    assert np.allclose(fitted, 0.2, atol=1e-3)

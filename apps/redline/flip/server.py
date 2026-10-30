@@ -43,7 +43,7 @@ def _whole(query: dict[str, list[str]], key: str) -> int | None:
     value = _one(query, key)
     if value is None:
         return None
-    if not (value.isascii() and value.isdigit()) or int(value) < 1:
+    if not (value.isascii() and value.isdigit()) or len(value) > 9 or int(value) < 1:
         raise ApiError(HTTPStatus.BAD_REQUEST, f"{key} is a whole number from 1")
     return int(value)
 
@@ -229,6 +229,9 @@ class FlipRoutes:
             flip = model.parse(body.get("flip"))
             if flip.source != ctx.line.source:
                 raise model.FlipError(f"source: must be {ctx.line.source}")
+            problem = model.synth_tempo_problem(flip)
+            if problem is not None:
+                raise model.FlipError(problem)
             analysis = self._analysis(ctx, needed=False)
             if analysis is not None:
                 bars = len(mixer.source_bar_starts(flip, analysis["frames"], analysis["rate"])) - 1
@@ -288,6 +291,8 @@ class FlipRoutes:
             try:
                 self.app._start("flip_render", 0, flip=n)
             except Busy as error:
+                # a version is made for its render: without one it would only push n on
+                (ctx.folder / f"flip-{n}.json").unlink(missing_ok=True)
                 raise ApiError(HTTPStatus.CONFLICT, str(error), "busy") from None
             return reply_json(HTTPStatus.ACCEPTED, {"n": n})
 

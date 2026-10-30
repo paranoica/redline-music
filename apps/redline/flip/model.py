@@ -14,6 +14,10 @@ from redline.song.model import SongError, _check_relative
 
 FORMAT = 1
 MAX_BARS = 512
+# a flip renders whole in memory; this many seconds of it at most
+MAX_PLAY_S = 15 * 60
+# the beat score's tempo range, which renders our 808 and hats
+SYNTH_BPM = (40, 220)
 BEATS_PER_BAR = 4
 TAPE_MAX_S = 4.0
 BASS_MODES = ("original", "ours", "off")
@@ -234,6 +238,16 @@ def _effects(value: object, bpm: float, total: int) -> tuple[Effect, ...]:
     return tuple(out)
 
 
+def synth_tempo_problem(flip: "Flip") -> str | None:
+    """Why the synth cannot play this flip's own parts at its tempo; None when it can."""
+    if "ours" not in (flip.bass_mode, flip.hats_mode):
+        return None
+    low, high = SYNTH_BPM
+    if low <= flip.bpm <= high:
+        return None
+    return f"grid.bpm: {flip.bpm:g}; our 808 and hats play at {low}..{high} BPM"
+
+
 def parse(data: object) -> Flip:
     """Parse a flip from JSON data; unknown or missing fields and bad values raise FlipError."""
     top = _fields(
@@ -270,7 +284,12 @@ def parse(data: object) -> Flip:
     arrangement = _arrangement(top["arrangement"])
     if hats_mode == "ours" and len(patterns) != len(arrangement):
         raise FlipError("hats.patterns: needs one pattern per arrangement block")
-    effects = _effects(top["effects"], bpm, sum(b.to_bar - b.from_bar for b in arrangement))
+    play = sum(b.to_bar - b.from_bar for b in arrangement)
+    if play * BEATS_PER_BAR * 60.0 / bpm > MAX_PLAY_S:
+        raise FlipError(
+            f"arrangement: {play} bars at {bpm:g} BPM play over {MAX_PLAY_S // 60} minutes"
+        )
+    effects = _effects(top["effects"], bpm, play)
     return Flip(
         source,
         bpm,

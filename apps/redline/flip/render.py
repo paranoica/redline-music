@@ -38,6 +38,8 @@ CEILING_DB = -1.0
 # a quiet flip is brought up toward the source at most this much
 MAX_GAIN_DB = 24.0
 MASTER_PASSES = 6
+LEVEL_WINDOW_S = 0.05
+PLAYING_DB = 20.0
 
 
 def play_bar_starts(bar_starts_frames: Sequence[int], arrangement: Sequence[Block]) -> list[int]:
@@ -284,10 +286,28 @@ def mix_flip(stems48: Mapping[str, Samples], ours48: Mapping[str, Samples], flip
     return apply_effects(mixed.astype(np.float32), starts, flip.effects, RATE)
 
 
+def _playing_rms(x: Samples) -> float:
+    """RMS over the windows where the part plays (within 20 dB of its loudest window)."""
+    if x.size == 0:
+        return 0.0
+    size = max(1, int(LEVEL_WINDOW_S * RATE))
+    usable = len(x) // size * size
+    if usable == 0:
+        return float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
+    power = np.square(x[:usable], dtype=np.float64).reshape(-1, size, x.shape[1]).mean(axis=(1, 2))
+    if power.max() <= 0.0:
+        return 0.0
+    playing = power[power >= power.max() * 10.0 ** (-PLAYING_DB / 10.0)]
+    return float(np.sqrt(playing.mean()))
+
+
 def _at_level_of(ours: Samples, replaced: Samples) -> Samples:
-    """Ours scaled to the RMS of what it replaces, so a swap changes the sound, not the level."""
-    have = float(np.sqrt(np.mean(np.square(ours, dtype=np.float64))))
-    want = float(np.sqrt(np.mean(np.square(replaced, dtype=np.float64))))
+    """Ours at the level of what it replaces while each plays, so a swap changes the sound only.
+
+    Measured where each part sounds: hats that played in one section are not averaged with the
+    bars they were silent in.
+    """
+    have, want = _playing_rms(ours), _playing_rms(replaced)
     if have <= 0.0 or want <= 0.0:
         return ours
     return (ours * np.float32(want / have)).astype(np.float32)

@@ -301,8 +301,13 @@ def _reattacks(env: Floats, start: int, top: int, grid: Grid | None = None) -> b
     rise = float(env[top]) / max(float(env[dip_at]), 1e-9)
     # a strike rises fast even from a shallow dip; a held note's ripple rises over half its period
     fast = (top - dip_at) * ENV_HOP / ANALYSIS_RATE <= REATTACK_RISE_S
-    shallow = fast and rise >= REATTACK_FAST and _on_grid(start / ANALYSIS_RATE, grid)
-    return rise >= REATTACK or shallow
+    if rise >= REATTACK:
+        return True
+    if grid is not None:
+        # a mono 808 struck again cuts the last note with no gap: the rise is shallow and blurred
+        # by the envelope, but it lands on the grid, which a ripple on a held note does not
+        return rise >= REATTACK_FAST and _on_grid(start / ANALYSIS_RATE, grid)
+    return fast and rise >= REATTACK_FAST
 
 
 def to_steps(notes: list[Note], grid: Grid) -> list[StepNote]:

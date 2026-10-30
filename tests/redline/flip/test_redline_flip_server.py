@@ -563,3 +563,29 @@ def test_the_job_command_round_trips_through_the_parser_with_a_dash_name():
 def test_a_hostile_flip_never_reaches_a_command(bad):
     with pytest.raises(ValueError):
         job_argv("flip_render", "demo", 0, Path("/r/out.json"), bad)
+
+
+def test_a_render_number_too_long_to_be_one_is_a_bad_request(made):
+    assert call(made, "GET", "/api/flip/audio?n=" + "9" * 5000)[0] == 400
+
+
+def test_a_refused_render_job_leaves_no_version_behind(made, root, monkeypatch):
+    from redline.song.jobs import Busy
+
+    folder = analyse_by_hand(root)
+    before = sorted(p.name for p in folder.glob("flip-*.json"))
+
+    def refuse(*args, **kwargs):
+        raise Busy("held")
+
+    monkeypatch.setattr(made.app, "_start", refuse)
+    assert api(made, "POST", "/api/flip/render", {})[0] == 409
+    assert sorted(p.name for p in folder.glob("flip-*.json")) == before
+
+
+def test_a_draft_whose_own_parts_cannot_play_at_its_tempo_is_422(made, root):
+    analyse_by_hand(root)
+    flip = draft_json(bass808={"mode": "ours", "params": {}})
+    flip["grid"]["bpm"] = 260
+    status, data = api(made, "POST", "/api/flip/draft", {"flip": flip})
+    assert status == 422 and "40..220" in data["error"]

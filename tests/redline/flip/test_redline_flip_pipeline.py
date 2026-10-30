@@ -1,4 +1,5 @@
 import json
+import os
 import stat
 
 import numpy as np
@@ -424,3 +425,19 @@ def test_a_hot_render_comes_to_the_source_loudness_under_the_ceiling(analysed):
     out, _ = sf.read(pipeline.render(folder, n), dtype="float32")
     assert float(np.abs(out).max()) <= 10 ** (-1.0 / 20) + 1e-4
     assert "toward the source's" in (folder / f"flip-{n}.report.md").read_text(encoding="utf-8")
+
+
+def test_a_flip_render_over_a_source_that_changed_since_is_refused(analysed):
+    root, _, result, _ = analysed
+    folder = folder_of(analysed)
+    n = write_version(folder)
+    source = root / "input" / "beats" / "demo.wav"
+    kept, before = source.read_bytes(), source.stat()
+    try:
+        audio, rate = sf.read(source, dtype="float32")
+        sf.write(source, audio * 0.5, rate)
+        with pytest.raises(pipeline.PipelineError, match="changed"):
+            pipeline.lineage(f"work/flips/{result['sha8']}/flip-{n}.wav", root)
+    finally:
+        source.write_bytes(kept)
+        os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))

@@ -129,6 +129,8 @@ def test_tape_duration_is_capped_at_four_seconds_on_a_long_range():
 def test_bars_limit_counts_play_order():
     data = doc()
     data["effects"] = []
+    # fast enough that 512 bars stay under the time limit
+    data["grid"]["bpm"] = 240
     data["arrangement"] = [
         {"label": "a", "from_bar": 0, "to_bar": 256},
         {"label": "b", "from_bar": 0, "to_bar": 256},
@@ -191,3 +193,27 @@ def test_load_refuses_a_broken_file(tmp_path):
     (tmp_path / "flip-1.json").write_text("{nope")
     with pytest.raises(model.FlipError):
         model.load(tmp_path / "flip-1.json")
+
+
+def test_a_flip_plays_at_most_fifteen_minutes_whatever_its_bars():
+    data = doc()
+    data["effects"] = []
+    data["grid"]["bpm"] = 30
+    # 113 bars at 30 BPM are 904 s; 112 are 896 s
+    data["arrangement"] = [{"label": "a", "from_bar": 0, "to_bar": 113}]
+    data["hats"]["patterns"] = ["eighths"]
+    with pytest.raises(model.FlipError, match="minutes"):
+        model.parse(data)
+    data["arrangement"][0]["to_bar"] = 112
+    model.parse(data)
+
+
+def test_our_parts_name_the_tempo_the_synth_cannot_play():
+    data = doc()
+    data["effects"] = []
+    data["grid"]["bpm"] = 260
+    data["bass808"]["mode"] = "ours"
+    assert "40..220" in model.synth_tempo_problem(model.parse(data))
+    data["bass808"]["mode"] = "original"
+    data["hats"]["mode"] = "original"
+    assert model.synth_tempo_problem(model.parse(data)) is None

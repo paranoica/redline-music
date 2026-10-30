@@ -120,3 +120,13 @@ def test_nudging_the_downbeat_moves_every_bar_and_keeps_the_tempo():
     assert grid.bpm == 120.0
     assert grid.bars == pytest.approx((0.3, 2.3, 4.3))
     assert grid.downbeat_s == 0.3
+
+
+def test_a_file_that_starts_just_after_a_bar_line_keeps_its_phase():
+    late = 0.025
+    whole = track(140.0, 24, {0: 1.0, 10: 0.7})
+    # the file starts 25 ms after a bar line: the first whole bar starts one bar on, less that
+    drums = whole[int(late * RATE) :]
+    grid = find_grid(drums, drums, RATE, bpm=140.0)
+    bar_s = 60.0 / 140.0 * 4
+    assert grid.downbeat_s == pytest.approx(bar_s - late, abs=0.005)

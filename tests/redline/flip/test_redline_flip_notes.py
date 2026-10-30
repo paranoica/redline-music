@@ -186,3 +186,16 @@ def test_off_grid_ripple_on_a_held_808_is_no_strike_when_the_grid_is_known():
     assert [n.midi for n in notes] == [30, 33]
     roll, _ = find_notes(phrase([(s, 1, 31) for s in range(8)] + [(8, 4, 26)]), RATE, grid_for(6.0))
     assert len(roll) == 9
+
+
+@pytest.mark.parametrize("tau", [0.3, 1.0])
+def test_a_root_808_struck_on_every_eighth_is_sixteen_notes(tau):
+    # a mono 808: each strike cuts the last one where it is, with no gap before it
+    out = np.zeros(int(8.0 * RATE), dtype=np.float32)
+    span = int(2 * STEP_S * RATE)
+    t = np.arange(span) / RATE
+    hit = (0.8 * np.sin(2 * np.pi * hz(29) * t) * np.exp(-t / tau)).astype(np.float32)
+    for k in range(16):
+        out[k * span : (k + 1) * span] = hit
+    notes, _ = find_notes(out, RATE, grid_for(8.0))
+    assert [n.midi for n in notes] == [29] * 16

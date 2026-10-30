@@ -123,8 +123,14 @@ def lineage(beat: str, root: Path) -> Lineage:
         sha8, n = found.group(1), int(found.group(2))
         folder = flip_dir(root, sha8)
         flip = model.load(inside(folder, f"flip-{n}.json"))
-        if not resolve_inside(flip.source, root, "flip source").is_file():
+        source = resolve_inside(flip.source, root, "flip source")
+        if not source.is_file():
             raise PipelineError(f"{flip.source}: the flip's source is gone")
+        if source_sha8(source) != sha8:
+            # its stems and grid are of the old file; a new analysis goes to another folder
+            raise PipelineError(
+                f"{flip.source}: the source changed since this flip; open the flip of the new file"
+            )
         return Lineage(flip.source, sha8, n)
     except (SongError, model.FlipError) as error:
         raise PipelineError(str(error)) from None
@@ -176,7 +182,7 @@ def renders(folder: Path) -> list[int]:
     """The n of every flip-<n>.wav that exists, ascending."""
     if not folder.is_dir():
         return []
-    found = (re.fullmatch(r"flip-(\d+)\.wav", p.name) for p in folder.iterdir())
+    found = (re.fullmatch(r"flip-([1-9][0-9]*)\.wav", p.name) for p in folder.iterdir())
     return sorted(int(m.group(1)) for m in found if m)
 
 
@@ -353,6 +359,9 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
         flip = model.load(path)
     except model.FlipError as error:
         raise PipelineError(str(error)) from None
+    problem = model.synth_tempo_problem(flip)
+    if problem is not None:
+        raise PipelineError(problem)
     analysis = _need_analysis(folder)
     stems = load_stems(folder)
     frames = len(stems["drums"])

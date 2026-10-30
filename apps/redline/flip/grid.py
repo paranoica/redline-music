@@ -35,7 +35,7 @@ MIN_ONSETS = 8
 # an onset farther than this from its sixteenth is off the grid and does not steer the fit
 FIT_TOLERANCE_S = 0.02
 DOWNBEAT_SHARE = 0.8
-ZERO_SNAP_S = 0.03
+ZERO_SNAP_S = 0.005
 END_MARGIN_S = 0.01
 
 
@@ -199,6 +199,13 @@ def _downbeat(times: Floats, weights: Floats, index: Floats, offset: float, slop
     return offset + slope * best
 
 
+def _inside_file(downbeat: float, step_s: float) -> float:
+    """The first downbeat inside the file; a bar line just before its start moves on a bar."""
+    if downbeat < -ZERO_SNAP_S:
+        return downbeat + step_s * STEPS_PER_BAR
+    return max(0.0, downbeat)
+
+
 def find_grid(
     drums_mono: Samples,
     bass_mono: Samples,
@@ -260,9 +267,7 @@ def find_grid(
             period = min(tied, key=lambda p: abs(math.log(p / target)))
     period = _scan_period(times, weights, period)
     offset, slope, index = _fit(times, weights, period)
-    downbeat = _downbeat(times, weights, index, offset, slope)
-    if downbeat < ZERO_SNAP_S:
-        downbeat = max(0.0, downbeat)
+    downbeat = _inside_file(_downbeat(times, weights, index, offset, slope), slope)
     tempo = 60.0 / slope / STEPS_PER_BEAT
     grid = Grid(tempo, downbeat, (), duration)
     return grid.with_downbeat(downbeat)
