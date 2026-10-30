@@ -57,6 +57,14 @@ def _entry_key(entry: dict[str, Any]) -> LatencyKey:
     )
 
 
+def _frames(entry: dict[str, Any]) -> int:
+    frames = entry["frames"]
+    # a round trip longer than a second is not a sound path the engine can monitor through
+    if isinstance(frames, bool) or not isinstance(frames, int) or not 0 <= frames <= entry["rate"]:
+        raise ValueError(f"the stored round trip {frames!r} is not 0 to {entry['rate']} frames")
+    return frames
+
+
 def _read(path: Path) -> list[dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     entries = data["calibrations"]
@@ -118,9 +126,9 @@ def round_trip(path: Path, key: LatencyKey, estimate: int | None) -> RoundTrip:
         if mine and _entry_key(mine[0]) != key:
             raise ValueError(f"the entry for {key.name()} does not match its own fields")
         if mine:
-            return RoundTrip(int(mine[0]["frames"]), "calibrated")
+            return RoundTrip(_frames(mine[0]), "calibrated")
         stored = "; ".join(str(e.get("key")) for e in others) or "nothing"
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, OverflowError) as error:
         return _fallback(estimate, f"{path.name} unreadable ({error}): {again}")
     return _fallback(
         estimate, f"calibrated for {stored}, not for {key.name()}: {again} for this setup"

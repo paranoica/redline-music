@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from redline.record.latency import LatencyKey, round_trip, save_calibration
 from redline.record.sweep import Delay
 
@@ -84,3 +85,26 @@ def test_speakers_are_stored_with_their_mode(tmp_path):
     assert entry["mode"] == "speakers"
     assert entry["peak_to_noise_db"] == 33.0
     assert round_trip(path, KEY, None).frames == 900
+
+
+@pytest.mark.parametrize(
+    "frames",
+    [-1, 48001, 2**64 - 1, 312.5, True, None, "312", float("inf")],
+    ids=["negative", "over a second", "huge", "fraction", "bool", "null", "text", "infinity"],
+)
+def test_a_stored_round_trip_that_cannot_be_one_is_refused(tmp_path, frames):
+    path = tmp_path / "latency.json"
+    save_calibration(path, KEY, Delay(312, 41.0), "cup")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["calibrations"][0]["frames"] = frames
+    # json.dumps writes inf as Infinity, which json.loads reads back
+    path.write_text(json.dumps(data), encoding="utf-8")
+    found = round_trip(path, KEY, estimate=200)
+    assert (found.frames, found.source) == (200, "estimate")
+    assert "latency.json" in found.note
+
+
+def test_a_round_trip_of_a_whole_second_is_still_applied(tmp_path):
+    path = tmp_path / "latency.json"
+    save_calibration(path, KEY, Delay(48000, 41.0), "loopback")
+    assert round_trip(path, KEY, estimate=200).frames == 48000
