@@ -34,7 +34,10 @@ class TakeReport:
 
 @dataclass(frozen=True)
 class Meters:
-    """Peaks since the last call, counters, and the monitor rack's latency in frames."""
+    """Peaks since the last call, counters, and the monitor rack's latency in frames.
+
+    quantum is the graph's period now; None from an engine that does not report it.
+    """
 
     mic_peak: float
     out_peak: float
@@ -43,6 +46,7 @@ class Meters:
     recording: bool
     take_frames: int
     rack_latency: int
+    quantum: int | None = None
 
 
 @dataclass(frozen=True)
@@ -158,4 +162,5 @@ def meters(data: dict[str, Any]) -> Meters:
         bool(data["recording"]),
         int(data["take_frames"]),
         int(data["rack_latency"]),
+        None if data.get("quantum") is None else int(data["quantum"]),
     )

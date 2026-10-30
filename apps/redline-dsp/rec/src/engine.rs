@@ -74,16 +74,23 @@ struct Shared {
     xruns: AtomicU64,
     overflows: AtomicU64,
     take_frames: AtomicU64,
+    /// The period the backend last reported; 0 until it does.
+    quantum: AtomicU32,
     quit: AtomicBool,
 }
 
-/// What the backend's xrun callback holds; it may run on any thread.
+/// What the backend's notification callbacks hold; they may run on any thread.
 #[derive(Clone)]
 pub struct XrunReporter(Arc<Shared>);
 
 impl XrunReporter {
     pub fn report(&self) {
         self.0.xruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The period the graph runs at now, for the meters.
+    pub fn set_quantum(&self, frames: u32) {
+        self.0.quantum.store(frames, Ordering::Relaxed);
     }
 }
 
@@ -646,6 +653,7 @@ impl Control {
             recording: self.recording,
             take_frames: s.take_frames.load(Ordering::Relaxed),
             rack_latency: self.rack_latency,
+            quantum: Some(s.quantum.load(Ordering::Relaxed)).filter(|&q| q > 0),
         }
     }
 

@@ -576,6 +576,21 @@ fn a_non_finite_mic_sample_leaves_the_meters_finite_and_in_json() {
         m.mic_peak
     );
     assert!(m.out_peak.is_finite(), "{}", m.out_peak);
-    let line = redline_rec::protocol::format(&Reply::Meters(m));
-    assert!(!line.contains("null"), "{line}");
+    let line: serde_json::Value =
+        serde_json::from_str(&redline_rec::protocol::format(&Reply::Meters(m))).unwrap();
+    assert!(
+        line["mic_peak"].is_number() && line["out_peak"].is_number(),
+        "{line}"
+    );
+}
+
+#[test]
+fn the_meters_report_the_quantum_the_backend_last_saw() {
+    let (e, mut c) = setup(480);
+    assert_eq!(c.meters().quantum, None);
+    let reporter = e.xrun_reporter();
+    reporter.set_quantum(64);
+    assert_eq!(c.meters().quantum, Some(64));
+    reporter.set_quantum(256);
+    assert_eq!(c.meters().quantum, Some(256));
 }

@@ -79,11 +79,13 @@ fn replies_are_one_json_line_each_naming_the_command() {
         recording: true,
         take_frames: 4800,
         rack_latency: 64,
+        quantum: Some(128),
     };
     assert_eq!(
         line(&Reply::Meters(meters)),
         json!({"reply": "meters", "mic_peak": 0.5, "out_peak": 0.25, "xruns": 2,
-               "overflows": 1, "recording": true, "take_frames": 4800, "rack_latency": 64})
+               "overflows": 1, "recording": true, "take_frames": 4800, "rack_latency": 64,
+               "quantum": 128})
     );
 }
 

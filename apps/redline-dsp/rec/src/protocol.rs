@@ -8,7 +8,7 @@
 //!   switched off from the end until its latency fits `budget` frames, or the backend's
 //!   default budget when none is given.
 //! - `{"cmd": "meters"}`: peaks since the last call, xruns, overflows, frames since the take
-//!   started (the round trip included), the monitor rack's latency.
+//!   started (the round trip included), the monitor rack's latency, the graph's period now.
 //! - `{"cmd": "quit"}`.
 //!
 //! Before any reply the backend writes one [`Startup`] line, `{"event": "started", ...}`.
@@ -89,6 +89,8 @@ pub struct Meters {
     pub recording: bool,
     pub take_frames: u64,
     pub rack_latency: usize,
+    /// The period the backend last reported; none before it has.
+    pub quantum: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

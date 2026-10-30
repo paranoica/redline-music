@@ -285,3 +285,59 @@ def test_a_null_peak_in_the_meters_reads_as_infinite_not_a_crash():
     m = meters(reply)
     assert m.mic_peak == float("inf") and m.out_peak == 0.5
     assert "CLIP" in level_meter(m.mic_peak)
+
+
+def test_the_meters_carry_the_quantum_and_an_older_engine_none():
+    from redline.record.protocol import meters
+
+    reply = {
+        "mic_peak": 0.1,
+        "out_peak": 0.1,
+        "xruns": 0,
+        "overflows": 0,
+        "recording": False,
+        "take_frames": 0,
+        "rack_latency": 0,
+    }
+    assert meters(reply).quantum is None
+    assert meters({**reply, "quantum": None}).quantum is None
+    assert meters({**reply, "quantum": 256}).quantum == 256
+
+
+class QuantumEngine:
+    """An engine whose meters report a quantum; it records nothing."""
+
+    def __init__(self, quantum):
+        self.quantum = quantum
+        self.started = []
+
+    def start(self, path, offset):
+        self.started.append(path)
+
+    def stop(self):
+        raise AssertionError("not reached")
+
+    def close(self):
+        pass
+
+    def meters(self):
+        from redline.record.protocol import Meters
+
+        return Meters(0.0, 0.0, 0, 0, False, 0, 0, self.quantum)
+
+
+def test_a_take_is_refused_when_the_quantum_moved_since_the_start(tmp_path):
+    engine = QuantumEngine(256)
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    message = session.toggle()
+    assert "64" in message and "256" in message and "restart `redline record`" in message
+    assert engine.started == [] and session.current is None
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("quantum", [64, None])
+def test_a_take_starts_when_the_quantum_held_or_is_not_reported(tmp_path, quantum):
+    engine = QuantumEngine(quantum)
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    assert session.toggle() == "recording take-01"
+    assert [p.name for p in engine.started] == ["take-01.wav"]

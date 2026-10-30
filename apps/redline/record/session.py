@@ -34,6 +34,10 @@ class Engine(Protocol):
         """Quit."""
         ...
 
+    def meters(self) -> Meters:
+        """Peaks, counters and the graph's quantum now."""
+        ...
+
 
 def quantum_warning(quantum: int) -> str | None:
     """The plain warning when the granted quantum cannot give a monitor under 10 ms."""
@@ -86,6 +90,13 @@ class Session:
     def toggle(self) -> str:
         """Start the next take, or finish the one running; what happened, in a line."""
         if self.current is None:
+            now = self.engine.meters().quantum
+            if now is not None and now != self.quantum:
+                return (
+                    f"take refused: the audio graph's quantum moved from {self.quantum} to "
+                    f"{now} frames, so the round trip the takes are shifted by no longer "
+                    "holds. Quit and restart `redline record`"
+                )
             path = next_take(self.folder).resolve()
             self.engine.start(path, self.round_trip.frames or 0)
             self.current = path

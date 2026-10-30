@@ -30,6 +30,7 @@ struct Process {
     out_l: Port<AudioOut>,
     out_r: Port<AudioOut>,
     clock: FrameClock,
+    quantum: XrunReporter,
 }
 
 impl ProcessHandler for Process {
@@ -39,6 +40,11 @@ impl ProcessHandler for Process {
         let l = self.out_l.as_mut_slice(ps);
         let r = self.out_r.as_mut_slice(ps);
         self.engine.cycle(mic, l, r, frame);
+        Flow::Continue
+    }
+
+    fn buffer_size(&mut self, _: &Client, frames: jack::Frames) -> Flow {
+        self.quantum.set_quantum(frames);
         Flow::Continue
     }
 }
@@ -145,8 +151,9 @@ fn run(args: Args) -> Result<(), String> {
     );
 
     let (engine, mut control) = engine(Config::new(rate, frames))?;
+    let reporter = engine.xrun_reporter();
     let notifications = Notifications {
-        xruns: engine.xrun_reporter(),
+        xruns: reporter.clone(),
         rate,
     };
     let process = Process {
@@ -155,6 +162,7 @@ fn run(args: Args) -> Result<(), String> {
         out_l,
         out_r,
         clock: FrameClock::default(),
+        quantum: reporter.clone(),
     };
     let active = client
         .activate_async(notifications, process)
@@ -201,9 +209,11 @@ fn run(args: Args) -> Result<(), String> {
         latency(c, &l_name, LatencyType::Playback),
         latency(c, &r_name, LatencyType::Playback),
     );
+    let quantum = c.buffer_size();
+    reporter.set_quantum(quantum);
     let graph = Graph {
         rate,
-        quantum: c.buffer_size(),
+        quantum,
         capture,
         playback: (pl.0.max(pr.0), pl.1.max(pr.1)),
     };

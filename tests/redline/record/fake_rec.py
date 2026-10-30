@@ -32,6 +32,7 @@ class Fake:
         self.rate = rate
         self.take = None
         self.racks = 0
+        self.quantum = None
         self.dropouts = json.loads(os.environ.get("FAKE_REC_DROPOUTS", "[]"))
 
     def samples(self):
@@ -92,6 +93,7 @@ class Fake:
             recording=self.take is not None,
             take_frames=4800 if self.take else 0,
             rack_latency=0,
+            quantum=int(os.environ.get("FAKE_REC_METERS_QUANTUM", self.quantum)),
         )
 
 
@@ -146,6 +148,7 @@ def main():
     quantum = int(os.environ.get("FAKE_REC_QUANTUM", args.quantum))
     startup(rate, quantum, args.round_trip, not args.no_connect, beat.frames)
     fake = Fake(args.beat, rate)
+    fake.quantum = quantum
     handlers = {
         "start": fake.start,
         "stop": fake.stop,
