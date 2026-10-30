@@ -116,7 +116,7 @@ a checklist, and each station says what it needs and how to get it.
 - **Result**: renders the final track into `output/<song>/`.
 
 Long work (separation, ranking, auto mix, the result) runs as separate processes you can
-cancel, and waits while a take records so the audio stays clean. Closing the tab never stops a
+cancel, and pauses while a take records so the audio stays clean. Closing the tab never stops a
 take; stopping the server keeps it. The mix and beat surfaces need a screen 1024 px wide; the
 rest works on a phone. More in [docs/song.md](docs/song.md).
 

@@ -79,7 +79,8 @@ Separation, ranking, auto mix and the result run as subprocesses (`redline song 
   except ranking, which queues one more run after the current one.
 - Cancel stops the process group (`SIGTERM`, then `SIGKILL` after 5 s). The slot stays taken
   until the process has exited.
-- Jobs run at lower priority and wait while a take records, so the recording keeps the CPU.
+- Jobs run at lower priority. While a take records, waiting jobs stay queued and running ones
+  are paused (`SIGSTOP`), so the recording keeps the CPU; they go on when the take ends.
 - A finished take starts its ranking. Only takes whose log says they finished, over the song's
   current beat, are ranked; the rest are listed with the reason.
 
@@ -98,7 +99,8 @@ headphones, as with `redline record` (see [sound.md](sound.md) and RDL-D24).
   relaunching at the audio graph's rate, analysing the monitor, a 5 s level check, ready.
 - A reply that comes late or does not match its command marks the engine out of sync: commands
   are refused until it is opened again, so a stale reply can never be taken for a new one.
-- A beat change while a take records is refused. Closing the tab does not stop a take; stopping
+- The engine follows the song's beat: after a re-render or a new seed it is relaunched on the new
+  file, or closed if that beat is not rendered yet. A beat change while a take records is refused. Closing the tab does not stop a take; stopping
   the server (`Ctrl+C`, `SIGTERM`, `SIGHUP`) ends a running take and keeps it, then cancels the
   jobs.
 - Takes are created owner-only and never over an existing file.
