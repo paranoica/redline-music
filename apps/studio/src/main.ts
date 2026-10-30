@@ -7,7 +7,7 @@ import { catalogueOf } from "./core/diff.ts";
 import { clock, formatNumber } from "./core/format.ts";
 import { History } from "./core/history.ts";
 import { keyAction } from "./core/keys.ts";
-import type { Loop } from "./core/loop.ts";
+import { intoLoop, type Loop } from "./core/loop.ts";
 import { abGains, dbToGain, integratedLufs, loudestSpan } from "./core/loudness.ts";
 import { buildLanes, buildRacks, parseRack } from "./core/racks.ts";
 import { changedKeys, needsAnalysis, staleKeys } from "./core/stale.ts";
@@ -394,7 +394,9 @@ class Studio {
 
   #seek(seconds: number): void {
     if (this.#client.dead) return;
-    const frame = Math.round(seconds * this.#rate);
+    // the engine takes a seek outside a loop that is on to the loop's start; the clock goes too
+    const loop = { start: Math.round(this.#loop.start * this.#rate), end: Math.round(this.#loop.end * this.#rate) };
+    const frame = intoLoop(Math.round(seconds * this.#rate), this.#loopOn, loop);
     this.#frame = frame;
     this.#anchor = { frame, at: this.#ctx.currentTime };
     this.#client.seek(frame);

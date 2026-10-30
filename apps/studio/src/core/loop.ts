@@ -21,6 +21,11 @@ export function dragLoop(loop: Loop, grip: LoopGrip, delta: number, duration: nu
   return { start, end: start + length };
 }
 
+// where a jump to `at` lands: a loop that is on takes one from outside it to its start
+export function intoLoop(at: number, on: boolean, loop: Loop): number {
+  return on && (at < loop.start || at >= loop.end) ? loop.start : at;
+}
+
 export function hitLoop(loop: Loop, t: number, tolerance: number): LoopGrip | null {
   if (Math.abs(t - loop.start) <= tolerance) return "start";
   if (Math.abs(t - loop.end) <= tolerance) return "end";

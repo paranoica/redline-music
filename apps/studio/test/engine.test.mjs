@@ -529,3 +529,46 @@ test("a forward seek while a rebuilt rack warms up does not warm it through the 
   assert.ok(posted.some((m) => m.type === "rack" && m.track === "vocal" && m.version === 2), "the new rack is not in yet");
   assert.ok(Math.abs(left(out, RATE / 4 - 1) - 0.5 * 10 ** (-6 / 20)) < 1e-3, `${left(out, RATE / 4 - 1)}`);
 });
+
+// each frame says which frame of the track it is: the left channel over the right
+const indexed = (frames) => stereo(frames, (n) => [(0.5 * n) / frames, 0.5]);
+
+// the track frame of the first frame heard; with `afterQuiet`, the first after a silence
+function firstHeard(engine, frames, afterQuiet = false) {
+  const l = new Float32Array(BLOCK);
+  const r = new Float32Array(BLOCK);
+  let quiet = !afterQuiet;
+  for (let at = 0; at < 4 * RATE; at += BLOCK) {
+    engine.render(l, r);
+    for (let i = 0; i < BLOCK; i++) {
+      if (Math.abs(r[i]) <= 1e-4) quiet = true;
+      else if (quiet) return Math.round((l[i] / r[i]) * frames);
+    }
+  }
+  return null;
+}
+
+test("with the loop on, a seek outside it plays from the loop's start; one inside stays where it is", () => {
+  const frames = 4 * RATE;
+  for (const [to, want] of [[30000, 10000], [5000, 10000], [20000, 10000], [10000, 10000], [15000, 15000]]) {
+    const { engine, posted } = setup({ frames, vocal: indexed(frames) });
+    engine.handle({ type: "loop", on: true, start: 10000, end: 20000 });
+    engine.handle({ type: "seek", frame: to });
+    engine.handle({ type: "play", playing: true });
+    assert.equal(firstHeard(engine, frames), want, `seek to ${to}`);
+    run(engine, RATE / 4);
+    const shown = posted.filter((m) => m.type === "levels").map((m) => m.frame);
+    assert.ok(shown.length > 0 && shown.every((f) => f >= 10000 && f < 20000), `seek to ${to}: ${shown}`);
+  }
+});
+
+test("with the loop on, a seek outside it while playing goes on from the loop's start", () => {
+  const frames = 4 * RATE;
+  const { engine } = setup({ frames, vocal: indexed(frames) });
+  engine.handle({ type: "loop", on: true, start: 10000, end: 20000 });
+  engine.handle({ type: "seek", frame: 12000 });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 4096);
+  engine.handle({ type: "seek", frame: 30000 });
+  assert.equal(firstHeard(engine, frames, true), 10000);
+});

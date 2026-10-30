@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { dragTo, fromNorm, isLog, snap, stepBy, toNorm } from "../src/core/control-math.ts";
 import { keyAction } from "../src/core/keys.ts";
-import { dragLoop, hitLoop } from "../src/core/loop.ts";
+import { dragLoop, hitLoop, intoLoop } from "../src/core/loop.ts";
 
 function close(got, want, tol = 1e-9) {
   assert.ok(Math.abs(got - want) <= tol, `${got} against ${want}`);
@@ -81,4 +81,14 @@ test("a press near an edge grabs the edge, inside the loop moves it, outside see
   assert.equal(hitLoop(loop, 15, 0.5), "move");
   assert.equal(hitLoop(loop, 25, 0.5), null);
   assert.equal(hitLoop(loop, 9.4, 0.5), null);
+});
+
+test("a seek outside a loop that is on lands on its start; inside it, or with the loop off, where it was asked", () => {
+  const loop = { start: 10, end: 20 };
+  assert.equal(intoLoop(30, true, loop), 10);
+  assert.equal(intoLoop(9, true, loop), 10);
+  assert.equal(intoLoop(20, true, loop), 10);
+  assert.equal(intoLoop(10, true, loop), 10);
+  assert.equal(intoLoop(19.5, true, loop), 19.5);
+  assert.equal(intoLoop(30, false, loop), 30);
 });

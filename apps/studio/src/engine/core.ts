@@ -7,6 +7,7 @@
 import { valueAt } from "../core/automation.ts";
 import { catalogueOf, paramNumber, type Catalogue } from "../core/diff.ts";
 import { DelayLine, align } from "../core/latency.ts";
+import { intoLoop } from "../core/loop.ts";
 import { LoudnessMeter } from "../core/loudness.ts";
 import type { EffectSpec, Lane, ParamValue, Track } from "../types.ts";
 import { lastError, utf8, withText, type Dsp } from "./dsp.ts";
@@ -398,7 +399,8 @@ export class Engine {
   // the racks are fed the frames before `frame` while the output stays silent
   #jump(frame: number): void {
     const frames = this.#stems?.frames ?? 0;
-    const at = Math.max(0, Math.min(Math.round(frame), Math.max(0, frames - 1)));
+    const to = intoLoop(Math.round(frame), this.#loop.on, this.#loop);
+    const at = Math.max(0, Math.min(to, Math.max(0, frames - 1)));
     const preroll = Math.min(at, WARM_MAX, this.#total + WARM_EXTRA);
     this.#read = at - preroll;
     for (const d of [this.#pad.vocal, this.#pad.beat, this.#late.original, this.#late.render]) {
