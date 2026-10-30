@@ -98,3 +98,12 @@ def test_new_with_a_text_seed_takes_its_latest_version(root, capsys):
     assert main(["song", "new", "other", "--beat-seed", "5", "--text-seed", "13"]) != 0
     assert "13" in capsys.readouterr().err
     assert model.list_songs() == ["demo"]
+
+
+def test_refs_replaces_the_references_and_bumps_the_rev(root, capsys):
+    assert main(["song", "new", "demo", "--beat-seed", "5"]) == 0
+    assert main(["song", "refs", "demo", "--ref", "input/refs/a.wav", "input/refs/b.mp3"]) == 0
+    song = model.load("demo")
+    assert song.references == ("input/refs/a.wav", "input/refs/b.mp3") and song.rev == 2
+    assert main(["song", "refs", "demo", "--ref", "../outside.wav"]) != 0
+    assert model.load("demo").references == ("input/refs/a.wav", "input/refs/b.mp3")

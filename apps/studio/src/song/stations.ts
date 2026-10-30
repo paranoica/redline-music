@@ -170,18 +170,14 @@ export function createMixStation(ctx: Ctx, host: SurfaceHost): KeyedView {
     slot = null;
     if (!m.ready || blocked) {
       void host.dispose();
-      const voice = song.stations.voice;
-      const stems = m.reason === "stems not ready";
+      const need = mixNeed(m.reason ?? "no voice chosen", song.stations.voice.kind, song.song.name);
       el.replaceChildren(
         needCard({
           title: "Сведение",
-          what: stems ? "Голос ещё не отделён." : "Для сведения нет голоса.",
-          how: stems
-            ? "Сведение берёт голос и бит из кэша: сначала отдели голос Suno на шаге «Дубли»."
-            : voice.kind === "takes"
-              ? "Выбери дубль на шаге «Дубли»: сведение берёт голос оттуда."
-              : "Укажи голос песни.",
-          actions: [goButton(stems || voice.kind === "takes" ? "К дублям" : "К биту", () => ctx.go(stems || voice.kind === "takes" ? "takes" : "beat"))],
+          what: need.what,
+          how: need.how,
+          ...(need.command ? { command: need.command } : {}),
+          actions: need.go ? [goButton(need.go === "takes" ? "К дублям" : "К биту", () => ctx.go(need.go ?? "takes"))] : [],
         }),
       );
       return;
@@ -401,4 +397,29 @@ export function createRecStation(ctx: Ctx, lyric: StationView, hooks: RecHooks):
       lyric.dispose();
     },
   };
+}
+
+export interface MixNeed {
+  what: string;
+  how: string;
+  command: string | null;
+  go: "takes" | "beat" | null;
+}
+
+// why the mix cannot be built, from the server's reason, and the way out
+export function mixNeed(reason: string, voice: "takes" | "suno", song: string): MixNeed {
+  if (reason === "stems not ready")
+    return { what: "Голос ещё не отделён.", how: "Сведение берёт голос и бит из кэша: сначала отдели голос Suno на шаге «Дубли».", command: null, go: "takes" };
+  if (reason === "the song has no references")
+    return {
+      what: "У песни нет референсов.",
+      how: "Сведение и варианты подбираются к референсам. Добавь их из терминала:",
+      command: `uv run redline song refs ${song} --ref <файлы референсов>`,
+      go: null,
+    };
+  if (reason === "no voice chosen")
+    return voice === "takes"
+      ? { what: "Для сведения нет голоса.", how: "Выбери дубль на шаге «Дубли»: сведение берёт голос оттуда.", command: null, go: "takes" }
+      : { what: "Для сведения нет голоса.", how: "Укажи голос песни.", command: null, go: "beat" };
+  return { what: `Сведение не собрать: ${reason}.`, how: "Проверь файлы песни.", command: null, go: null };
 }

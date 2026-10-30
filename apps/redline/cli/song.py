@@ -16,7 +16,14 @@ if TYPE_CHECKING:
 
 def _song(args: argparse.Namespace) -> int | None:
     """Run a `redline song` subcommand; None when none was given."""
-    handlers = {"new": _new, "list": _list, "show": _show, "studio": _studio, "job": _job}
+    handlers = {
+        "new": _new,
+        "refs": _refs,
+        "list": _list,
+        "show": _show,
+        "studio": _studio,
+        "job": _job,
+    }
     handler = handlers.get(args.song_command)
     if handler is None:
         return None
@@ -56,6 +63,16 @@ def _latest_text(seed: int) -> dict[str, int]:
     if not have:
         raise model.SongError(f"--text-seed: seed {seed} has no text")
     return {"seed": seed, "version": max(have)}
+
+
+def _refs(args: argparse.Namespace) -> int:
+    song = model.load(args.name)
+    refs = tuple(model.relative_to_root(p) for p in args.ref)
+    for stored in refs:
+        model.resolve_inside(stored, where="--ref")
+    saved = model.save(replace(song, references=refs), song.rev)
+    print(f"song {saved.name}: {len(refs)} references", flush=True)
+    return 0
 
 
 def _list(args: argparse.Namespace) -> int:
