@@ -774,6 +774,30 @@ test("after a seek while playing with a hold shorter than a block a report comes
   assert.deepEqual(got, wanted);
 });
 
+test("a rack rebuilt while paused, without a seek, plays on from the frame it stopped at", () => {
+  const frames = 4 * RATE;
+  const got = [];
+  const wanted = [];
+  for (const [from, to] of [[240, null], [240, 240], [240, 0], [240, 130], [130, 240], [0, 240]]) {
+    const { engine, posted } = setup({ frames, vocal: indexed(frames), racks: { master: masterOf(from) } });
+    engine.handle({ type: "play", playing: true });
+    run(engine, 300 * BLOCK);
+    engine.handle({ type: "play", playing: false });
+    run(engine, 20 * BLOCK);
+    const stop = posted.filter((m) => m.type === "levels").at(-1);
+    assert.equal(stop.playing, false);
+    if (to !== null) {
+      engine.handle({ type: "rack", track: "master", version: 2, json: masterOf(to), lanes: [] });
+      assert.ok(posted.some((m) => m.type === "rack" && m.version === 2 && m.latency === to));
+    }
+    engine.handle({ type: "play", playing: true });
+    const at = `${from} -> ${to ?? "no rebuild"}`;
+    got.push(`${at}: ${firstHeard(engine, frames)}`);
+    wanted.push(`${at}: ${stop.frame}`);
+  }
+  assert.deepEqual(got, wanted);
+});
+
 // a reference whose frame p is heard as p by firstHeard
 const REF = 10000;
 const refSource = { type: "source", name: "reference", data: stereo(REF, (p) => [(0.5 * p) / REF, 0.5]), start: 0, length: REF };

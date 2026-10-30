@@ -298,7 +298,14 @@ export class Engine {
     if (rack.pending) this.#free(rack.pending.inst);
     rack.pending = null;
     rack.swapQueued = false;
-    if (!rack.current || !this.#running) {
+    if (!this.#running) {
+      // what the old racks held of the frames before this spot goes with them, so it is read again
+      const at = this.#heard(this.#read + this.#hold);
+      this.#install(rack, inst);
+      if (this.#stems) this.#restart(at);
+      return;
+    }
+    if (!rack.current) {
       this.#install(rack, inst);
       return;
     }
