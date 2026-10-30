@@ -26,6 +26,11 @@ from scipy.ndimage import maximum_filter1d
 from scipy.signal import butter, sosfiltfilt
 
 
+def as_record(settings):
+    # through JSON, so the rack's tuple compares as the list chain.json holds
+    return json.loads(json.dumps(asdict(settings)))
+
+
 class HalfSeparator:
     id = "fake:half"
 
@@ -101,10 +106,10 @@ def test_master_round_writes_the_original_and_four_masters(inputs, tmp_path):
         assert m["final_lufs"] == pytest.approx(m["target_lufs"], abs=0.2)
     variants = chain["variants"]
     assert sorted(variants) == sorted(n for n in names if n != "original")
-    assert variants["no master"] == asdict(replace(Settings(), master_on=False))
+    assert variants["no master"] == as_record(replace(Settings(), master_on=False))
     for m in masters:
         fixed = replace(Settings(), master_auto=False, master_lufs=m["target_lufs"])
-        assert variants[m["name"]] == asdict(fixed)
+        assert variants[m["name"]] == as_record(fixed)
 
 
 def test_master_round_masters_the_chosen_sound(inputs, tmp_path):
@@ -370,6 +375,22 @@ def test_cli_run_prints_the_folder(inputs, tmp_path, capsys):
     assert printed == str(folder)
 
 
+def test_cli_run_takes_a_rack_from_a_preset(inputs, tmp_path):
+    pytest.importorskip("redline_dsp")
+    track, refs = inputs
+    presets = tmp_path / "w" / "studio" / "presets"
+    presets.mkdir(parents=True)
+    rack = [{"effect": "gain", "params": {"db": -12}}]
+    (presets / "quiet.json").write_text(json.dumps({"version": 2, "rack": rack}))
+    stems = []
+    for extra, out in (([], "o1"), (["--preset", "quiet"], "o2")):
+        args = ["run", "--track", str(track), "--ref", str(refs), "--work", str(tmp_path / "w")]
+        assert main([*args, "--out", str(tmp_path / out), *extra], HalfSeparator()) == 0
+        (folder,) = list((tmp_path / out).iterdir())
+        stems.append(sf.read(folder / "stems" / "vocal.wav")[0])
+    np.testing.assert_allclose(stems[1], stems[0] * 10 ** (-12 / 20), atol=1e-6)
+
+
 def test_run_masters_to_the_references_median(hot_inputs, tmp_path):
     folder = make_track(hot_inputs, tmp_path)
     chain = json.loads((folder / "chain.json").read_text())
@@ -409,10 +430,10 @@ def test_timbre_round_writes_the_original_the_base_and_each_effect(inputs, tmp_p
     variants = json.loads((result.run_dir / "chain.json").read_text())["variants"]
     bare = replace(Settings(), octave_down_on=False, doubles_on=False)
     assert variants == {
-        "base": asdict(bare),
-        "doubles": asdict(replace(bare, doubles_on=True)),
-        "octave down": asdict(replace(bare, octave_down_on=True)),
-        "bitcrush": asdict(replace(bare, bitcrush_on=True)),
+        "base": as_record(bare),
+        "doubles": as_record(replace(bare, doubles_on=True)),
+        "octave down": as_record(replace(bare, octave_down_on=True)),
+        "bitcrush": as_record(replace(bare, bitcrush_on=True)),
     }
 
 
@@ -478,7 +499,8 @@ def test_bass_round_holds_the_loudness_and_steps_the_808_drive(inputs, tmp_path)
     assert sorted(key["key"].values()) == sorted(["original", *names])
     chain = json.loads((result.run_dir / "chain.json").read_text())
     assert chain["variants"] == {
-        f"808 +{d:.0f} dB": asdict(replace(Settings(), bass_drive_db=d)) for d in (0, 6, 12, 18, 24)
+        f"808 +{d:.0f} dB": as_record(replace(Settings(), bass_drive_db=d))
+        for d in (0, 6, 12, 18, 24)
     }
     masters = {m["name"]: m for m in chain["masters"]}
     assert sorted(masters) == sorted(names)
@@ -508,11 +530,11 @@ def test_cli_voice_round_writes_the_chosen_timbre_with_each_new_voice(inputs, tm
     variants = json.loads((run_dir / "chain.json").read_text())["variants"]
     chosen = Settings()
     assert variants == {
-        "base": asdict(chosen),
-        "formant x1.35 + octave down + doubles": asdict(replace(chosen, formant=1.35)),
-        "formant x0.78 + octave down + doubles": asdict(replace(chosen, formant=0.78)),
-        "voice up + octave down + doubles": asdict(replace(chosen, voice_octave=1)),
-        "nightcore + octave down + doubles": asdict(replace(chosen, nightcore=True)),
+        "base": as_record(chosen),
+        "formant x1.35 + octave down + doubles": as_record(replace(chosen, formant=1.35)),
+        "formant x0.78 + octave down + doubles": as_record(replace(chosen, formant=0.78)),
+        "voice up + octave down + doubles": as_record(replace(chosen, voice_octave=1)),
+        "nightcore + octave down + doubles": as_record(replace(chosen, nightcore=True)),
     }
     letters = list(key["key"])
     assert sorted(p.name for p in (tmp_path / "o").rglob("*.wav")) == [f"{c}.wav" for c in letters]

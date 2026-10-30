@@ -11,8 +11,12 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 
+from redline.core import native
+
 EQ_BANDS_HZ = (200, 400, 1000, 2500, 5000, 8000)
 PRESET_NAME = re.compile(r"[\w \-]{1,40}")
+# version 2 added the effects rack; a file without a version is version 1
+VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,30 @@ class Spec:
     choices: tuple[float, ...] = ()
     basic: bool = False
     stage: str = field(kw_only=True)
+
+
+@dataclass(frozen=True)
+class AutomationLane:
+    """One param of a rack effect moving over the track: (seconds, value) points, linear between.
+
+    Before the first point the param holds the first value, after the last the last one.
+    """
+
+    param: str
+    points: tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True)
+class RackEffect:
+    """One effect of the rack: its params as sorted (name, value) pairs, and its lanes.
+
+    A choice param's value is the choice's name or its index.
+    """
+
+    effect: str
+    on: bool = True
+    params: tuple[tuple[str, float | str], ...] = ()
+    automation: tuple[AutomationLane, ...] = ()
 
 
 GROUPS = {
@@ -97,6 +125,7 @@ class Settings:
     master_on: bool = True
     master_auto: bool = True
     master_lufs: float = -9.0
+    rack: tuple[RackEffect, ...] = ()
 
     @property
     def eq_offsets_db(self) -> tuple[float, ...]:
@@ -481,6 +510,12 @@ SPECS: dict[str, Spec] = {
         "LUFS",
         stage="master",
     ),
+    "rack": Spec(
+        "rack",
+        "Рэк эффектов",
+        "Эффекты по порядку, после встроенных эффектов и до бита",
+        stage="rack",
+    ),
 }
 
 # the settings the studio shows first; the rest wait behind "all settings"
@@ -525,17 +560,152 @@ def _value(key: str, raw: Any) -> Any:
     return float(raw)
 
 
+def _number(what: str, raw: Any, low: float, high: float) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, int | float) or not math.isfinite(raw):
+        raise ValueError(f"{what} takes a number")
+    if not low <= raw <= high:
+        raise ValueError(f"{what} takes {low:g} to {high:g}")
+    return float(raw)
+
+
+def _param(what: str, spec: dict[str, Any], raw: Any) -> float | str:
+    choices = spec.get("choices", [])
+    if choices and isinstance(raw, str):
+        if raw not in choices:
+            raise ValueError(f"{what} takes {', '.join(choices)}")
+        return raw
+    value = _number(what, raw, spec["low"], spec["high"])
+    if choices and value != int(value):
+        raise ValueError(f"{what} takes a whole number or one of {', '.join(choices)}")
+    return value
+
+
+def _lane(effect: str, specs: dict[str, dict[str, Any]], raw: Any) -> AutomationLane:
+    if not isinstance(raw, dict):
+        raise ValueError("an automation lane is an object")
+    extra = sorted(set(raw) - {"param", "points"})
+    if extra:
+        raise ValueError(f"a lane takes param and points, not {', '.join(extra)}")
+    name = raw.get("param")
+    if not isinstance(name, str) or name not in specs:
+        raise ValueError(f"{effect} has no param {name}")
+    what = f"{effect}.{name}"
+    if specs[name].get("choices"):
+        raise ValueError(f"{what} is a choice and cannot be automated")
+    points = raw.get("points")
+    if not isinstance(points, list) or not points:
+        raise ValueError(f"{what}: a lane needs points, [[seconds, value], ...]")
+    out: list[tuple[float, float]] = []
+    for point in points:
+        if not isinstance(point, list) or len(point) != 2:
+            raise ValueError(f"{what}: a point is [seconds, value]")
+        seconds = point[0]
+        if (
+            isinstance(seconds, bool)
+            or not isinstance(seconds, int | float)
+            or not 0 <= seconds < math.inf
+        ):
+            raise ValueError(f"{what}: points take seconds from 0, not {seconds!r}")
+        if out and seconds < out[-1][0]:
+            raise ValueError(f"{what}: points go in order of time")
+        out.append((float(seconds), float(_param(what, specs[name], point[1]))))
+    return AutomationLane(name, tuple(out))
+
+
+def _slot(raw: Any, catalogue: dict[str, dict[str, dict[str, Any]]]) -> RackEffect:
+    if not isinstance(raw, dict):
+        raise ValueError("is an object with an effect name")
+    extra = sorted(set(raw) - {"effect", "on", "params", "automation"})
+    if extra:
+        raise ValueError(f"takes effect, on, params and automation, not {', '.join(extra)}")
+    name = raw.get("effect")
+    if not isinstance(name, str):
+        raise ValueError("needs an effect name")
+    if name not in catalogue:
+        raise ValueError(f"no effect {name}; `redline effects` lists them")
+    on = raw.get("on", True)
+    if not isinstance(on, bool):
+        raise ValueError(f"{name}: on takes true or false")
+    specs = catalogue[name]
+    params = _params(name, specs, raw.get("params", {}))
+    lanes_raw = raw.get("automation", [])
+    if not isinstance(lanes_raw, list):
+        raise ValueError(f"{name}: automation is a list of lanes")
+    lanes = tuple(_lane(name, specs, lane) for lane in lanes_raw)
+    names = [lane.param for lane in lanes]
+    twice = sorted({n for n in names if names.count(n) > 1})
+    if twice:
+        raise ValueError(f"{name}: {', '.join(twice)} automated twice")
+    return RackEffect(name, on, params, lanes)
+
+
+def _params(
+    effect: str, specs: dict[str, dict[str, Any]], given: Any
+) -> tuple[tuple[str, float | str], ...]:
+    if not isinstance(given, dict):
+        raise ValueError(f"{effect}: params are an object of name: value")
+    params = []
+    for key, value in given.items():
+        if key not in specs:
+            raise ValueError(f"{effect} has no param {key}")
+        params.append((key, _param(f"{effect}.{key}", specs[key], value)))
+    return tuple(sorted(params))
+
+
+def _rack(raw: Any) -> tuple[RackEffect, ...]:
+    if not isinstance(raw, list):
+        raise ValueError("the rack is a list of effects")
+    if not raw:
+        return ()
+    effects = native.rack_effects()
+    if effects is None:
+        raise ValueError(
+            "the effects rack needs the Rust module redline_dsp, which is not built here; "
+            "build it (uv sync) or leave the rack empty"
+        )
+    catalogue = {e["effect"]: {p["name"]: p for p in e["params"]} for e in effects}
+    out = []
+    for i, slot in enumerate(raw):
+        try:
+            out.append(_slot(slot, catalogue))
+        except ValueError as error:
+            raise ValueError(f"rack effect {i + 1} {error}") from None
+    return tuple(out)
+
+
 def from_dict(data: dict[str, Any]) -> Settings:
-    """Settings from a mapping; keys left out keep their defaults, unknown keys are refused."""
+    """Settings from a mapping; keys left out keep their defaults, unknown keys are refused.
+
+    A mapping without "version" is version 1 and has no rack; version 2 may carry one.
+    """
+    data = dict(data)
+    version = data.pop("version", 1)
+    if type(version) is not int or version not in (1, VERSION):
+        raise ValueError(f"version takes 1 or {VERSION}")
+    rack = data.pop("rack", None)
+    # an empty rack is what version 1 means anyway; records of runs spell it out
+    if rack and version != VERSION:
+        raise ValueError(f'a rack needs "version": {VERSION}')
     unknown = sorted(set(data) - set(KINDS))
     if unknown:
         raise ValueError(f"unknown setting {', '.join(unknown)}")
-    return Settings(**{key: _value(key, raw) for key, raw in data.items()})
+    scalars = {key: _value(key, raw) for key, raw in data.items()}
+    return Settings(**scalars, rack=_rack([] if rack is None else rack))
+
+
+def _no_twice(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    # json.loads would keep the last of a repeated key without a word
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"{key} is given twice")
+        out[key] = value
+    return out
 
 
 def load(path: Path) -> Settings:
     """Settings from a JSON file."""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_no_twice)
     if not isinstance(data, dict):
         raise ValueError(f"{path}: settings are a JSON object")
     return from_dict(data)
@@ -550,18 +720,46 @@ def load_preset(folder: Path, name: str) -> Settings:
     return load(path)
 
 
+def _slot_dict(effect: RackEffect) -> dict[str, Any]:
+    return {
+        "effect": effect.effect,
+        "on": effect.on,
+        "params": dict(effect.params),
+        "automation": [
+            {"param": lane.param, "points": [list(p) for p in lane.points]}
+            for lane in effect.automation
+        ],
+    }
+
+
+def to_dict(settings: Settings) -> dict[str, Any]:
+    """The settings as their file holds them: the version, every key, the rack as a list."""
+    scalars = {key: getattr(settings, key) for key in KINDS}
+    return {"version": VERSION, **scalars, "rack": [_slot_dict(e) for e in settings.rack]}
+
+
+def rack_json(rack: tuple[RackEffect, ...]) -> str:
+    """The rack as `redline_dsp.rack_process` takes it; the automation goes separately."""
+    effects = [{"effect": e.effect, "on": e.on, "params": dict(e.params)} for e in rack]
+    return json.dumps({"effects": effects})
+
+
 def save(settings: Settings, path: Path) -> None:
     """Write the settings as JSON, every key spelled out."""
-    path.write_text(json.dumps(asdict(settings), indent=1), encoding="utf-8")
+    path.write_text(json.dumps(to_dict(settings), indent=1), encoding="utf-8")
 
 
 def schema() -> dict[str, Any]:
-    """Groups, specs and defaults, for the studio page."""
+    """Groups, specs and defaults of the plain settings, for the studio page.
+
+    The rack is left out: the page builds its card from `/api/effects`.
+    """
     defaults = asdict(Settings())
     return {
         "groups": GROUPS,
         "settings": [
             {"key": key, "default": defaults[key], "kind": KINDS[key].__name__, **asdict(spec)}
             for key, spec in SPECS.items()
+            if key in KINDS
         ],
     }

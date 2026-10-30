@@ -3,6 +3,7 @@ import { api, Superseded } from "./api.js";
 import { Controls, STAGE_OF } from "./controls.js";
 import { History } from "./history.js";
 import { Player } from "./player.js";
+import { RackCard } from "./rack.js";
 import { Waveform, loudestSpan } from "./waveform.js";
 
 const LOOP_SECONDS = 20;
@@ -44,6 +45,7 @@ const ui = {
 const player = new Player();
 let schema;
 let controls;
+let rackCard;
 let history;
 let defaults = {};
 let values = {};
@@ -117,6 +119,8 @@ function firstStage(before, after) {
   for (const spec of schema.settings) {
     if (before[spec.key] !== after[spec.key]) first = Math.min(first, STAGE_OF[spec.group]);
   }
+  // the rack runs after the effects, inside the third stage
+  if (JSON.stringify(before.rack) !== JSON.stringify(after.rack)) first = Math.min(first, 2);
   return first;
 }
 
@@ -243,6 +247,7 @@ function apply(next, record = true) {
   values = { ...next };
   if (record) history.push(values);
   controls.show(values);
+  rackCard.show(values.rack);
   ui.undo.disabled = !history.past.length;
   ui.redo.disabled = !history.future.length;
   if (JSON.stringify(values) === rendered) {
@@ -445,10 +450,14 @@ async function start() {
   setState("busy", "загрузка");
   schema = await api.schema();
   defaults = Object.fromEntries(schema.settings.map((s) => [s.key, s.default]));
+  // the rack is part of the settings sent; "reset all" and a preset without one empty it
+  defaults = { version: 2, ...defaults, rack: [] };
   values = { ...schema.current };
   history = new History(values);
   controls = new Controls($("cards"), schema, $("tip"), (next) => apply(next));
   controls.show(values);
+  rackCard = new RackCard($("cards"), await api.effects(), (rack) => apply({ ...values, rack }));
+  rackCard.show(values.rack);
   const tuning = schema.track.tuning_cents;
   ui.tuning.textContent = `${tuning > 0 ? "+" : ""}${Math.round(tuning)} ц`;
   ui.target.textContent = `${schema.track.master_lufs.toFixed(1)} LUFS`;

@@ -34,6 +34,9 @@ def test_every_setting_has_a_spec_with_its_default_in_range():
     assert set(SPECS) == {f.name for f in fields(Settings)}
     for key, value in asdict(Settings()).items():
         spec = SPECS[key]
+        if key == "rack":
+            assert value == () and spec.label and spec.help
+            continue
         assert spec.label and spec.help
         assert spec.low <= float(value) <= spec.high, key
 
@@ -72,10 +75,11 @@ def test_a_saved_file_reads_back_the_same(tmp_path):
         load(tmp_path / "bad.json")
 
 
-def test_the_schema_lists_every_setting_once_with_its_group():
+def test_the_schema_lists_every_plain_setting_once_with_its_group():
     out = schema()
     keys = [row["key"] for row in out["settings"]]
-    assert sorted(keys) == sorted(SPECS) and len(keys) == len(set(keys))
+    # the rack is not a slider: the page builds its card from the effects list
+    assert sorted(keys) == sorted(set(SPECS) - {"rack"}) and len(keys) == len(set(keys))
     assert all(row["group"] in out["groups"] for row in out["settings"])
 
 
@@ -137,6 +141,7 @@ ENGINE_STAGE_KEYS = {
         "reverb_predelay_ms",
         "reverb_tone_hz",
     ),
+    "rack": ("rack",),
     "beat": ("beat_db", "bass_freq_hz", "bass_drive_db"),
     "master": ("master_on", "master_auto", "master_lufs"),
 }
@@ -150,6 +155,7 @@ def _engine_keys():
         "voice": render.VOICE_KEYS,
         "layers": render.LAYER_KEYS,
         "fx": render.FX_KEYS,
+        "rack": render.RACK_KEYS,
         "beat": render.BEAT_KEYS,
         "master": render.MASTER_KEYS,
     }

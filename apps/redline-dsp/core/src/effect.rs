@@ -388,6 +388,28 @@ impl Rack {
             .sum()
     }
 
+    /// Frames the sound is late by when it reaches `slot`: the latency of the effects switched
+    /// on before it. Automation reads its lane this much later, so a change lands on the
+    /// input's frame.
+    pub fn latency_before(&self, slot: usize) -> usize {
+        self.effects
+            .iter()
+            .zip(&self.on)
+            .take(slot)
+            .filter(|(_, &on)| on)
+            .map(|(e, _)| e.latency())
+            .sum()
+    }
+
+    /// Sets a param of the effect in `slot`, as automation does between blocks.
+    pub fn set(&mut self, slot: usize, name: &str, value: f32) -> Result<(), RackError> {
+        let effect = self
+            .effects
+            .get_mut(slot)
+            .ok_or_else(|| RackError(format!("the rack has no effect at {slot}")))?;
+        Ok(effect.set(name, value)?)
+    }
+
     pub fn len(&self) -> usize {
         self.effects.len()
     }

@@ -49,14 +49,56 @@ squared off are squared off here too, at their loudness.
 
 ## The engine and the studio
 
-The render runs in stages: chain, voice, layers, effects, beat, master. Each stage's result is
-cached by the settings it depends on (up to 1.5 GB), so moving the master target re-runs only
-the master and an effect change does not redo the voice. A newer request cancels an older one
-between stages.
+The render runs in stages: chain, voice, layers, effects, rack, beat, master. Each stage's
+result is cached by the settings it depends on (up to 1.5 GB), so moving the master target
+re-runs only the master and an effect change does not redo the voice. A newer request cancels
+an older one between stages.
 
 A preview renders only the loop, padded on both sides by the longest effect tail, and takes the
 last whole render's master gain so that it sounds as loud as the whole would. The whole track
 renders on a button.
+
+## The rack
+
+The rack stage runs the vocal, after the built-in effects, through the Rust effects of
+`apps/redline-dsp` (`redline_dsp.rack_process`). A rack that is empty or has every effect
+switched off skips the stage, so its output and the cache are what they were before the rack
+existed. The stage is cached by the rack and the beat stage's settings: the processed beat is
+the rack's side signal, which `duck`, a compressor with `detector: side` and a vocoder with
+`carrier: side` listen to.
+
+Settings files of version 2 carry the rack:
+
+```text
+"rack": [{"effect": NAME, "on": true, "params": {PARAM: VALUE},
+          "automation": [{"param": PARAM, "points": [[SECONDS, VALUE], ...]}]}]
+```
+
+Loading checks every effect and param against `redline_dsp.rack_effects()`, the same list
+`redline effects` prints: unknown names, values out of range, a choice that does not exist,
+lanes with points out of order or on a choice param are refused with the effect's place in the
+rack. Without the Rust module a rack that is not empty is refused; an empty one loads. A file
+without `version` (or with version 1) loads with an empty rack, and a rack in it is refused
+rather than dropped.
+
+The audio goes through in blocks of 512 frames. An effect that looks ahead (the pitch effects,
+the limiter) delays its output; the rack sums the delay of the effects switched on, feeds that
+much silence after the vocal and drops as much from the front, so the vocal stays on its
+frames. Automation is set before each block from the lane's straight line at the block's first
+frame (`redline_dsp.rack_process_automated`); a lane is read later by the delay of the effects
+ahead of its effect, so a change lands on the vocal's frame at the second it names. The
+smoothed params (levels, mixes, frequencies) glide to a new value over about 20 ms, so a jump
+does not click; a param that sizes a buffer, such as the limiter's lookahead, takes only its
+value at the start. Lanes are in seconds of the
+track only; sections of the lyrics are not supported.
+
+Offline-only effects (`reverse`, `reverse_reverb`) need audio ahead of the frame they play;
+both the render and the studio's preview have the whole piece in hand, so they work in both.
+A preview runs the rack on the loop padded by 10 s on each side, so tails from before the loop
+reach into it. It is close, not exact: an effect that counts from the start of its input (the
+grid of `chop`, `trance_gate` and `stutter`, the windows of `reverse`) counts from the start of
+the padded piece in a preview and from the start of the track in the render; the whole render
+is the one to judge.
 
 The studio page talks to a server on `127.0.0.1` only. The address carries a token; the page
 drops it from the address bar and sends it with every call. The Host header must be this

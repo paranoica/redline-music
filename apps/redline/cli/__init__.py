@@ -14,7 +14,7 @@ from redline.cli.lyrics import (
     _lyrics_write,
 )
 from redline.cli.parser import build_parser, check_studio
-from redline.cli.sound import _master, _measure, _run, _studio, _vocal, _voice
+from redline.cli.sound import _effects, _master, _measure, _run, _studio, _vocal, _voice
 
 if TYPE_CHECKING:
     from redline.measure.separate import Separator
@@ -36,6 +36,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         "run": _run,
         "studio": _studio,
         "voice": _voice,
+        "effects": _effects,
     }
     lyrics = {
         "check": _lyrics_check,

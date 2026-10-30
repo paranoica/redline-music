@@ -105,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="render the picks instead of searching for the settings closest to the references",
     )
+    effects = commands.add_parser(
+        "effects", help="the effects of the rack, with their params, ranges and defaults"
+    )
+    effects.add_argument("--json", action="store_true", help="print the raw list as JSON")
     lyrics = commands.add_parser(
         "lyrics", help="lyrics: write, edit, Suno cards, marks, copy check"
     )

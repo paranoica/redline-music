@@ -91,7 +91,9 @@ def test_the_schema_carries_every_setting_and_the_track(server):
     status, _, body = call(server, "GET", "/api/schema")
     data = json.loads(body)
     assert status == 200
-    assert {row["key"] for row in data["settings"]} == set(Settings.__dataclass_fields__)
+    # the rack has its own card, built from /api/effects
+    plain = set(Settings.__dataclass_fields__) - {"rack"}
+    assert {row["key"] for row in data["settings"]} == plain
     assert data["track"]["seconds"] == pytest.approx(4.0, abs=0.01)
     assert data["current"]["formant"] == 1.0
 

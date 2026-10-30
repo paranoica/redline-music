@@ -199,6 +199,39 @@ def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
     return 0
 
 
+def _effects(args: argparse.Namespace, separator: "Separator | None") -> int:
+    import json
+
+    from redline.core import native
+
+    effects = native.rack_effects()
+    if effects is None:
+        print("redline: the effects rack needs the Rust module redline_dsp", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(effects, indent=1))
+        return 0
+    rows = [("effect", "param", "low", "high", "default", "unit")]
+    for effect in effects:
+        note = "  (offline only)" if effect["offline_only"] else ""
+        for i, param in enumerate(effect["params"] or [None]):
+            name, tail = (effect["effect"], note) if i == 0 else ("", "")
+            if param is None:
+                rows.append((name, "", "", "", "", tail.strip()))
+            elif param.get("choices"):
+                default = param["choices"][int(param["default"])]
+                choices = ", ".join(param["choices"])
+                rows.append((name, param["name"], "", "", default, f"one of: {choices}{tail}"))
+            else:
+                low, high, default = (f"{param[key]:g}" for key in ("low", "high", "default"))
+                rows.append((name, param["name"], low, high, default, param["unit"] + tail))
+    widths = [max(len(row[c]) for row in rows) for c in range(5)]
+    for row in rows:
+        cells = [row[c].ljust(widths[c]) if c < 2 else row[c].rjust(widths[c]) for c in range(5)]
+        print("  ".join([*cells, row[5]]).rstrip())
+    return 0
+
+
 def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     import hashlib
     import secrets

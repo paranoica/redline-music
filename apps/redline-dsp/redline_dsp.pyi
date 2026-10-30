@@ -31,4 +31,11 @@ def rack_process(
     rack_json: str,
     side: npt.NDArray[np.float32] | None = None,
 ) -> npt.NDArray[np.float32]: ...
+def rack_process_automated(
+    samples: npt.NDArray[np.float32],
+    rate: float,
+    rack_json: str,
+    lanes: list[tuple[int, str, list[tuple[float, float]]]],
+    side: npt.NDArray[np.float32] | None = None,
+) -> npt.NDArray[np.float32]: ...
 def rack_effects() -> str: ...

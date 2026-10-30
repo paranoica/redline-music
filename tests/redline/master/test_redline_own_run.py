@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from redline.cli import main
-from redline.engine.settings import Settings
+from redline.engine.settings import Settings, to_dict
 from redline.vocal.auto import AutoResult
 from redline_signals import make_rng, write
 
@@ -103,6 +103,11 @@ def voice_args(own, tmp_path, *extra):
     return [*args, "--work", str(tmp_path / "w"), "--out", str(tmp_path / "o"), *extra]
 
 
+def as_record(settings):
+    # through JSON, so the rack's tuple compares as the list chain.json holds
+    return json.loads(json.dumps(asdict(settings)))
+
+
 def only_result(tmp_path):
     (folder,) = list((tmp_path / "o").iterdir())
     return folder, json.loads((folder / "chain.json").read_text())
@@ -137,10 +142,10 @@ def test_voice_runs_the_auto_search_by_default_and_records_it(own, tmp_path, aut
     np.testing.assert_allclose(engine.beat, kick(4), atol=1e-7)
     assert [r.name for r in refs] == ["a.wav", "b.wav"]
     folder, record = only_result(tmp_path)
-    assert record["settings"] == asdict(CHOSEN)
+    assert record["settings"] == as_record(CHOSEN)
     assert record["vocal_db"] == -9.0
     assert record["auto"] == {
-        "settings": asdict(CHOSEN),
+        "settings": as_record(CHOSEN),
         "distance_before": 12.5,
         "distance_after": 3.25,
         "values": {"vocal.crest_db": 11.0, "vocal.kurtosis": None},
@@ -180,7 +185,7 @@ def test_voice_without_auto_renders_the_defaults(own, tmp_path, no_auto, capsys)
     args = voice_args(own, tmp_path, "--no-auto")
     assert main(args, separator=CountingSeparator()) == 0
     folder, record = only_result(tmp_path)
-    assert record["settings"] == asdict(Settings())
+    assert record["settings"] == as_record(Settings())
     assert "auto" not in record
     assert capsys.readouterr().out.strip() == str(folder)
 
@@ -191,7 +196,7 @@ def test_voice_takes_a_preset_without_the_auto_search(own, tmp_path, no_auto):
     (presets / "dry.json").write_text(json.dumps({"drive_db": 10.0, "doubles_on": False}))
     assert main(voice_args(own, tmp_path, "--preset", "dry"), separator=CountingSeparator()) == 0
     _, record = only_result(tmp_path)
-    assert record["settings"] == asdict(replace(Settings(), drive_db=10.0, doubles_on=False))
+    assert record["settings"] == as_record(replace(Settings(), drive_db=10.0, doubles_on=False))
     assert "auto" not in record
 
 
@@ -201,8 +206,37 @@ def test_voice_takes_a_settings_file_without_the_auto_search(own, tmp_path, no_a
     args = voice_args(own, tmp_path, "--settings", str(path))
     assert main(args, separator=CountingSeparator()) == 0
     _, record = only_result(tmp_path)
-    assert record["settings"] == asdict(replace(Settings(), vocal_db=-3.0))
+    assert record["settings"] == as_record(replace(Settings(), vocal_db=-3.0))
     assert "auto" not in record
+
+
+def test_voice_takes_a_rack_from_a_settings_file(own, tmp_path, no_auto):
+    pytest.importorskip("redline_dsp")
+    plain, racked = tmp_path / "plain.json", tmp_path / "rack.json"
+    plain.write_text(json.dumps({"vocal_db": -3.0}))
+    rack = [{"effect": "gain", "params": {"db": -12}}]
+    racked.write_text(json.dumps({"version": 2, "vocal_db": -3.0, "rack": rack}))
+    stems = []
+    for path, out in ((plain, "o1"), (racked, "o2")):
+        args = voice_args(own, tmp_path, "--settings", str(path))
+        args[args.index("--out") + 1] = str(tmp_path / out)
+        assert main(args, separator=CountingSeparator()) == 0
+        (folder,) = list((tmp_path / out).iterdir())
+        record = json.loads((folder / "chain.json").read_text())
+        stems.append((sf.read(folder / "stems" / "vocal.wav")[0], record))
+    (before, _), (after, record) = stems
+    assert record["settings"]["rack"][0]["effect"] == "gain"
+    # the rack is the vocal's last stage: its stem is the same vocal 12 dB down
+    np.testing.assert_allclose(after, before * 10 ** (-12 / 20), atol=1e-6)
+
+
+def test_voice_refuses_a_rack_with_an_unknown_effect(own, tmp_path, no_auto, capsys):
+    pytest.importorskip("redline_dsp")
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps({"version": 2, "rack": [{"effect": "flanger9"}]}))
+    assert main(voice_args(own, tmp_path, "--settings", str(path))) == 2
+    assert "flanger9" in capsys.readouterr().err
+    assert not (tmp_path / "o").exists()
 
 
 def test_voice_refuses_a_missing_preset(own, tmp_path, no_auto, capsys):
@@ -318,7 +352,7 @@ def test_studio_opens_on_the_own_stems_with_the_auto_settings(own, tmp_path, aut
     assert studio.folder == tmp_path / "w" / "studio"
     assert studio.track_key.startswith("my vocal-")
     saved = studio.folder / studio.track_key / "settings.json"
-    assert json.loads(saved.read_text()) == asdict(CHOSEN)
+    assert json.loads(saved.read_text()) == to_dict(CHOSEN)
     assert len(auto) == 1 and served["closed"]
 
 

@@ -12,7 +12,6 @@ import os
 import threading
 import time
 from collections.abc import Sequence
-from dataclasses import asdict
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -21,9 +20,10 @@ import numpy as np
 import numpy.typing as npt
 import soundfile as sf
 
+from redline.core import native
 from redline.core.loudness import integrated_lufs
 from redline.engine.render import Cancelled, Engine, Rendered
-from redline.engine.settings import PRESET_NAME, Settings, from_dict, schema
+from redline.engine.settings import PRESET_NAME, VERSION, Settings, from_dict, schema, to_dict
 from redline.web.local import BadRequest, LocalHandler, LocalServer, only, site_files
 
 Samples = npt.NDArray[np.floating]
@@ -114,7 +114,7 @@ class Studio:
             raise BadRequest(HTTPStatus.CONFLICT, "render these settings exactly before saving")
         path = self.folder / self.track_key / "settings.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        _replace(path, json.dumps(asdict(settings), indent=1))
+        _replace(path, json.dumps(to_dict(settings), indent=1))
         return path
 
     def presets(self) -> dict[str, dict]:
@@ -135,8 +135,11 @@ class Studio:
             raise BadRequest(
                 HTTPStatus.BAD_REQUEST, "a preset name is 1-40 letters, digits, spaces"
             )
-        defaults = asdict(Settings())
-        changed = {k: v for k, v in asdict(settings).items() if defaults[k] != v}
+        defaults = to_dict(Settings())
+        changed = {k: v for k, v in to_dict(settings).items() if defaults[k] != v}
+        if settings.rack:
+            # a rack loads only from a file that says its version
+            changed = {"version": VERSION, **changed}
         folder = self.folder / "presets"
         folder.mkdir(parents=True, exist_ok=True)
         _replace(folder / f"{name}.json", json.dumps(changed, ensure_ascii=False))
@@ -178,6 +181,9 @@ class Handler(LocalHandler):
             return self.json(HTTPStatus.OK, self._schema())
         if path == "/api/presets":
             return self.json(HTTPStatus.OK, studio.presets())
+        if path == "/api/effects":
+            # empty without the Rust module: the page then says the rack is not available
+            return self.json(HTTPStatus.OK, native.rack_effects() or [])
         if path == "/api/references":
             return self.json(
                 HTTPStatus.OK,
@@ -242,7 +248,7 @@ class Handler(LocalHandler):
         ctx = studio.engine.context
         return {
             **schema(),
-            "current": asdict(current),
+            "current": to_dict(current),
             "track": {
                 "seconds": len(studio.original) / studio.rate,
                 "rate": studio.rate,

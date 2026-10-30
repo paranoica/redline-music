@@ -181,6 +181,80 @@ fn rack_process<'py>(
     rack_json: &str,
     side: Option<PyReadonlyArray2<'py, f32>>,
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    run_rack(py, samples, rate, rack_json, side, &[])
+}
+
+/// One param's curve: the slot in the rack, the param, (seconds, value) points in order of
+/// time, read linearly between them.
+type Lane = (usize, String, Vec<(f64, f32)>);
+
+/// As `rack_process`, with params moving along lanes. A lane's value is set before every
+/// block, at the time of the block's first frame less the latency of the effects ahead of it.
+#[pyfunction]
+#[pyo3(signature = (samples, rate, rack_json, lanes, side=None))]
+fn rack_process_automated<'py>(
+    py: Python<'py>,
+    samples: PyReadonlyArray2<'py, f32>,
+    rate: f32,
+    rack_json: &str,
+    lanes: Vec<Lane>,
+    side: Option<PyReadonlyArray2<'py, f32>>,
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    run_rack(py, samples, rate, rack_json, side, &lanes)
+}
+
+fn lane_value(points: &[(f64, f32)], t: f64) -> f32 {
+    let i = points.partition_point(|&(s, _)| s <= t);
+    if i == 0 {
+        return points[0].1;
+    }
+    if i == points.len() {
+        return points[i - 1].1;
+    }
+    let ((t0, v0), (t1, v1)) = (points[i - 1], points[i]);
+    let v = v0 + (v1 - v0) * ((t - t0) / (t1 - t0)) as f32;
+    // rounding must not step outside the two points, which were checked against the range
+    v.clamp(v0.min(v1), v0.max(v1))
+}
+
+fn check_lanes(rack: &mut Rack, lanes: &[Lane]) -> Result<(), RackError> {
+    for (slot, param, points) in lanes {
+        if points.is_empty() {
+            return Err(RackError(format!("the lane of {param} has no points")));
+        }
+        let mut last = f64::NEG_INFINITY;
+        for &(t, value) in points {
+            if !t.is_finite() {
+                return Err(RackError(format!(
+                    "{param}: a point's time is a finite second, not {t}"
+                )));
+            }
+            if t < last {
+                return Err(RackError(format!("{param}: points go in order of time")));
+            }
+            last = t;
+            rack.set(*slot, param, value)?;
+        }
+    }
+    Ok(())
+}
+
+fn set_lanes(rack: &mut Rack, lanes: &[Lane], offsets: &[f64], frame: usize, rate: f32) {
+    for ((slot, param, points), offset) in lanes.iter().zip(offsets) {
+        let t = (frame as f64 - offset) / rate as f64;
+        let set = rack.set(*slot, param, lane_value(points, t));
+        debug_assert!(set.is_ok(), "a checked lane was refused");
+    }
+}
+
+fn run_rack<'py>(
+    py: Python<'py>,
+    samples: PyReadonlyArray2<'py, f32>,
+    rate: f32,
+    rack_json: &str,
+    side: Option<PyReadonlyArray2<'py, f32>>,
+    lanes: &[Lane],
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
     if samples.shape()[1] != 2 {
         return Err(PyValueError::new_err(
             "the rack takes stereo samples, (rows, 2)",
@@ -197,7 +271,17 @@ fn rack_process<'py>(
     }
     let error = |e: RackError| PyValueError::new_err(e.to_string());
     let mut rack = Rack::from_json(rack_json).map_err(error)?;
+    check_lanes(&mut rack, lanes).map_err(error)?;
     rack.reset(rate).map_err(error)?;
+    let offsets: Vec<f64> = lanes
+        .iter()
+        .map(|(slot, _, _)| rack.latency_before(*slot) as f64)
+        .collect();
+    if !lanes.is_empty() {
+        // a reset puts the params where they are set, so they start on the lanes, not gliding
+        set_lanes(&mut rack, lanes, &offsets, 0, rate);
+        rack.reset(rate).map_err(error)?;
+    }
     let rows = samples.shape()[0];
     // the input and then silence the length of the latency, so the output can be shifted back
     // onto the input's frames without losing its end
@@ -214,12 +298,15 @@ fn rack_process<'py>(
     py.detach(|| {
         filters::flushing_tiny(|| match &side {
             Some(side) => {
-                for (block, s) in frames.chunks_mut(RACK_BLOCK).zip(side.chunks(RACK_BLOCK)) {
+                let blocks = frames.chunks_mut(RACK_BLOCK).zip(side.chunks(RACK_BLOCK));
+                for (k, (block, s)) in blocks.enumerate() {
+                    set_lanes(&mut rack, lanes, &offsets, k * RACK_BLOCK, rate);
                     rack.process_with(block, s);
                 }
             }
             None => {
-                for block in frames.chunks_mut(RACK_BLOCK) {
+                for (k, block) in frames.chunks_mut(RACK_BLOCK).enumerate() {
+                    set_lanes(&mut rack, lanes, &offsets, k * RACK_BLOCK, rate);
                     rack.process(block);
                 }
             }
@@ -260,6 +347,7 @@ fn redline_dsp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resample, m)?)?;
     m.add_function(wrap_pyfunction!(sosfilt, m)?)?;
     m.add_function(wrap_pyfunction!(rack_process, m)?)?;
+    m.add_function(wrap_pyfunction!(rack_process_automated, m)?)?;
     m.add_function(wrap_pyfunction!(rack_effects, m)?)?;
     Ok(())
 }

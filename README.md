@@ -137,6 +137,59 @@ uv run redline studio --vocal input/vocal.wav --beat input/beat.wav --ref input/
 
 The first time it starts from the settings the search found; after that, from what is saved.
 
+## Voice lab
+
+The voice lab is a rack: a list of effects that the vocal goes through in your order, after the
+built-in effects and before the beat is mixed in. The effects are written in Rust
+(`apps/redline-dsp`), so the rack needs that module built; with an empty rack nothing changes
+and the module is not needed.
+
+| Family | Effects |
+|---|---|
+| level and tone | gain, pan, width, eq, filter, exciter |
+| dynamics | compressor, gate, deesser, limiter, multiband, duck, transient |
+| dirt | saturate, distort, bitcrush, downsample, telephone, radio, lofi, underwater, whisper |
+| pitch | pitch, formant, octaver, harmonizer, unison, vibrato, drift, robot, tune |
+| synth voice | vocoder, talkbox, ring_mod, freq_shift, comb, resonator |
+| time | varispeed, timestretch, tape_stop, tape_start, reverse, freeze, granular, stutter, chop, trance_gate |
+| space | room, plate, hall, shimmer, gated_reverb, reverse_reverb, delay, tape_delay, throws, chorus, flanger, phaser, doubler, autopan |
+
+`redline effects` prints every effect with its params, their ranges, defaults and units;
+`redline effects --json` prints the same list as JSON. The beat is the rack's side signal, so
+`duck`, a compressor with its detector on `side` and the vocoder's beat carrier listen to it.
+
+The rack lives in the settings file, which says `"version": 2`:
+
+```json
+{
+ "version": 2,
+ "vocal_db": -6.0,
+ "rack": [
+  {"effect": "tune", "params": {"key": "A", "scale": "minor", "speed": 0}},
+  {"effect": "delay", "on": false, "params": {"mode": "pingpong", "time": 375}},
+  {
+   "effect": "gain",
+   "params": {"db": 0},
+   "automation": [{"param": "db", "points": [[0, -12], [8, 0]]}]
+  }
+ ]
+}
+```
+
+`on` defaults to true and a param left out to its default; a choice param takes the choice's
+name or its index. A file without `version` is an old one and has no rack. An unknown effect, an
+unknown param or a value out of range is refused when the file loads, naming what is wrong.
+
+`automation` moves a param over the track: points of `[seconds, value]` from the start of the
+track, in order of time, straight lines between them; before the first point the param holds
+the first value and after the last the last one. Two points at the same second make a jump.
+Points are in seconds only; naming a section of the lyrics (a hook, a verse) is not supported
+yet. A choice param cannot be automated.
+
+`redline run` and `redline voice` take the rack from `--settings` or `--preset` like every other
+setting. In the studio the rack is a card of its own: add an effect, move its params, switch it
+off, reorder or remove it. Lanes from a saved file are kept but not edited there.
+
 ## Lyrics
 
 The lyrics module works from a private base of texts you collect yourself. It is never part
@@ -184,6 +237,7 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline studio` | the live page |
 | `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
 | `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
+| `redline effects` | the rack's effects with their params and ranges (`--json` for the raw list) |
 | `redline lyrics index` | build style profiles and copy-check digests from the base |
 | `redline lyrics write` | write a new text by seed, optionally for a beat |
 | `redline lyrics edit` | change a saved text by an instruction |

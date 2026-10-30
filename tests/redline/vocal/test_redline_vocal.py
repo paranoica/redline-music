@@ -307,7 +307,9 @@ def test_blind_round_writes_every_variant_at_one_level_with_the_key_and_settings
     assert max(levels) - min(levels) <= 0.1
     chain = json.loads((result.run_dir / "chain.json").read_text())
     assert chain["rendered"] == ["mastered", "plain"]
-    assert chain["variants"] == {"plain": asdict(plain), "mastered": asdict(Settings())}
+    variants = {"plain": asdict(plain), "mastered": asdict(Settings())}
+    # through JSON, so tuples compare as the lists the file holds
+    assert chain["variants"] == json.loads(json.dumps(variants))
     assert sorted(renders) == ["mastered", "plain"]
     letters = {name: letter for letter, name in key["key"].items()}
     heard, _ = sf.read(result.listen_dir / f"{letters['plain']}.wav", always_2d=True)

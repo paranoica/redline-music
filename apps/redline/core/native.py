@@ -147,6 +147,37 @@ def rack_process(
     return redline_dsp.rack_process(x, float(rate), rack_json, side=s)
 
 
+Lane = tuple[int, str, list[tuple[float, float]]]
+
+
+def rack_process_automated(
+    samples: Samples,
+    rate: int,
+    rack_json: str,
+    lanes: list[Lane],
+    side: Samples | None = None,
+) -> Samples | None:
+    """As `rack_process`, with params moving along lanes; None without Rust.
+
+    Args:
+        samples: the main signal, (rows, 2).
+        rate: the sample rate in Hz.
+        rack_json: the rack, `{"effects": [...]}`.
+        lanes: (slot, param, [(seconds, value), ...]) for each moving param, points in order
+            of time and read linearly between them; seconds count from the first sample.
+        side: the side signal of the same shape, as `rack_process` takes it.
+
+    Raises:
+        ValueError: as `rack_process`, or a lane names a slot or param the rack lacks, has no
+            points, a time that is not finite, points out of order or a value out of range.
+    """
+    if redline_dsp is None:
+        return None
+    x = np.ascontiguousarray(samples, dtype=np.float32)
+    s = None if side is None else np.ascontiguousarray(side, dtype=np.float32)
+    return redline_dsp.rack_process_automated(x, float(rate), rack_json, lanes, s)
+
+
 def rack_effects() -> list[dict[str, Any]] | None:
     """The rack's effects with their params' ranges, defaults and units; None without Rust."""
     if redline_dsp is None:

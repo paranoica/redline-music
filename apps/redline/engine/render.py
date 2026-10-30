@@ -12,8 +12,9 @@ from dataclasses import astuple, dataclass, fields
 import numpy as np
 import numpy.typing as npt
 
+from redline.core import native
 from redline.core.loudness import integrated_lufs
-from redline.engine.settings import SPECS, Settings
+from redline.engine.settings import SPECS, Settings, rack_json
 from redline.master.clip import MasterResult, clip_at, master_clip, saturate_low
 from redline.vocal.chain import (
     ALL_LEVELS,
@@ -51,6 +52,7 @@ CHAIN_KEYS = _stage_keys("chain")
 VOICE_KEYS = _stage_keys("voice")
 LAYER_KEYS = _stage_keys("layers")
 FX_KEYS = _stage_keys("fx")
+RACK_KEYS = _stage_keys("rack")
 BEAT_KEYS = _stage_keys("beat")
 MASTER_KEYS = _stage_keys("master")
 
@@ -154,6 +156,8 @@ class Engine:
         # loop must read than the whole mix did there before the master's gain is reused
         self._fixed_master: MasterResult | None = None
         self._loop: tuple[int, int, float] | None = None
+        # the frame of the track the stems start at; a preview's piece starts mid-track
+        self._start = 0
 
     @property
     def cached_bytes(self) -> int:
@@ -210,7 +214,13 @@ class Engine:
         beat_key = ("beat", *_key(settings, BEAT_KEYS))
         (beat,) = self._stage(beat_key, lambda: (self._beat(settings),))
         check()
-        master_key = (*fx_key, *beat_key, "master", *_key(settings, MASTER_KEYS))
+        vocal_key = fx_key
+        if any(effect.on for effect in settings.rack):
+            # the beat is the rack's side signal, for a ducker or a vocoder's carrier
+            vocal_key = (*fx_key, *beat_key, "rack", *_key(settings, RACK_KEYS))
+            (layered,) = self._stage(vocal_key, lambda: (self._rack(layered, beat, settings),))
+            check()
+        master_key = (*vocal_key, *beat_key, "master", *_key(settings, MASTER_KEYS))
         mix = layered + beat
         final, master = self._stage(master_key, lambda: self._master(mix, settings))
         self.last = (master, mix)
@@ -224,9 +234,13 @@ class Engine:
             tails.append(MAX_ECHOES * settings.throw_ms / 1000)
         if settings.reverb_on:
             tails.append(settings.reverb_decay_s * 1.2)
+        if any(effect.on for effect in settings.rack):
+            # rack reverbs and delays can ring longer than the built-in ones
+            tails.append(MAX_PREVIEW_PAD_S)
         pad = int(min(max(tails), MAX_PREVIEW_PAD_S) * self.context.rate)
         low, high = max(0, start - pad), min(len(self.vocal), end + pad)
         piece = Engine(self.vocal[low:high], self.beat[low:high], self.context, 0)
+        piece._start = self._start + low
         last = self.last
         if last is not None and last[0] is not None:
             piece._fixed_master = last[0]
@@ -293,6 +307,26 @@ class Engine:
                 settings.reverb_decay_s,
                 settings.reverb_predelay_ms,
                 settings.reverb_tone_hz,
+            )
+        return out
+
+    def _rack(self, vocal: Samples, beat: Samples, settings: Settings) -> Samples:
+        rate = self.context.rate
+        rack = rack_json(settings.rack)
+        # lanes are in the track's seconds; these stems may start later in it
+        shift = self._start / rate
+        lanes = [
+            (slot, lane.param, [(seconds - shift, value) for seconds, value in lane.points])
+            for slot, effect in enumerate(settings.rack)
+            for lane in effect.automation
+        ]
+        if lanes:
+            out = native.rack_process_automated(vocal, rate, rack, lanes, beat)
+        else:
+            out = native.rack_process(vocal, rate, rack, beat)
+        if out is None:
+            raise ValueError(
+                "the effects rack needs the Rust module redline_dsp, which is not built here"
             )
         return out
 

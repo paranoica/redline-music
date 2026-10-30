@@ -43,6 +43,7 @@ async function audio(response) {
 export const api = {
   schema: async () => (await call("GET", "/api/schema")).json(),
   presets: async () => (await call("GET", "/api/presets")).json(),
+  effects: async () => (await call("GET", "/api/effects")).json(),
   original: async () => audio(await call("GET", "/api/original")),
   references: async () => (await call("GET", "/api/references")).json(),
   reference: async (index) => audio(await call("GET", `/api/reference?i=${index}`)),
