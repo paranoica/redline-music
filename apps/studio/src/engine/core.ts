@@ -27,6 +27,7 @@ const DIP = 384;
 const AB_RAMP_S = 0.03;
 const DELAY_CAPACITY = 1 << 17;
 const LEVELS_PER_S = 30;
+const SOURCES: readonly Source[] = ["result", "original", "reference", "render"];
 
 // a lane with its param's name kept in the heap, so the audio thread does not encode it
 interface LiveLane {
@@ -137,6 +138,7 @@ export class Engine {
   #want = false;
   #running = false;
   #jobs: (() => void)[] = [];
+  #spareJobs: (() => void)[] = [];
   #env = 0;
   // frames the output stays silent after the delay lines were emptied, until they refill
   #hold = 0;
@@ -650,7 +652,8 @@ export class Engine {
     this.#hold = Math.max(0, this.#hold - n);
     for (let i = 0; i < n; i++) {
       this.#env = approach(this.#env, target, envStep);
-      for (const s of ["result", "original", "reference", "render"] as const) {
+      for (let k = 0; k < SOURCES.length; k++) {
+        const s = SOURCES[k] as Source;
         this.#gain[s] = approach(this.#gain[s], this.#target[s], gainStep);
       }
       const g = this.#gain;
@@ -681,10 +684,15 @@ export class Engine {
       this.#want = false;
       this.#jobs.push(this.#finishJob);
     }
-    if (this.#env === 0) {
+    if (this.#env === 0 && this.#jobs.length > 0) {
+      // jobs queued by these jobs wait for the next silent block
       const jobs = this.#jobs;
-      this.#jobs = [];
-      for (const job of jobs) job();
+      this.#jobs = this.#spareJobs;
+      this.#spareJobs = jobs;
+      for (let i = 0; i < jobs.length; i++) (jobs[i] as () => void)();
+      jobs.length = 0;
+    }
+    if (this.#env === 0) {
       if (!this.#want && this.#jobs.length === 0) {
         this.#running = false;
         this.#report();
