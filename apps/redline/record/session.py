@@ -24,12 +24,15 @@ class Engine(Protocol):
 
     def start(self, path: Path, offset: int) -> None:
         """Start a take."""
+        ...
 
     def stop(self) -> TakeReport:
         """Finish the take."""
+        ...
 
     def close(self) -> None:
         """Quit."""
+        ...
 
 
 def quantum_warning(quantum: int) -> str | None:
