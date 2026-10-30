@@ -162,6 +162,21 @@ def test_a_bad_rack_raises_naming_what_is_wrong(rack, named):
         native.rack_process(noise(0.1), RATE, rack)
 
 
+def test_a_pitch_rack_an_octave_up_doubles_the_fundamental():
+    x = tone(440.0, 1.5, amp=0.5)
+    rack = _rack({"effect": "pitch", "params": {"semitones": 12, "preserve": "on"}})
+    y = native.rack_process(x, RATE, rack)
+    assert y.shape == x.shape
+    steady = y[RATE // 2 :, 0].astype(np.float64)
+    n = 1 << 18
+    spectrum = np.abs(np.fft.rfft(steady * np.hanning(len(steady)), n))
+    freqs = np.fft.rfftfreq(n, 1 / RATE)
+    peak = freqs[np.argmax(spectrum)]
+    assert peak == pytest.approx(880.0, rel=0.01)
+    dry = np.abs(np.fft.rfft(x[RATE // 2 :, 0] * np.hanning(len(steady)), n))
+    assert freqs[np.argmax(dry)] == pytest.approx(440.0, rel=0.01)
+
+
 def test_the_rack_takes_stereo_only():
     with pytest.raises(ValueError, match="stereo"):
         native.rack_process(noise(0.1, channels=1), RATE, _rack())
@@ -169,7 +184,25 @@ def test_the_rack_takes_stereo_only():
 
 def test_rack_effects_lists_the_effects_with_ranges():
     effects = {e["effect"]: e for e in native.rack_effects()}
-    assert list(effects) == ["gain", "pan", "width", "eq", "filter", "saturate", "bitcrush"]
+    assert list(effects) == [
+        "gain",
+        "pan",
+        "width",
+        "eq",
+        "filter",
+        "saturate",
+        "bitcrush",
+        "pitch",
+        "formant",
+        "octaver",
+        "harmonizer",
+        "unison",
+        "vibrato",
+        "drift",
+        "robot",
+        "tune",
+    ]
+    assert effects["tune"]["params"][1]["choices"][2] == "harmonic minor"
     db = effects["gain"]["params"][0]
     assert db["name"] == "db" and db["unit"] == "dB" and db["default"] == 0
     assert db["low"] < 0 < db["high"]

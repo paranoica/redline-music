@@ -22,6 +22,9 @@ cache-keys = [
     { file = "Cargo.lock" },
     { file = "core/Cargo.toml" },
     { file = "core/src/**/*.rs" },
+    { file = "core/build.rs" },
+    { file = "core/cpp/**" },
+    { file = "core/vendor/**" },
     { file = "py/Cargo.toml" },
     { file = "py/src/**/*.rs" },
 ]

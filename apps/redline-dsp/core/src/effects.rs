@@ -2,10 +2,26 @@
 
 use crate::design::{self, Sos};
 use crate::effect::{check, Effect, ParamError, ParamSpec};
+use crate::voice;
 use std::f32::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
 
 pub const EFFECTS: &[&str] = &[
-    "gain", "pan", "width", "eq", "filter", "saturate", "bitcrush",
+    "gain",
+    "pan",
+    "width",
+    "eq",
+    "filter",
+    "saturate",
+    "bitcrush",
+    "pitch",
+    "formant",
+    "octaver",
+    "harmonizer",
+    "unison",
+    "vibrato",
+    "drift",
+    "robot",
+    "tune",
 ];
 
 pub fn make(name: &str) -> Option<Box<dyn Effect>> {
@@ -17,6 +33,15 @@ pub fn make(name: &str) -> Option<Box<dyn Effect>> {
         "filter" => Box::new(Filter::new()),
         "saturate" => Box::new(Saturate::new()),
         "bitcrush" => Box::new(Bitcrush::new()),
+        "pitch" => Box::new(voice::Pitch::new()),
+        "formant" => Box::new(voice::Formant::new()),
+        "octaver" => Box::new(voice::Octaver::new()),
+        "harmonizer" => Box::new(voice::Harmonizer::new()),
+        "unison" => Box::new(voice::Unison::new()),
+        "vibrato" => Box::new(voice::Vibrato::new()),
+        "drift" => Box::new(voice::Drift::new()),
+        "robot" => Box::new(voice::Robot::new()),
+        "tune" => Box::new(voice::Tune::new()),
         _ => return None,
     })
 }

@@ -45,14 +45,85 @@ fn allocations(f: impl FnOnce()) -> usize {
     ALLOCATIONS.with(Cell::get) - before
 }
 
+// signalsmith-stretch's C++ allocates through malloc, which the global allocator never sees.
+// Defined in this executable, these take the place of glibc's for every library in the
+// process, so C++ allocations are counted too.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod libc_counting {
+    use std::ffi::c_void;
+
+    extern "C" {
+        fn __libc_malloc(size: usize) -> *mut c_void;
+        fn __libc_calloc(n: usize, size: usize) -> *mut c_void;
+        fn __libc_realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+        fn __libc_memalign(align: usize, size: usize) -> *mut c_void;
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn malloc(size: usize) -> *mut c_void {
+        super::count();
+        unsafe { __libc_malloc(size) }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn calloc(n: usize, size: usize) -> *mut c_void {
+        super::count();
+        unsafe { __libc_calloc(n, size) }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn realloc(ptr: *mut c_void, size: usize) -> *mut c_void {
+        super::count();
+        unsafe { __libc_realloc(ptr, size) }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn aligned_alloc(align: usize, size: usize) -> *mut c_void {
+        super::count();
+        unsafe { __libc_memalign(align, size) }
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn posix_memalign(
+        out: *mut *mut c_void,
+        align: usize,
+        size: usize,
+    ) -> i32 {
+        super::count();
+        let p = unsafe { __libc_memalign(align, size) };
+        if p.is_null() {
+            return 12; // ENOMEM
+        }
+        unsafe { *out = p };
+        0
+    }
+}
+
 #[test]
 fn the_counter_sees_an_allocation() {
     assert!(allocations(|| drop(std::hint::black_box(vec![0u8; 16]))) >= 1);
 }
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[test]
+fn the_counter_sees_an_allocation_in_cpp() {
+    use redline_dsp_core::stretch::Stretch;
+    let mut s = Stretch::new(2, 48000.0, 1);
+    // resetting reuses the buffers configure made
+    assert_eq!(allocations(|| s.reset()), 0);
+    let n = allocations(|| drop(std::hint::black_box(Stretch::new(2, 48000.0, 1))));
+    assert!(n >= 1, "{n}");
+}
+
 #[test]
 fn no_effect_allocates_in_process_at_any_setting() {
     let mut block = vec![[0.3f32, -0.2]; 512];
+    let tone: Vec<[f32; 2]> = (0..512)
+        .map(|i| {
+            let v = 0.5 * (i as f32 * 0.0577).sin();
+            [v, 0.8 * v]
+        })
+        .collect();
     for name in EFFECTS {
         let mut e = make(name).unwrap();
         let specs = e.params();
@@ -64,6 +135,12 @@ fn no_effect_allocates_in_process_at_any_setting() {
                 for size in [1, 64, 512] {
                     let n = allocations(|| e.process(&mut block[..size]));
                     assert_eq!(n, 0, "{name} with {} at {value}, block {size}", p.name);
+                }
+                // enough sound for the spectral effects to analyse and synthesise blocks
+                for _ in 0..30 {
+                    block.copy_from_slice(&tone);
+                    let n = allocations(|| e.process(&mut block));
+                    assert_eq!(n, 0, "{name} with {} at {value}, on a tone", p.name);
                 }
             }
             e.set(p.name, p.default).unwrap();

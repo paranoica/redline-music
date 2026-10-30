@@ -54,7 +54,24 @@ fn db(v: f32) -> f32 {
 fn every_effect_has_its_specs_in_range_and_rejects_values_outside() {
     assert_eq!(
         EFFECTS,
-        ["gain", "pan", "width", "eq", "filter", "saturate", "bitcrush"]
+        [
+            "gain",
+            "pan",
+            "width",
+            "eq",
+            "filter",
+            "saturate",
+            "bitcrush",
+            "pitch",
+            "formant",
+            "octaver",
+            "harmonizer",
+            "unison",
+            "vibrato",
+            "drift",
+            "robot",
+            "tune"
+        ]
     );
     for name in EFFECTS {
         let mut e = make(name).unwrap();

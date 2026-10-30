@@ -12,3 +12,6 @@ name = "redline_dsp_core"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+[build-dependencies]
+cc = "1.2"
