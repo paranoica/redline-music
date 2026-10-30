@@ -1,6 +1,6 @@
 use redline_dsp_core::effect::Rack;
 use redline_rec::engine::{engine, serve, Config, Control, Engine, FADE_SECONDS};
-use redline_rec::protocol::{Cause, Command, Dropout, Reply, TakeReport};
+use redline_rec::protocol::{Cause, Command, Dropout, Late, Reply, TakeReport};
 use redline_rec::wav::read;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -593,4 +593,42 @@ fn the_meters_report_the_quantum_the_backend_last_saw() {
     assert_eq!(c.meters().quantum, Some(64));
     reporter.set_quantum(256);
     assert_eq!(c.meters().quantum, Some(256));
+}
+
+#[test]
+fn a_start_after_a_stop_that_timed_out_hands_back_the_late_report() {
+    let (mut e, mut c) = setup(48000);
+    let first = take_path("late-reply-1.wav");
+    c.start(&first, 0).unwrap();
+    cycle(&mut e, &[0.1; 64], 0, 64, 0);
+    stop_times_out(&mut e, &mut c, 64);
+    std::thread::sleep(Duration::from_millis(200));
+    let second = take_path("late-reply-2.wav");
+    let command = Command::Start {
+        path: second.clone(),
+        offset: 0,
+    };
+    match c.handle(command) {
+        Reply::Start {
+            path,
+            late: Some(Late::Take(take)),
+        } => {
+            assert_eq!(path, second);
+            assert_eq!((take.path, take.frames), (first.clone(), 64));
+        }
+        other => panic!("the late report was not handed back: {other:?}"),
+    }
+    finish(&mut e, &mut c, 128);
+    let again = take_path("late-reply-3.wav");
+    match c.handle(Command::Start {
+        path: again.clone(),
+        offset: 0,
+    }) {
+        Reply::Start { late: None, .. } => {}
+        other => panic!("a start without a late take carries none: {other:?}"),
+    }
+    finish(&mut e, &mut c, 192);
+    for p in [first, second, again] {
+        std::fs::remove_file(p).unwrap();
+    }
 }

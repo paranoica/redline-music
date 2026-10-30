@@ -1,5 +1,5 @@
 use redline_rec::protocol::{
-    format, format_wrong_rate, parse, Cause, Command, Dropout, Meters, Reply, TakeReport,
+    format, format_wrong_rate, parse, Cause, Command, Dropout, Late, Meters, Reply, TakeReport,
 };
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -53,9 +53,17 @@ fn line(reply: &Reply) -> Value {
 fn replies_are_one_json_line_each_naming_the_command() {
     assert_eq!(
         line(&Reply::Start {
-            path: PathBuf::from("t.wav")
+            path: PathBuf::from("t.wav"),
+            late: None,
         }),
         json!({"reply": "start", "path": "t.wav"})
+    );
+    assert_eq!(
+        line(&Reply::Start {
+            path: PathBuf::from("t.wav"),
+            late: Some(Late::Error("writing a.wav: no space".into())),
+        }),
+        json!({"reply": "start", "path": "t.wav", "late": {"error": "writing a.wav: no space"}})
     );
     assert_eq!(
         line(&Reply::SetRack {

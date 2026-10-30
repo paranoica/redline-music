@@ -22,8 +22,8 @@ METER_WIDTH = 20
 class Engine(Protocol):
     """What a session needs of the engine."""
 
-    def start(self, path: Path, offset: int) -> None:
-        """Start a take."""
+    def start(self, path: Path, offset: int) -> TakeReport | str | None:
+        """Start a take; a take whose stop timed out, or its writer error, if it came since."""
         ...
 
     def stop(self) -> TakeReport:
@@ -75,6 +75,12 @@ def level_meter(peak: float) -> str:
     return f"[{'#' * filled}{'-' * (METER_WIDTH - filled)}] {shown}{clip}"
 
 
+def _kept(report: TakeReport, how: str) -> str:
+    lost = sum(1 for d in report.dropouts if d.frames > 0)
+    note = f", {lost} dropouts" if lost else ""
+    return f"{report.path.stem} {how}: {report.frames / report.rate:.1f} s{note}"
+
+
 class Session:
     """Takes recorded into one song's folder: start, stop, discard, quit."""
 
@@ -86,9 +92,16 @@ class Session:
         self.quantum = quantum
         self.current: Path | None = None
         self.recorded: list[Path] = []
+        # a take whose stop timed out: the engine may still finish it, and the next key asks
+        self.pending: Path | None = None
 
     def toggle(self) -> str:
-        """Start the next take, or finish the one running; what happened, in a line."""
+        """Start the next take, or finish the one running; what happened, in a line.
+
+        After a stop timed out, the key asks the engine for that take again instead.
+        """
+        if self.pending is not None:
+            return self._collect()
         if self.current is None:
             now = self.engine.meters().quantum
             if now is not None and now != self.quantum:
@@ -98,27 +111,47 @@ class Session:
                     "holds. Quit and restart `redline record`"
                 )
             path = next_take(self.folder).resolve()
-            self.engine.start(path, self.round_trip.frames or 0)
+            late = self.engine.start(path, self.round_trip.frames or 0)
             self.current = path
+            if not isinstance(late, str) and late is not None and late.path in self.recorded:
+                self._log(late)
             return f"recording {path.stem}"
-        report = self._finish()
-        lost = sum(1 for d in report.dropouts if d.frames > 0)
-        note = f", {lost} dropouts" if lost else ""
-        return f"{report.path.stem} kept: {report.frames / report.rate:.1f} s{note}"
+        return _kept(self._finish(), "kept")
 
     def _finish(self) -> TakeReport:
         assert self.current is not None
         path, self.current = self.current, None
+        self.recorded.append(path)
         try:
             report = self.engine.stop()
         except EngineError as error:
             # `redline takes` must not read a missing log as a take without dropouts
             write_incomplete_sidecar(path, str(error), self.round_trip, self.quantum)
-            self.recorded.append(path)
+            self.pending = path
             raise
-        write_sidecar(report, self.round_trip, self.quantum)
-        self.recorded.append(path)
+        self._log(report)
         return report
+
+    def _log(self, report: TakeReport) -> None:
+        write_sidecar(report, self.round_trip, self.quantum)
+
+    def _collect(self) -> str:
+        assert self.pending is not None
+        path = self.pending
+        try:
+            report = self.engine.stop()
+        except EngineError as error:
+            if not self.engine.meters().recording:
+                # the writer failed, or the engine holds no take: nothing more will come
+                self.pending = None
+                if path in self.recorded:
+                    write_incomplete_sidecar(path, str(error), self.round_trip, self.quantum)
+            raise
+        self.pending = None
+        if path not in self.recorded:
+            return f"{path.stem} finished late; it was discarded"
+        self._log(report)
+        return _kept(report, "finished late, kept")
 
     def discard_last(self) -> str:
         """Throw away the take running, else the last one kept in this session."""
@@ -126,6 +159,9 @@ class Session:
             path, self.current = self.current, None
             try:
                 self.engine.stop()
+            except EngineError:
+                self.pending = path
+                raise
             finally:
                 discard(path)
             return f"{path.stem} discarded"
@@ -140,6 +176,8 @@ class Session:
         try:
             if self.current is not None:
                 self._finish()
+            elif self.pending is not None:
+                self._collect()
         finally:
             self.engine.close()
 

@@ -6,7 +6,7 @@
 //! what the singer sang to beat frame `b` lands on take frame `b`.
 
 use crate::budget::fit_latency;
-use crate::protocol::{format, parse, Cause, Command, Dropout, Meters, Reply, TakeReport};
+use crate::protocol::{format, parse, Cause, Command, Dropout, Late, Meters, Reply, TakeReport};
 use crate::ring::{ring, Consumer, Producer};
 use crate::wav::WavWriter;
 use redline_dsp_core::effect::Rack;
@@ -451,6 +451,8 @@ pub struct Control {
     returned: usize,
     recording: bool,
     stopping: bool,
+    /// Collected from a stop that timed out, held until a start succeeds and hands it back.
+    late: Option<Late>,
     rack_latency: usize,
     default_budget: Option<usize>,
 }
@@ -510,6 +512,7 @@ pub fn engine(config: Config) -> Result<(Engine, Control), String> {
         returned: 0,
         recording: false,
         stopping: false,
+        late: None,
         rack_latency: 0,
         default_budget: None,
     };
@@ -565,21 +568,26 @@ impl Control {
     }
 
     /// Records the mic into a new file at `path` from the next period on, beat frame 0 at
-    /// take frame 0 once `offset`, the round trip in frames, is dropped.
-    pub fn start(&mut self, path: &Path, offset: u64) -> Result<(), String> {
+    /// take frame 0 once `offset`, the round trip in frames, is dropped. The take of a stop
+    /// that timed out, when it has been finished since, comes back.
+    pub fn start(&mut self, path: &Path, offset: u64) -> Result<Option<Late>, String> {
         if self.stopping {
             // a stop that timed out: the writer may have finished the take since
-            match self.done.try_recv() {
-                Ok(_) | Err(mpsc::TryRecvError::Disconnected) => {
-                    self.recording = false;
-                    self.stopping = false;
-                }
+            let report = match self.done.try_recv() {
+                Ok(report) => report,
+                Err(mpsc::TryRecvError::Disconnected) => Err("the take writer stopped".into()),
                 Err(mpsc::TryRecvError::Empty) => {
                     return Err(
                         "the last take is still being finished; stop again to wait for it".into(),
                     )
                 }
-            }
+            };
+            self.late = Some(match report {
+                Ok(take) => Late::Take(take),
+                Err(error) => Late::Error(error),
+            });
+            self.recording = false;
+            self.stopping = false;
         }
         if self.recording {
             return Err("a take is already being recorded".into());
@@ -604,7 +612,7 @@ impl Control {
         let _ = self.to_audio.push(ToAudio::Start);
         self.shared.take_frames.store(0, Ordering::Relaxed);
         self.recording = true;
-        Ok(())
+        Ok(self.late.take())
     }
 
     /// Ends the take at the next period; [`Control::wait_take`] has its report.
@@ -664,9 +672,9 @@ impl Control {
 
     pub fn handle(&mut self, command: Command) -> Reply {
         let reply = match command {
-            Command::Start { path, offset } => {
-                self.start(&path, offset).map(|()| Reply::Start { path })
-            }
+            Command::Start { path, offset } => self
+                .start(&path, offset)
+                .map(|late| Reply::Start { path, late }),
             Command::Stop => self.stop().map(|take| Reply::Stop { take }),
             Command::SetRack { rack, budget } => self
                 .set_rack_json(&rack.to_string(), budget.or(self.default_budget))

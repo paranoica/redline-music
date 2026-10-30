@@ -164,6 +164,16 @@ def _peak(value: Any) -> float:
     return math.inf if value is None else float(value)
 
 
+def late_take(data: dict[str, Any]) -> TakeReport | str | None:
+    """A start reply's late take: the report of a stop that timed out, or its writer error."""
+    late = data.get("late")
+    if late is None:
+        return None
+    if "take" in late:
+        return take_report(late["take"])
+    return str(late["error"])
+
+
 def meters(data: dict[str, Any]) -> Meters:
     """A meters reply; a null peak is a non-finite one, read as infinite."""
     return Meters(

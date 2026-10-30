@@ -2,7 +2,8 @@
 //! a reply names the command it answers in "reply", or is `{"reply": "error", "error": ...}`.
 //!
 //! - `{"cmd": "start", "path": "...", "offset": N}`: record a take to a new file; `offset` is
-//!   the hardware round trip in frames, so the take's frame 0 is the beat's frame 0.
+//!   the hardware round trip in frames, so the take's frame 0 is the beat's frame 0. When the
+//!   last stop timed out and its take was finished since, the reply carries it in `late`.
 //! - `{"cmd": "stop"}`: finish the take; the reply carries its [`TakeReport`].
 //! - `{"cmd": "set_rack", "rack": {...}, "budget": N}`: a new monitor rack, its effects
 //!   switched off from the end until its latency fits `budget` frames, or the backend's
@@ -80,6 +81,14 @@ pub struct TakeReport {
     pub dropouts: Vec<Dropout>,
 }
 
+/// A take whose stop timed out, finished since: its report, or why the writer failed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Late {
+    Take(TakeReport),
+    Error(String),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Meters {
     pub mic_peak: f32,
@@ -98,6 +107,8 @@ pub struct Meters {
 pub enum Reply {
     Start {
         path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        late: Option<Late>,
     },
     Stop {
         take: TakeReport,

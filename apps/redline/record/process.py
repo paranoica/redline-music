@@ -18,6 +18,7 @@ from redline.record.protocol import (
     Meters,
     Startup,
     TakeReport,
+    late_take,
     meters,
     parse_startup,
     take_report,
@@ -180,9 +181,17 @@ class EngineProcess:
             raise EngineError(f"the engine answered {reply.get('reply')!r} to {command['cmd']}")
         return reply
 
-    def start(self, path: Path, offset: int) -> None:
-        """Record a new take into path, dropping offset frames, the round trip."""
-        self.request({"cmd": "start", "path": str(path), "offset": offset}, "start")
+    def start(self, path: Path, offset: int) -> TakeReport | str | None:
+        """Record a new take into path, dropping offset frames, the round trip.
+
+        Returns:
+            The take of a stop that timed out, or its writer error, when it came since.
+        """
+        reply = self.request({"cmd": "start", "path": str(path), "offset": offset}, "start")
+        try:
+            return late_take(reply)
+        except (KeyError, TypeError, ValueError) as error:
+            raise EngineError(f"the engine's late take is unreadable: {error}") from error
 
     def stop(self) -> TakeReport:
         """Finish the take and return the engine's report on it."""

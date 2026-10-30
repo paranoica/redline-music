@@ -394,3 +394,98 @@ def test_a_failed_stop_leaves_a_sidecar_marked_incomplete_with_the_error(tmp_pat
     assert "did not finish" in data["error"]
     assert read_dropouts(tmp_path / "take-01.wav", RATE)[:2] == (None, None)
     assert session.current is None
+
+
+TIMED_OUT = "the take did not finish within 10 s: is the audio running?"
+
+
+class LateEngine(QuantumEngine):
+    """Its first stop times out while the take goes on being finished; later stops answer
+    with what the second stop gives: a report, or an error."""
+
+    def __init__(self, second):
+        super().__init__(64)
+        self.second = second
+        self.stops = 0
+        self.holding = False
+
+    def start(self, path, offset):
+        # the engine creates the file at the start
+        path.write_bytes(b"")
+        self.started.append(path)
+        self.holding = True
+        return None
+
+    def stop(self):
+        self.stops += 1
+        if self.stops == 1:
+            raise EngineError(TIMED_OUT)
+        self.holding = False
+        if isinstance(self.second, str):
+            raise EngineError(self.second)
+        return self.second
+
+    def meters(self):
+        from redline.record.protocol import Meters
+
+        return Meters(0.0, 0.0, 0, 0, self.holding, 0, 0, self.quantum)
+
+
+def late_report(path):
+    from redline.record.protocol import Dropout, TakeReport
+
+    return TakeReport(path, RATE, 2 * RATE, 300, [Dropout(4800, 480, ("xrun",))])
+
+
+def test_after_a_stop_timed_out_the_next_key_collects_the_take_and_logs_it_complete(tmp_path):
+    take = (tmp_path / "take-01.wav").resolve()
+    engine = LateEngine(late_report(take))
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError, match="did not finish"):
+        session.toggle()
+    message = session.toggle()
+    assert engine.stops == 2 and len(engine.started) == 1
+    assert "take-01" in message and "late" in message
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert data["complete"] is True and "error" not in data
+    assert data["dropouts"] == [[4800, 5280]]
+    assert read_dropouts(take, RATE)[0] == 1
+    assert session.toggle() == "recording take-02"
+
+
+def test_a_take_the_writer_failed_on_late_stays_incomplete_with_the_writer_error(tmp_path):
+    engine = LateEngine("writing take-01.wav: no space left on device")
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError):
+        session.toggle()
+    with pytest.raises(EngineError, match="no space"):
+        session.toggle()
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert data["complete"] is False and "no space" in data["error"]
+    # nothing more will come: the next key records again
+    assert session.toggle() == "recording take-02"
+
+
+def test_a_timed_out_take_discarded_meanwhile_leaves_no_log_when_it_comes(tmp_path):
+    take = (tmp_path / "take-01.wav").resolve()
+    engine = LateEngine(late_report(take))
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError):
+        session.toggle()
+    session.discard_last()
+    session.toggle()
+    assert engine.stops == 2
+    assert not (tmp_path / "take-01.json").exists()
+
+
+def test_the_start_reply_carries_a_late_take_or_the_writer_error():
+    from redline.record.protocol import late_take
+
+    assert late_take({"reply": "start", "path": "t.wav"}) is None
+    report = {"path": "a.wav", "rate": RATE, "frames": 10, "offset": 0, "dropouts": []}
+    taken = late_take({"reply": "start", "path": "t.wav", "late": {"take": report}})
+    assert taken is not None and not isinstance(taken, str) and taken.frames == 10
+    assert late_take({"reply": "start", "late": {"error": "no space"}}) == "no space"
