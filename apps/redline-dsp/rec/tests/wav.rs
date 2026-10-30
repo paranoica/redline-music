@@ -4,7 +4,10 @@ use std::path::PathBuf;
 fn scratch(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("rec-wav");
     std::fs::create_dir_all(&dir).unwrap();
-    dir.join(name)
+    let path = dir.join(name);
+    // a run cut short leaves its file, and a take is never written over another
+    let _ = std::fs::remove_file(&path);
+    path
 }
 
 fn u16_at(b: &[u8], at: usize) -> u16 {
@@ -65,6 +68,8 @@ fn a_stereo_file_reads_back_as_written_and_an_empty_one_as_empty() {
     assert_eq!(&wav.samples[..1000], &x[..]);
     assert_eq!(&wav.samples[1000..], &[0.0; 10]);
 
+    std::fs::remove_file(&path).unwrap();
+    let path = scratch("empty.wav");
     WavWriter::create(&path, 48000, 1)
         .unwrap()
         .finish()
@@ -104,4 +109,20 @@ fn reading_refuses_what_is_not_a_float_wav() {
     let err = read(&path).unwrap_err().to_string();
     std::fs::remove_file(&path).unwrap();
     assert!(err.contains("float"), "{err}");
+}
+
+#[test]
+fn a_take_is_created_for_the_owner_only_and_never_over_another() {
+    use std::os::unix::fs::PermissionsExt;
+    let path = scratch("owner.wav");
+    let w = WavWriter::create(&path, 48000, 1).unwrap();
+    w.finish().unwrap();
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    let again = WavWriter::create(&path, 48000, 1);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(mode, 0o600);
+    assert_eq!(
+        again.err().map(|e| e.kind()),
+        Some(std::io::ErrorKind::AlreadyExists)
+    );
 }

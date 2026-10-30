@@ -1,7 +1,8 @@
 //! 32-bit float WAV, written as it comes and read back whole.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 const HEADER: usize = 58;
@@ -53,7 +54,12 @@ impl WavWriter {
         if channels == 0 {
             return Err(io::Error::other("a WAV file needs a channel"));
         }
-        let mut file = BufWriter::new(File::create(path)?);
+        let created = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?;
+        let mut file = BufWriter::new(created);
         file.write_all(&header(rate, channels, 0)?)?;
         Ok(WavWriter {
             file,
