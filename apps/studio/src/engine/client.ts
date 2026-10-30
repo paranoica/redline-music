@@ -36,6 +36,10 @@ export class EngineClient {
     port.onmessage = (event) => this.#receive(event.data as FromEngine);
   }
 
+  get dead(): boolean {
+    return this.#dead;
+  }
+
   #send(message: ToEngine, transfer?: Transferable[]): void {
     this.#port.postMessage(message, transfer);
   }
@@ -104,14 +108,17 @@ export class EngineClient {
   }
 
   play(playing: boolean): void {
+    if (this.#dead) return;
     this.#send({ type: "play", playing });
   }
 
   seek(frame: number): void {
+    if (this.#dead) return;
     this.#send({ type: "seek", frame });
   }
 
   loop(on: boolean, start: number, end: number): void {
+    if (this.#dead) return;
     this.#send({ type: "loop", on, start, end });
   }
 

@@ -339,6 +339,7 @@ class Studio {
     c.onFatal = (reason) => {
       this.#playing = false;
       this.#showPlay();
+      ui.play.disabled = true;
       status(`Движок звука остановился: ${reason}. Убери тяжёлые эффекты и обнови страницу.`, "error", "engine");
     };
     c.onError = (e) => status(`Движок: ${e.track ? `${trackName(e.track)} — ` : ""}${e.message}`, "error");
@@ -364,7 +365,9 @@ class Studio {
   }
 
   async #togglePlay(): Promise<void> {
+    if (this.#client.dead) return;
     await this.#ctx.resume();
+    if (this.#client.dead) return;
     this.#playing = !this.#playing;
     this.#toggledAt = performance.now();
     this.#anchor = { frame: this.#frame, at: this.#ctx.currentTime };
@@ -380,6 +383,7 @@ class Studio {
   }
 
   #seek(seconds: number): void {
+    if (this.#client.dead) return;
     const frame = Math.round(seconds * this.#rate);
     this.#frame = frame;
     this.#anchor = { frame, at: this.#ctx.currentTime };
@@ -388,6 +392,7 @@ class Studio {
   }
 
   #setLoop(loop: Loop, done: boolean): void {
+    if (this.#client.dead) return;
     this.#loop = loop;
     this.#wave.setLoop(loop, this.#loopOn);
     this.#lanes.setLoop(loop, this.#loopOn);
@@ -406,6 +411,7 @@ class Studio {
   }
 
   #setLoopOn(on: boolean): void {
+    if (this.#client.dead) return;
     this.#loopOn = on;
     ui.loop.setAttribute("aria-pressed", String(on));
     this.#setLoop(this.#loop, true);
