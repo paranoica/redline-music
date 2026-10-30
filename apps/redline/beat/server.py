@@ -412,7 +412,7 @@ class BeatStudio:
 
     def _render_names(self) -> set[str]:
         """beat.wav, render.json and a stem per sound the newest render.json lists."""
-        names = set(RENDER_FILES)
+        names: set[str] = set(RENDER_FILES)
         with contextlib.suppress(OSError, ValueError, TypeError, AttributeError):
             report = json.loads((self.out / "render.json").read_text(encoding="utf-8"))
             names |= {
