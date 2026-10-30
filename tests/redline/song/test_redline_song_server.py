@@ -826,3 +826,9 @@ def test_a_second_server_for_the_same_song_is_refused_and_reaps_nothing(made, ro
     with pytest.raises(model.SongError, match="already open"):
         SongApp(NAME, make_rec=FakeRec, assets=lambda: (None, None, str))
     assert reaped == []
+
+
+def test_the_engine_opening_is_its_own_refusal_not_the_jobs_busy(made, root):
+    made.app.rec.open_error = rec.Busy("the engine is opening or calibrating")
+    status, data = api(made, "POST", "/api/rec/open", {})
+    assert status == 409 and data["code"] == "engine_busy"

@@ -89,6 +89,7 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
         return;
       }
       if (n === b.seed) return;
+      if (host.dirty() && !confirm("Несохранённые правки в бите пропадут. Сменить seed?")) return;
       void ctx.change({ beat: { own: n } }).then((ok) => {
         if (ok) void host.dispose().then(() => slot?.mountNow());
       });

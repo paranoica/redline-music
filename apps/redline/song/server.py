@@ -61,7 +61,7 @@ BEAT_GONE = "the beat changed and is not rendered"
 REC_ERRORS = (
     (rec.OutOfSync, HTTPStatus.CONFLICT, "out_of_sync"),
     (rec.NotReady, HTTPStatus.CONFLICT, "not_ready"),
-    (rec.Busy, HTTPStatus.CONFLICT, "busy"),
+    (rec.Busy, HTTPStatus.CONFLICT, "engine_busy"),
     (rec.TakeRunning, HTTPStatus.CONFLICT, "take_running"),
     (rec.RecClosed, HTTPStatus.CONFLICT, "closed"),
     (rec.CommandTimeout, HTTPStatus.GATEWAY_TIMEOUT, "timeout"),

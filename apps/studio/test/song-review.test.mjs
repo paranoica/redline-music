@@ -177,3 +177,50 @@ test("a parked surface holds its sound and lets it go when it comes back", async
   host.place("mix", document.createElement("div"));
   assert.deepEqual(held, [true, false]);
 });
+
+test("a surface placed back after a park takes the keyboard again", async () => {
+  globalThis.document = fakeDocument();
+  const states = [];
+  const mount = async () => ({ dispose() {}, setActive: (on) => states.push(on), hold() {} });
+  const host = new SurfaceHost(document.createElement("div"));
+  await host.show("mix", mount, document.createElement("div"), "/m", "t");
+  host.park();
+  host.place("mix", document.createElement("div"));
+  assert.equal(states.at(-1), true);
+});
+
+test("a surface parked while still mounting lands parked: no keyboard, sound held", async () => {
+  globalThis.document = fakeDocument();
+  const states = [];
+  const held = [];
+  let land;
+  const mount = () => new Promise((r) => (land = () => r({ dispose() {}, setActive: (on) => states.push(on), hold: (on) => held.push(on) })));
+  const host = new SurfaceHost(document.createElement("div"));
+  const shown = host.show("mix", mount, document.createElement("div"), "/m", "t");
+  await settle();
+  host.park();
+  land();
+  await shown;
+  assert.equal(states.at(-1), false);
+  assert.deepEqual(held, [true]);
+  host.place("mix", document.createElement("div"));
+  assert.equal(states.at(-1), true);
+  assert.deepEqual(held, [true, false]);
+});
+
+test("the engine opening or calibrating reads as the engine, not as jobs", () => {
+  const text = refusalText(new ApiError(409, { code: "engine_busy", error: "the engine is opening" }), []);
+  assert.match(text, /[Дд]вижок/);
+  assert.doesNotMatch(text, /ничего не идёт/);
+});
+
+test("the host says whether the live surface holds unsaved work, whatever its kind", async () => {
+  globalThis.document = fakeDocument();
+  let dirty = false;
+  const host = new SurfaceHost(document.createElement("div"));
+  assert.equal(host.dirty(), false);
+  await host.show("beat", async () => ({ dispose() {}, dirty: () => dirty }), document.createElement("div"), "/b", "t");
+  assert.equal(host.dirty(), false);
+  dirty = true;
+  assert.equal(host.dirty(), true);
+});

@@ -84,6 +84,7 @@ const REFUSALS: Record<string, string> = {
   not_ready: "Движок записи ещё не готов.",
   out_of_sync: "Движок записи не отвечает: перезапусти его на шаге «Запись».",
   closed: "Движок записи закрыт: открой его на шаге «Запись».",
+  engine_busy: "Движок записи открывается или калибруется: подожди немного.",
 };
 
 // what a refusal from the server says to the person, by its code
@@ -202,6 +203,7 @@ export class SurfaceHost {
     if (this.#parked) {
       this.#parked = false;
       this.#current?.mounted.hold?.(false);
+      this.#current?.mounted.setActive?.(this.#active);
     }
     return true;
   }
@@ -210,13 +212,19 @@ export class SurfaceHost {
   park(): void {
     const live = this.#current ?? this.#pending;
     if (!live) return;
-    this.#current?.mounted.setActive?.(false);
-    if (this.#current && !this.#parked) {
+    if (!this.#parked) {
+      // a surface still mounting is parked too: it lands silent and out of the keyboard
       this.#parked = true;
-      this.#current.mounted.hold?.(true);
+      this.#current?.mounted.setActive?.(false);
+      this.#current?.mounted.hold?.(true);
     }
     this.#holder ??= h("div", { hidden: true });
     this.#holder.append(live.root);
+  }
+
+  // the live surface holds edits that disposing it would lose
+  dirty(): boolean {
+    return this.#current?.mounted.dirty?.() ?? false;
   }
 
   // the kind of the live surface when it would be lost by mounting `kind` and holds unsaved work
@@ -234,6 +242,7 @@ export class SurfaceHost {
     slot.replaceChildren(root);
     // known before any wait, so a redraw meanwhile places it instead of mounting a second
     this.#pending = { kind, root };
+    this.#parked = false;
     const before = this.#chain;
     const work = (async (): Promise<void> => {
       // the surface before this one, mounting or mounted, is gone before the next one starts
@@ -258,8 +267,12 @@ export class SurfaceHost {
         return;
       }
       this.#current = { kind, mounted, root };
-      this.#parked = false;
-      mounted.setActive?.(this.#active);
+      if (this.#parked) {
+        mounted.setActive?.(false);
+        mounted.hold?.(true);
+      } else {
+        mounted.setActive?.(this.#active);
+      }
     })();
     this.#chain = work.catch(() => {});
     return work;
