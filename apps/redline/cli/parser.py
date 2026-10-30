@@ -108,6 +108,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="render the picks instead of searching for the settings closest to the references",
     )
     _classic(voice)
+    takes = commands.add_parser(
+        "takes",
+        help="rank recorded takes over a beat: timing against the other takes, clipping, "
+        "noise, dropouts, beat in the mic",
+    )
+    takes.add_argument("--beat", type=Path, required=True, help="the beat the takes went over")
+    takes.add_argument(
+        "--dir", type=Path, required=True, help="the folder of take-NN.wav files of one song"
+    )
+    takes.add_argument(
+        "--ref", type=Path, nargs="+", help="reference files or a folder of them (for --deep)"
+    )
+    takes.add_argument(
+        "--deep",
+        action="store_true",
+        help="add each take's distance to the references after the auto search (~40 s a take)",
+    )
+    takes.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
     )

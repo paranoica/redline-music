@@ -12,6 +12,7 @@ from redline.measure.separate import SeparationError
 if TYPE_CHECKING:
     from redline.engine.settings import Settings
     from redline.measure.separate import Separator
+    from redline.takes.rank import Ranking
     from redline.vocal.auto import AutoResult
 
 SOUND_ERRORS = (AudioError, SeparationError, ValueError, OSError)
@@ -204,6 +205,58 @@ def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
     print(folder, flush=True)
     if found is not None:
         _print_auto(found)
+    return 0
+
+
+def _takes(args: argparse.Namespace, separator: "Separator | None") -> int:
+    from redline.measure.run import keep_out_of_git
+    from redline.takes.rank import Deep, TakesError, rank_folder
+    from redline.takes.report import voice_command, write_outputs
+
+    deep = None
+    if args.deep:
+        if not args.ref:
+            print("redline: --deep needs --ref", file=sys.stderr)
+            return 2
+        refs = _references(args)
+        if refs is None:
+            return 2
+        from redline.measure.separate import RoformerSeparator
+
+        deep = Deep(refs, args.work, separator or RoformerSeparator())
+    try:
+        ranking = rank_folder(args.beat, args.dir, deep)
+        song = args.dir.resolve().name
+        out_dir = args.work / "takes" / song
+        keep_out_of_git(out_dir)
+        best = ranking.takes[0].path if ranking.takes else None
+        voice = None if best is None else voice_command(best, args.beat, args.ref or [])
+        report = write_outputs(out_dir, ranking, song, voice)
+    except (TakesError, *SOUND_ERRORS) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    return _print_takes(ranking, report, voice)
+
+
+def _print_takes(ranking: "Ranking", report: Path, voice: str | None) -> int:
+    from redline.takes.report import table
+
+    for line in table(ranking):
+        print(line)
+    for name, reason in ranking.skipped:
+        print(f"skipped {name}: {reason}")
+    for take in ranking.takes:
+        if take.headphones:
+            print(f"{take.name}: the beat is in the mic, use headphones")
+    print(report, flush=True)
+    if voice is None:
+        print("redline: no take could be measured", file=sys.stderr)
+        return 2
+    if ranking.ranked:
+        print(f"cleanest and closest to the other takes: {ranking.takes[0].name}")
+    else:
+        print(f"one take only, nothing to rank against: {ranking.takes[0].name}")
+    print(voice, flush=True)
     return 0
 
 

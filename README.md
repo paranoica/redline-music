@@ -250,6 +250,7 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline studio` | the live page |
 | `redline run` | render one take or a folder of takes with the picks, a settings file or a preset |
 | `redline voice` | render your own recorded vocal over a beat, with settings found by measurement |
+| `redline takes` | rank recorded takes of a song: timing against the other takes, clipping, noise, dropouts, beat in the mic |
 | `redline effects` | the rack's effects with their params and ranges (`--json` for the raw list) |
 | `redline lyrics index` | build style profiles and copy-check digests from the base |
 | `redline lyrics write` | write a new text by seed, optionally for a beat |
