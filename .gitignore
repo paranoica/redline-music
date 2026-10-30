@@ -10,6 +10,7 @@ plugins/bedrock/evals/results/
 plugins/bedrock/evals-bench
 bench/results/
 /apps/redline-dsp/target/
+/.claude/worktrees/
 
 # Private data: never in this repository
 /private
