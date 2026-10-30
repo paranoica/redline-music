@@ -343,3 +343,19 @@ def test_a_mix_over_the_ceiling_is_lowered_to_it_and_says_by_how_much():
     calm = np.full((RATE, 2), 0.5, np.float32)
     same, none = render.fit_ceiling(calm)
     assert none == 0.0 and np.array_equal(same, calm)
+
+
+def test_a_flip_is_mastered_to_the_source_loudness_under_the_ceiling():
+    from redline.core.loudness import integrated_lufs
+
+    t = np.arange(6 * 48000) / 48000
+    # a quiet beat with loud spikes: matching its loudness would push the spikes far over
+    body = 0.05 * np.sin(2 * np.pi * 110 * t)
+    body[::12000] = 0.9
+    mix = np.stack([body, body], axis=1).astype(np.float32)
+    target = integrated_lufs(mix, 48000) + 9.0
+    out, info = render.master_flip(mix, 48000, target)
+    assert abs(integrated_lufs(out, 48000) - target) < 1.0
+    assert float(np.abs(out).max()) <= 10 ** (render.CEILING_DB / 20) + 1e-4
+    # at least the loudness gap: the limiter takes some back
+    assert info["gain_db"] >= 9.0

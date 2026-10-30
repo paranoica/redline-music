@@ -13,6 +13,7 @@ import numpy.typing as npt
 import soundfile as sf
 
 from redline.core import native
+from redline.core.loudness import integrated_lufs
 from redline.core.private import write_private
 from redline.flip.model import BEATS_PER_BAR, Block, Effect, Flip
 
@@ -34,6 +35,9 @@ RENDER_FILE = re.compile(r"flip-(\d+)\.(wav|report\.md)")
 
 # the render plays as the beat while recording; it peaks here at most
 CEILING_DB = -1.0
+# a quiet flip is brought up toward the source at most this much
+MAX_GAIN_DB = 24.0
+MASTER_PASSES = 3
 
 
 def play_bar_starts(bar_starts_frames: Sequence[int], arrangement: Sequence[Block]) -> list[int]:
@@ -300,6 +304,47 @@ def fit_ceiling(mix: Samples, ceiling_db: float = CEILING_DB) -> tuple[Samples, 
     if peak <= limit:
         return mix, 0.0
     return (mix * np.float32(limit / peak)).astype(np.float32), 20.0 * np.log10(limit / peak)
+
+
+def master_flip(mix: Samples, rate: int, target_lufs: float) -> tuple[Samples, dict[str, float]]:
+    """The mix at the source's loudness, its peaks held at the ceiling by the core's limiter.
+
+    Returns:
+        The mastered mix, and what was done: `gain_db` toward the target and `lowered_db` the
+        last-resort scaling when the limiter's output still went over (0 when it did not).
+    """
+    have = integrated_lufs(mix, rate)
+    if not (math.isfinite(have) and math.isfinite(target_lufs)):
+        held, lowered_db = fit_ceiling(mix)
+        return held, {"gain_db": 0.0, "lowered_db": lowered_db}
+    gain_db = min(MAX_GAIN_DB, target_lufs - have)
+    out = mix
+    # the limiter takes back some loudness where it works, so the gain is corrected on its output
+    for _ in range(MASTER_PASSES):
+        out = _limited(mix, rate, gain_db)
+        missing = target_lufs - integrated_lufs(out, rate)
+        if abs(missing) < 0.3 or gain_db >= MAX_GAIN_DB:
+            break
+        gain_db = min(MAX_GAIN_DB, gain_db + missing)
+    held, lowered_db = fit_ceiling(out)
+    return held, {"gain_db": gain_db, "lowered_db": lowered_db}
+
+
+def _limited(mix: Samples, rate: int, gain_db: float) -> Samples:
+    louder = (mix * np.float32(10.0 ** (gain_db / 20.0))).astype(np.float32)
+    rack = json.dumps(
+        {
+            "effects": [
+                {
+                    "effect": "limiter",
+                    "on": True,
+                    "params": {"ceiling": CEILING_DB, "release": 50.0, "lookahead": 5.0},
+                }
+            ]
+        }
+    )
+    limited = native.rack_process(louder, rate, rack)
+    return louder if limited is None else limited.astype(np.float32)
 
 
 def _ours(ours48: Mapping[str, Samples], name: str) -> Samples:

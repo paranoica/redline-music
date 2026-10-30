@@ -7,6 +7,7 @@ and the renders `flip-<n>.wav` with their reports.
 
 import functools
 import json
+import math
 import re
 import shutil
 import tempfile
@@ -20,6 +21,7 @@ import numpy.typing as npt
 import soundfile as sf
 
 from redline.core.audio import AudioError, decode
+from redline.core.loudness import integrated_lufs
 from redline.core.private import make_private_dir, write_private
 from redline.flip import model
 from redline.flip import render as mixer
@@ -369,22 +371,33 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
         )
         parts = render_flip_parts(score)
         ours = {"bass808": parts["bass"], "hats": parts["hat"]}
+    # the stems add up to the source: its loudness is what the flip is mastered to
+    whole = sum(stems[k] for k in ("drums", "bass", "other", "vocals") if k in stems)
+    target = integrated_lufs(np.asarray(whole, dtype=np.float32), FLIP_RATE)
     if flip.hats_mode != "original":
         stems.update(separate_named(stems["drums"], FLIP_RATE, drumsep or DrumSep(), _work(folder)))
-    mix, lowered_db = mixer.fit_ceiling(mixer.mix_flip(stems, ours, flip))
-    return mixer.write_render(folder, n, mix, FLIP_RATE, _report(flip, notes, lowered_db))
+    mix, done = mixer.master_flip(mixer.mix_flip(stems, ours, flip), FLIP_RATE, target)
+    return mixer.write_render(folder, n, mix, FLIP_RATE, _report(flip, notes, done, target))
 
 
 def _work(folder: Path) -> Path:
     return folder.resolve().parent.parent
 
 
-def _report(flip: model.Flip, compromises: list[str], lowered_db: float = 0.0) -> str:
+def _report(
+    flip: model.Flip,
+    compromises: list[str],
+    done: dict[str, float] | None = None,
+    target_lufs: float = math.nan,
+) -> str:
     lines = [f"{flip.play_bars} bars in play order at {flip.bpm:.2f} BPM, swing {flip.swing:g}."]
-    if lowered_db:
+    if done is not None and math.isfinite(target_lufs):
         lines.append(
-            f"The render was lowered by {-lowered_db:.1f} dB to peak at {mixer.CEILING_DB:g} dBFS."
+            f"Brought to the source's loudness ({target_lufs:.1f} LUFS, {done['gain_db']:+.1f} dB);"
+            f" a limiter holds the peaks at {mixer.CEILING_DB:g} dBFS."
         )
+    if done is not None and done["lowered_db"]:
+        lines.append(f"Still over after the limiter: lowered by {-done['lowered_db']:.1f} dB more.")
     if flip.bass_mode == "ours":
         lines.append("The 808 is ours, played from the notes read off the bass stem.")
     if flip.hats_mode != "original":
