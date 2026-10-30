@@ -315,6 +315,36 @@ fn tape_stop_slows_the_pitch_to_nothing_and_then_is_silent() {
 }
 
 #[test]
+fn tape_stop_with_resume_is_silent_for_that_long_then_plays_the_input_again() {
+    // stopped by 1.5 s; back at full speed 0.5 s later, spliced in over 10 ms
+    let x = sine(440.0, 3.0);
+    let y = run(
+        effect(
+            "tape_stop",
+            &[("time", 0.5), ("duration", 1.0), ("resume", 0.5)],
+        )
+        .as_mut(),
+        &x,
+        128,
+    );
+    assert_same(&y[..frames(0.5)], &x[..frames(0.5)], 0.0, "before the stop");
+    assert!(y[frames(1.5)..frames(2.0)].iter().all(|f| *f == [0.0, 0.0]));
+    assert_same(&y[frames(2.011)..], &x[frames(2.011)..], 0.0, "resumed");
+    let jump = y[frames(1.99)..frames(2.02)]
+        .windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs())
+        .fold(0.0, f32::max);
+    assert!(jump < 0.06, "{jump}");
+    // 0, the default, never comes back
+    let y = run(
+        effect("tape_stop", &[("time", 0.5), ("duration", 1.0)]).as_mut(),
+        &x,
+        128,
+    );
+    assert!(y[frames(1.5)..].iter().all(|f| *f == [0.0, 0.0]));
+}
+
+#[test]
 fn tape_stop_curve_shapes_the_fall() {
     let x = sine(440.0, 2.0);
     let at_half = |curve: f32| {

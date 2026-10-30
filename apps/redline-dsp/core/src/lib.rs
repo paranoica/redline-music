@@ -5,9 +5,11 @@
 pub mod design;
 pub mod effect;
 mod effects;
+mod faust;
 pub mod filters;
 pub mod loudness;
 pub mod pitch;
+mod space;
 pub mod stretch;
 mod time;
 mod voice;

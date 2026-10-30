@@ -218,6 +218,22 @@ def test_non_finite_samples_come_out_as_silence():
     assert np.abs(y[-1000:]).max() > 0.1
 
 
+def test_a_ping_pong_rack_echoes_left_then_right_each_repeat_quieter():
+    x = np.zeros((RATE, 2), np.float32)
+    x[0] = 1.0
+    params = {"mode": "pingpong", "time": 100, "feedback": 0.5, "tone": 20000, "mix": 1}
+    y = native.rack_process(x, RATE, _rack({"effect": "delay", "params": params}))
+    assert y.shape == x.shape
+    step = int(0.1 * RATE)
+    assert np.abs(y[:step]).max() < 1e-6
+    # the loop's low pass passes 0 Hz at 1: an echo's samples sum to its level
+    for k in range(1, 5):
+        echo = y[k * step : k * step + 200].astype(np.float64)
+        near, far = (0, 1) if k % 2 else (1, 0)
+        assert echo[:, near].sum() == pytest.approx(0.5 ** (k - 1), rel=0.01)
+        assert abs(echo[:, far].sum()) < 1e-6
+
+
 def test_a_chop_rack_repeats_the_first_sixteenth_of_each_bar_of_four():
     x = noise(2.0)
     # 105 bpm at 44100 Hz: a sixteenth is 6300 frames
@@ -267,6 +283,20 @@ def test_rack_effects_lists_the_effects_with_ranges():
         "stutter",
         "chop",
         "trance_gate",
+        "room",
+        "plate",
+        "hall",
+        "shimmer",
+        "gated_reverb",
+        "reverse_reverb",
+        "delay",
+        "tape_delay",
+        "throws",
+        "chorus",
+        "flanger",
+        "phaser",
+        "doubler",
+        "autopan",
     ]
     assert effects["tune"]["params"][1]["choices"][2] == "harmonic minor"
     db = effects["gain"]["params"][0]

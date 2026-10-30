@@ -2,6 +2,7 @@
 
 use crate::design::{self, Sos};
 use crate::effect::{check, Effect, ParamError, ParamSpec, Smoothed};
+use crate::space;
 use crate::time;
 use crate::voice;
 use std::f32::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
@@ -33,6 +34,20 @@ pub const EFFECTS: &[&str] = &[
     "stutter",
     "chop",
     "trance_gate",
+    "room",
+    "plate",
+    "hall",
+    "shimmer",
+    "gated_reverb",
+    "reverse_reverb",
+    "delay",
+    "tape_delay",
+    "throws",
+    "chorus",
+    "flanger",
+    "phaser",
+    "doubler",
+    "autopan",
 ];
 
 pub fn make(name: &str) -> Option<Box<dyn Effect>> {
@@ -63,6 +78,20 @@ pub fn make(name: &str) -> Option<Box<dyn Effect>> {
         "stutter" => Box::new(time::Stutter::new()),
         "chop" => Box::new(time::Chop::new()),
         "trance_gate" => Box::new(time::TranceGate::new()),
+        "room" => Box::new(space::room()),
+        "plate" => Box::new(space::plate()),
+        "hall" => Box::new(space::hall()),
+        "shimmer" => Box::new(space::shimmer()),
+        "gated_reverb" => Box::new(space::gated_reverb()),
+        "reverse_reverb" => Box::new(space::ReverseReverb::new()),
+        "delay" => Box::new(space::Delay::new()),
+        "tape_delay" => Box::new(space::TapeDelay::new()),
+        "throws" => Box::new(space::Throws::new()),
+        "chorus" => Box::new(space::Chorus::new()),
+        "flanger" => Box::new(space::Flanger::new()),
+        "phaser" => Box::new(space::Phaser::new()),
+        "doubler" => Box::new(space::Doubler::new()),
+        "autopan" => Box::new(space::Autopan::new()),
         _ => return None,
     })
 }

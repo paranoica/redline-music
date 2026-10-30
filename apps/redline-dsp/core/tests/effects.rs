@@ -80,7 +80,21 @@ fn every_effect_has_its_specs_in_range_and_rejects_values_outside() {
             "granular",
             "stutter",
             "chop",
-            "trance_gate"
+            "trance_gate",
+            "room",
+            "plate",
+            "hall",
+            "shimmer",
+            "gated_reverb",
+            "reverse_reverb",
+            "delay",
+            "tape_delay",
+            "throws",
+            "chorus",
+            "flanger",
+            "phaser",
+            "doubler",
+            "autopan"
         ]
     );
     for name in EFFECTS {

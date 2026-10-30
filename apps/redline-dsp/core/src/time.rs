@@ -12,7 +12,8 @@
 //!   (at 2.0 the second half of the take by the middle of the output), which no streaming
 //!   effect has; the windowed head is what a stream can do.
 //! - tape_stop: from `time` the speed falls from 1 to 0 over `duration` as (1 - u)^curve,
-//!   then silence for good. tape_start: silence until `time`, then the speed rises as
+//!   then silence; `resume` seconds later the live input comes back at full speed, spliced
+//!   in (0 keeps the silence for good). tape_start: silence until `time`, then the speed rises as
 //!   u^curve from the input at `time`; once up to speed it splices back onto the live input,
 //!   dropping the lag the spin-up built, so it stays in time with the beat.
 //! - reverse: windows played backwards one window late (latency is one window). Fixed
@@ -383,6 +384,7 @@ pub struct TapeMotion {
     time: f32,
     duration: f32,
     curve: f32,
+    resume: f32,
     rate: f32,
     history: History,
     delay: f64,
@@ -394,10 +396,16 @@ pub struct TapeMotion {
 
 impl TapeMotion {
     const DURATION_MAX: f32 = 4.0;
-    const SPECS: &'static [ParamSpec] = &[
+    const START_SPECS: &'static [ParamSpec] = &[
         ParamSpec::range("time", 0.0, 600.0, 0.0, "s"),
         ParamSpec::range("duration", 0.05, Self::DURATION_MAX, 0.5, "s"),
         ParamSpec::range("curve", 0.25, 4.0, 1.0, ""),
+    ];
+    const STOP_SPECS: &'static [ParamSpec] = &[
+        Self::START_SPECS[0],
+        Self::START_SPECS[1],
+        Self::START_SPECS[2],
+        ParamSpec::range("resume", 0.0, 600.0, 0.0, "s"),
     ];
 
     fn new(starting: bool) -> Self {
@@ -406,6 +414,7 @@ impl TapeMotion {
             time: 0.0,
             duration: 0.5,
             curve: 1.0,
+            resume: 0.0,
             rate: 0.0,
             history: History::new(),
             delay: 0.0,
@@ -434,13 +443,18 @@ impl Effect for TapeMotion {
         }
     }
     fn params(&self) -> &'static [ParamSpec] {
-        Self::SPECS
+        if self.starting {
+            Self::START_SPECS
+        } else {
+            Self::STOP_SPECS
+        }
     }
     fn set(&mut self, name: &str, value: f32) -> Result<(), ParamError> {
-        match check(self.name(), Self::SPECS, name, value)? {
+        match check(self.name(), self.params(), name, value)? {
             0 => self.time = value,
             1 => self.duration = value,
-            _ => self.curve = value,
+            2 => self.curve = value,
+            _ => self.resume = value,
         }
         Ok(())
     }
@@ -470,7 +484,15 @@ impl Effect for TapeMotion {
                     continue;
                 }
                 if u >= 1.0 {
-                    *f = [0.0; 2];
+                    let back = (u - 1.0) * duration - self.resume as f64;
+                    if self.resume > 0.0 && back >= 0.0 {
+                        let gain = (back * rate + 1.0) / (self.splice + 1) as f64;
+                        if gain < 1.0 {
+                            *f = scale(*f, gain as f32);
+                        }
+                    } else {
+                        *f = [0.0; 2];
+                    }
                     continue;
                 }
                 let gain = ((1.0 - u) / edge).min(1.0) as f32;
