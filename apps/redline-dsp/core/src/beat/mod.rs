@@ -4,3 +4,4 @@
 pub mod events;
 pub mod instruments;
 pub mod score;
+pub mod voices;
