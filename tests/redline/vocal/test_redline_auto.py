@@ -1,5 +1,7 @@
 import itertools
 import math
+import threading
+import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -8,7 +10,7 @@ import pytest
 from redline.core.audio import Audio, Decoded
 from redline.engine.render import Engine, Rendered
 from redline.engine.settings import SPECS, Settings
-from redline.master.clip import MasterResult
+from redline.master.clip import MasterResult, master_clip
 from redline.measure.run import FileResult, _measure
 from redline.measure.separate import Stems
 from redline.vocal.auto import (
@@ -165,6 +167,16 @@ def test_a_silent_vocal_spreads_over_the_whole_track():
 def test_a_single_window_sits_in_the_middle_of_the_active_part():
     vocal = level_at(30.0, [(0.0, 30.0, 0.3)])
     assert spread_windows(vocal, RATE, 1, 8.0) == [(at(11.0), at(19.0))]
+
+
+def test_by_default_three_windows_of_six_seconds_as_in_the_search():
+    vocal = level_at(60.0, [(0.0, 60.0, 0.3)])
+    # 3 windows of 6 s over 60 s: starts 27 s apart, the last ending at the end
+    assert spread_windows(vocal, RATE) == [
+        (0, at(6.0)),
+        (at(27.0), at(33.0)),
+        (at(54.0), at(60.0)),
+    ]
 
 
 @pytest.mark.parametrize(("count", "seconds"), [(0, 8.0), (4, 0.0), (4, -1.0)])
@@ -341,7 +353,28 @@ def test_no_passes_or_no_targets_keep_the_base(track):
     assert blind.targets == {} and blind.distance_after == 0.0
 
 
-def test_the_score_is_taken_after_the_master_on_the_pooled_windows(track, monkeypatch):
+def pooled_render(track, settings, count, seconds):
+    """The windows rendered without a master, joined, and the join mastered once.
+
+    The master goes to the track's target when it is automatic, to the settings' own
+    otherwise, and is left out when the settings switch it off.
+    """
+    vocal, beat, ctx = track
+    renders = [
+        Engine(vocal[a:b], beat[a:b], ctx).render(replace(settings, master_on=False))
+        for a, b in spread_windows(vocal, RATE, count, seconds)
+    ]
+    joined_vocal = np.concatenate([r.vocal for r in renders])
+    joined_beat = np.concatenate([r.beat for r in renders])
+    mix = joined_vocal + joined_beat
+    final, master = mix, None
+    if settings.master_on:
+        target = ctx.master_lufs if settings.master_auto else settings.master_lufs
+        final, master = master_clip(mix, RATE, target)
+    return Rendered(joined_vocal, joined_beat, final, renders[0].chain, master)
+
+
+def test_the_score_is_taken_after_one_master_on_the_pooled_windows(track, monkeypatch):
     from redline.vocal import auto as auto_module
 
     vocal, beat, ctx = track
@@ -355,18 +388,79 @@ def test_the_score_is_taken_after_the_master_on_the_pooled_windows(track, monkey
     monkeypatch.setattr(auto_module, "measure_processed", recorded)
     auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=1.5, passes=0)
     ((vocal_m, beat_m),) = seen
-    windows = spread_windows(vocal, RATE, 2, 1.5)
-    assert len(windows) == 2
-    renders = [Engine(vocal[a:b], beat[a:b], ctx).render(BASE) for a, b in windows]
-    assert all(r.master is not None and r.master.clipped_share > 0 for r in renders)
-    stems = [after_master(r) for r in renders]
-    np.testing.assert_array_equal(vocal_m, np.concatenate([v for v, _ in stems]))
-    np.testing.assert_array_equal(beat_m, np.concatenate([b for _, b in stems]))
+    assert len(spread_windows(vocal, RATE, 2, 1.5)) == 2
+    pooled = pooled_render(track, BASE, 2, 1.5)
+    assert pooled.master is not None and pooled.master.clipped_share > 0
+    expected_vocal, expected_beat = after_master(pooled)
+    np.testing.assert_array_equal(vocal_m, expected_vocal)
+    np.testing.assert_array_equal(beat_m, expected_beat)
     # what is measured is the mastered sound, not the mix the master was given
-    final = np.concatenate([r.final for r in renders])
-    mix = np.concatenate([r.vocal + r.beat for r in renders])
-    assert rms(vocal_m + beat_m - final) < 0.01 * rms(final)
-    assert rms(mix - final) > 0.2 * rms(final)
+    mix = pooled.vocal + pooled.beat
+    assert rms(vocal_m + beat_m - pooled.final) < 0.01 * rms(pooled.final)
+    assert rms(mix - pooled.final) > 0.2 * rms(pooled.final)
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        replace(BASE, master_auto=False, master_lufs=-14.0),
+        replace(BASE, master_on=False),
+    ],
+)
+def test_the_pooled_master_follows_the_candidates_own_master_settings(track, monkeypatch, settings):
+    from redline.vocal import auto as auto_module
+
+    vocal, beat, ctx = track
+    seen = []
+    measure = auto_module.measure_processed
+
+    def recorded(v, b, rate):
+        seen.append((v, b))
+        return measure(v, b, rate)
+
+    monkeypatch.setattr(auto_module, "measure_processed", recorded)
+    found = auto_settings(
+        Engine(vocal, beat, ctx), LOUDER_REFS, settings, count=2, seconds=1.5, passes=0
+    )
+    assert found.settings == settings
+    ((vocal_m, beat_m),) = seen
+    expected_vocal, expected_beat = after_master(pooled_render(track, settings, 2, 1.5))
+    np.testing.assert_array_equal(vocal_m, expected_vocal)
+    np.testing.assert_array_equal(beat_m, expected_beat)
+
+
+def test_windows_of_very_different_loudness_get_one_master_gain(monkeypatch):
+    from redline.vocal import auto as auto_module
+
+    vocal, beat = engine_stems(4.0)
+    # the first two seconds 15 dB down: a quiet verse window and a loud hook window
+    quiet = np.float32(10 ** (-15 / 20))
+    vocal[: at(2.0)] *= quiet
+    beat[: at(2.0)] *= quiet
+    ctx = engine_context(vocal)
+    track = (vocal, beat, ctx)
+    windows = spread_windows(vocal, RATE, 2, 2.0)
+    assert windows == [(0, at(2.0)), (at(2.0), at(4.0))]
+    alone = [Engine(vocal[a:b], beat[a:b], ctx).render(BASE).master for a, b in windows]
+    assert all(m is not None for m in alone)
+    # mastered apart, the quiet window would be raised far more than the loud one
+    assert alone[0].gain_db - alone[1].gain_db > 6.0
+    seen = []
+    after = auto_module.after_master
+    monkeypatch.setattr(auto_module, "after_master", lambda r: seen.append(r) or after(r))
+    auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, BASE, count=2, seconds=2.0, passes=0)
+    (rendered,) = seen
+    pooled = pooled_render(track, BASE, 2, 2.0)
+    assert rendered.master == pooled.master
+    gain = 10 ** (pooled.master.gain_db / 20)
+    mix = rendered.vocal + rendered.beat
+    for a, b in ((0, at(2.0)), (at(2.0), at(4.0))):
+        piece, out = mix[a:b], rendered.final[a:b]
+        # samples the clip left alone show the gain each window was given
+        untouched = (np.abs(piece) * gain < 0.3) & (np.abs(piece) > 1e-3)
+        assert untouched.sum() > 1000
+        ratio = np.median(out[untouched] / piece[untouched])
+        assert ratio == pytest.approx(gain, rel=0.02)
 
 
 def test_one_engine_per_window_serves_every_candidate(track, monkeypatch):
@@ -388,19 +482,73 @@ def test_one_engine_per_window_serves_every_candidate(track, monkeypatch):
 def test_edge_keys_are_the_ones_on_the_first_or_last_grid_value(track):
     vocal, beat, ctx = track
     engine = Engine(vocal, beat, ctx)
-    edges = replace(BASE, vocal_db=-12.0, comp_threshold_db=-38.0, drive_db=40.0)
+    spec = SPECS["vocal_db"]
+    # the level is set past the grid, so its edges are the ends of its whole range
+    edges = replace(BASE, vocal_db=spec.low, comp_threshold_db=-38.0, drive_db=40.0)
     kept = auto_settings(engine, LOUDER_REFS, edges, count=1, seconds=2.0, passes=0)
     assert kept.at_edge == ("vocal_db", "drive_db")
-    inside = replace(BASE, vocal_db=-7.0, comp_threshold_db=-14.0, drive_db=10.0)
+    inside = replace(BASE, vocal_db=-12.0, comp_threshold_db=-14.0, drive_db=10.0)
     kept = auto_settings(engine, LOUDER_REFS, inside, count=1, seconds=2.0, passes=0)
     assert kept.at_edge == ("comp_threshold_db",)
 
 
-def test_the_found_result_reports_its_edges(result):
-    expected = tuple(
-        key for key, grid in AXES.items() if not grid[0] < getattr(result.settings, key) < grid[-1]
-    )
-    assert result.at_edge == expected
+def test_a_level_set_below_the_grid_but_inside_its_range_is_not_at_the_edge(track):
+    vocal, beat, ctx = track
+    quieter = [ref("a", {PAIR: -12.0})]
+    found = auto_settings(Engine(vocal, beat, ctx), quieter, BASE, count=2, seconds=2.0, passes=1)
+    spec, level = SPECS["vocal_db"], found.settings.vocal_db
+    assert spec.low < level < AXES["vocal_db"][0]
+    assert level not in AXES["vocal_db"]
+    assert "vocal_db" not in found.at_edge
+
+
+def test_a_level_pushed_to_the_end_of_its_range_is_at_the_edge(track):
+    vocal, beat, ctx = track
+    far = [ref("a", {PAIR: -60.0})]
+    found = auto_settings(Engine(vocal, beat, ctx), far, BASE, count=2, seconds=2.0, passes=1)
+    assert found.settings.vocal_db == SPECS["vocal_db"].low
+    assert "vocal_db" in found.at_edge
+
+
+class Interrupted(Exception):
+    """Stands in for Ctrl+C reaching a render."""
+
+
+def test_an_error_in_one_window_stops_the_other_windows_at_once(track, monkeypatch):
+    from redline.vocal import auto as auto_module
+
+    vocal, beat, ctx = track
+    engine = Engine(vocal, beat, ctx)
+    calls: list[int] = []
+    built: list[int] = []
+    lock = threading.Lock()
+
+    class Breaking(Engine):
+        def __init__(self, *args, **kwargs):
+            self.index = len(built)
+            built.append(self.index)
+            super().__init__(*args, **kwargs)
+
+        def render(self, settings, cancelled=lambda: False):
+            with lock:
+                calls.append(self.index)
+                mine = calls.count(self.index)
+            # the last window breaks on the first candidate of the search's first grid
+            if self.index == len(built) - 1 and mine == 2:
+                raise Interrupted
+            time.sleep(0.3)
+            return super().render(settings, cancelled)
+
+    monkeypatch.setattr(auto_module, "Engine", Breaking)
+    with pytest.raises(Interrupted):
+        auto_settings(engine, LOUDER_REFS, BASE, count=2, seconds=1.5, passes=1)
+    assert built == [0, 1]
+    returned = list(calls)
+    # the base, then at most the candidate the first window had begun
+    assert returned.count(0) <= 2
+    time.sleep(1.0)
+    # and nothing runs on after the call has returned
+    assert calls == returned
 
 
 SPREAD = "vocal.short_term_spread_lu"
@@ -412,49 +560,39 @@ ALL_REFS = [
 ]
 
 
-def clean_windows(track, settings, count, seconds):
-    """Each window's final and its after-master stems, rendered apart from the search."""
-    vocal, beat, ctx = track
-    out = []
-    for a, b in spread_windows(vocal, RATE, count, seconds):
-        rendered = Engine(vocal[a:b], beat[a:b], ctx).render(settings)
-        out.append((rendered.final, *after_master(rendered)))
-    return out
-
-
 class KnownSeparator:
-    """Gives back each window's own clean stems, changed by `split`, and counts its calls."""
+    """Gives back the pooled windows' own clean stems, changed by `split`, and counts its calls."""
 
     id = "fake:known"
 
     def __init__(self, track, settings, count, seconds, split):
-        self.stems = {
-            final.tobytes(): (index, v, b)
-            for index, (final, v, b) in enumerate(clean_windows(track, settings, count, seconds))
-        }
+        pooled = pooled_render(track, settings, count, seconds)
+        self.final = pooled.final
+        self.vocal, self.beat = after_master(pooled)
         self.split = split
-        self.calls = []
+        self.calls = 0
 
     def __call__(self, samples, rate):
         assert rate == RATE
-        index, vocal, beat = self.stems[np.asarray(samples).tobytes()]
-        self.calls.append(index)
-        return self.split(index, vocal, beat)
+        np.testing.assert_array_equal(samples, self.final)
+        self.calls += 1
+        return self.split(self.vocal, self.beat)
 
 
 def expected_bias(track, settings, count, seconds, split):
-    """Median over windows of separated minus clean, per metric both sides have."""
-    diffs: dict[str, list[float]] = {}
-    for index, (_, vocal, beat) in enumerate(clean_windows(track, settings, count, seconds)):
-        clean = measure_processed(vocal, beat, RATE)
-        separated = measure_processed(*split(index, vocal, beat), RATE)
-        for metric in SEARCHED:
-            if clean[metric] is not None and separated[metric] is not None:
-                diffs.setdefault(metric, []).append(separated[metric] - clean[metric])
-    return {metric: float(np.median(values)) for metric, values in diffs.items()}
+    """Separated minus clean on the pooled windows, per metric both sides have."""
+    pooled = pooled_render(track, settings, count, seconds)
+    vocal, beat = after_master(pooled)
+    clean = measure_processed(vocal, beat, RATE)
+    separated = measure_processed(*split(vocal, beat), RATE)
+    return {
+        metric: separated[metric] - clean[metric]
+        for metric in SEARCHED
+        if clean[metric] is not None and separated[metric] is not None
+    }
 
 
-def bleed(index, vocal, beat):
+def bleed(vocal, beat):
     # Roformer-like: some beat stays in the vocal, and the beat loses it
     return vocal + 0.4 * beat, 0.6 * beat
 
@@ -469,9 +607,8 @@ def test_without_a_separator_the_targets_are_the_references_and_no_bias(track, r
     assert explicit == result
 
 
-def test_the_bias_is_the_median_over_windows_of_separated_minus_clean(track):
+def test_the_bias_is_separated_minus_clean_on_the_pooled_windows(track):
     vocal, beat, ctx = track
-    # three windows, so the median is one window's difference and not a mean of two
     separator = KnownSeparator(track, BASE, 3, 1.2, bleed)
     found = auto_settings(
         Engine(vocal, beat, ctx),
@@ -494,32 +631,10 @@ def test_the_bias_is_the_median_over_windows_of_separated_minus_clean(track):
     assert found.distance_before == pytest.approx(distance(found.values, found.targets))
 
 
-def test_a_window_missing_a_metric_on_one_side_is_left_out_of_its_median(track):
+def test_a_metric_the_separated_side_lacks_gets_no_bias(track):
     vocal, beat, ctx = track
 
-    def first_silent(index, vocal, beat):
-        return (np.zeros_like(vocal), beat) if index == 0 else bleed(index, vocal, beat)
-
-    separator = KnownSeparator(track, BASE, 3, 1.2, first_silent)
-    found = auto_settings(
-        Engine(vocal, beat, ctx),
-        ALL_REFS,
-        BASE,
-        count=3,
-        seconds=1.2,
-        passes=0,
-        separator=separator,
-    )
-    bias = expected_bias(track, BASE, 3, 1.2, first_silent)
-    # two windows left: their mean, which differs from the three-window median
-    assert found.bias == pytest.approx(bias, rel=1e-9, abs=1e-12)
-    assert bias != pytest.approx(expected_bias(track, BASE, 3, 1.2, bleed))
-
-
-def test_a_metric_no_window_has_on_the_separated_side_gets_no_bias(track):
-    vocal, beat, ctx = track
-
-    def silent(index, vocal, beat):
+    def silent(vocal, beat):
         return np.zeros_like(vocal), beat
 
     separator = KnownSeparator(track, BASE, 2, 1.5, silent)
@@ -538,7 +653,7 @@ def test_a_metric_no_window_has_on_the_separated_side_gets_no_bias(track):
 
 def test_a_perfect_separator_finds_no_bias_and_changes_nothing(track, result):
     vocal, beat, ctx = track
-    separator = KnownSeparator(track, BASE, 2, 2.0, lambda index, v, b: (v, b))
+    separator = KnownSeparator(track, BASE, 2, 2.0, lambda v, b: (v, b))
     found = auto_settings(
         Engine(vocal, beat, ctx),
         LOUDER_REFS,
@@ -560,7 +675,7 @@ def test_a_separator_that_reads_the_vocal_louder_moves_the_target_back(track, re
     # references that read the vocal 6 dB louder only because they were separated
     shifted = [ref(r.name, {PAIR: r.values[PAIR] + louder}) for r in LOUDER_REFS]
     naive = auto_settings(Engine(vocal, beat, ctx), shifted, BASE, count=2, seconds=2.0, passes=2)
-    separator = KnownSeparator(track, BASE, 2, 2.0, lambda index, v, b: (2 * v, b))
+    separator = KnownSeparator(track, BASE, 2, 2.0, lambda v, b: (2 * v, b))
     found = auto_settings(
         Engine(vocal, beat, ctx),
         shifted,
@@ -577,7 +692,7 @@ def test_a_separator_that_reads_the_vocal_louder_moves_the_target_back(track, re
     assert found.settings == result.settings
 
 
-def test_the_separator_runs_once_per_window_on_its_final_not_per_candidate(track):
+def test_the_separator_runs_once_per_search_on_the_pooled_final(track):
     vocal, beat, ctx = track
     separator = KnownSeparator(track, BASE, 2, 1.5, bleed)
     found = auto_settings(
@@ -590,7 +705,7 @@ def test_the_separator_runs_once_per_window_on_its_final_not_per_candidate(track
         separator=separator,
     )
     assert found.settings != BASE
-    assert separator.calls == [0, 1]
+    assert separator.calls == 1
 
 
 def test_by_default_three_windows_of_six_seconds_are_rendered(monkeypatch):

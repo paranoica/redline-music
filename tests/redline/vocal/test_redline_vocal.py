@@ -1,11 +1,14 @@
+import gc
 import json
-from dataclasses import asdict
+import weakref
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta
 
 import numpy as np
 import pytest
 import soundfile as sf
 from redline.cli import main
+from redline.core.listen import write_listen_set
 from redline.core.loudness import integrated_lufs
 from redline.engine.render import Engine
 from redline.engine.settings import Settings, from_dict
@@ -314,6 +317,73 @@ def test_blind_round_writes_every_variant_at_one_level_with_the_key_and_settings
     out_files = sorted(p.name for p in (tmp_path / "o").rglob("*") if p.is_file())
     assert out_files == [".gitignore", "A.wav", "B.wav", "C.wav"]
     assert result.run_dir.is_relative_to(tmp_path / "w")
+
+
+def test_a_round_drops_each_variants_stems_once_it_is_rendered(engine, tmp_path):
+    alive = []
+
+    class Watched(Engine):
+        def render(self, settings, cancelled=lambda: False):
+            gc.collect()
+            # the variants before this one are down to their finals already
+            assert all(ref() is None for ref in alive)
+            rendered = super().render(settings, cancelled)
+            # copies, so the engine's own stage cache does not keep them alive
+            vocal, beat = rendered.vocal.copy(), rendered.beat.copy()
+            alive.extend([weakref.ref(vocal), weakref.ref(beat)])
+            return replace(rendered, vocal=vocal, beat=beat)
+
+    watched = Watched(engine.vocal, engine.beat, engine.context)
+    plain = from_dict({"master_on": False, "doubles_on": False})
+
+    def record(kept):
+        gc.collect()
+        assert all(ref() is None for ref in alive)
+        return {"masters": [asdict(k.master) for k in kept.values() if k.master is not None]}
+
+    variants = {"plain": plain, "mastered": Settings(), "quiet": replace(plain, vocal_db=-12.0)}
+    result, kept = blind_round(watched, variants, tmp_path / "w", tmp_path / "o", "t", 3, record)
+    assert len(alive) == 6
+    assert sorted(kept) == ["mastered", "plain", "quiet"]
+    assert all(k.vocal is None for k in kept.values())
+    chain = json.loads((result.run_dir / "chain.json").read_text())
+    assert len(chain["masters"]) == 1
+
+
+def test_a_round_writes_what_its_full_renders_would_have_given(engine, tmp_path):
+    plain = from_dict({"master_on": False, "doubles_on": False})
+    variants = {"original": engine.vocal + engine.beat, "plain": plain, "mastered": Settings()}
+
+    def record(renders):
+        # reads what the stage 3 rounds read: the chain, the master and the final's loudness
+        return {
+            name: {
+                "chain": asdict(r.chain),
+                "master": None if r.master is None else asdict(r.master),
+                "final_lufs": integrated_lufs(r.final, RATE),
+            }
+            for name, r in renders.items()
+        }
+
+    result, _ = blind_round(engine, variants, tmp_path / "w", tmp_path / "o", "t", 11, record)
+    fresh = Engine(engine.vocal, engine.beat, engine.context)
+    full = {n: fresh.render(v) for n, v in variants.items() if isinstance(v, Settings)}
+    expected = {
+        **record(full),
+        "variants": {"plain": asdict(plain), "mastered": asdict(Settings())},
+    }
+    # through JSON, so tuples compare as the lists the file holds
+    assert json.loads((result.run_dir / "chain.json").read_text()) == json.loads(
+        json.dumps(expected)
+    )
+    mixes = {n: full[n].final if n in full else v for n, v in variants.items()}
+    write_listen_set(mixes, RATE, tmp_path / "expected", 11)
+    files = sorted(p.name for p in result.listen_dir.iterdir())
+    assert files == sorted(p.name for p in (tmp_path / "expected").iterdir())
+    for name in files:
+        assert (result.listen_dir / name).read_bytes() == (
+            tmp_path / "expected" / name
+        ).read_bytes()
 
 
 @pytest.mark.parametrize("name", ["eq", "light", "heavy", "loudest"])

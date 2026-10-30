@@ -566,6 +566,49 @@ def test_a_voice_round_hands_the_tracks_measured_tuning_to_hard_tune(inputs, tmp
     assert chain["variants"]["base"]["hard_tune"] == 0.0
 
 
+def test_hard_tune_in_a_round_snaps_to_the_tracks_own_tuning(inputs, tmp_path, monkeypatch):
+    from redline.engine import render as engine
+    from redline.master import run as final_run
+
+    measure = final_run.measure_inputs
+    tunings = []
+
+    def measured(*args):
+        result = measure(*args)
+        tunings.append(result.track.info["vocal.tuning_cents"])
+        return result
+
+    seen = []
+    monkeypatch.setattr(final_run, "measure_inputs", measured)
+    monkeypatch.setattr(
+        engine, "hard_tune", lambda x, rate, cents, strength: seen.append(cents) or x
+    )
+    _, refs = inputs
+    # a held 400 Hz with its harmonics over a light kick, long enough for the pitch tracker
+    rng = make_rng()
+    n = 12 * 44100
+    t = np.arange(n) / 44100
+    voice = 0.5 * np.sin(2 * np.pi * 400 * t) + 0.2 * np.sin(2 * np.pi * 800 * t)
+    voice += 0.1 * np.sin(2 * np.pi * 1200 * t)
+    kick = np.sin(2 * np.pi * 55 * t) * np.exp(-((t % 0.5) / 0.15))
+    mono = 0.3 * voice + 0.1 * kick + 0.0005 * rng.standard_normal(n)
+    track = write(tmp_path, "held.wav", np.column_stack([mono, mono]).astype(np.float32), 44100)
+    timbre_round(
+        track,
+        sorted(refs.iterdir()),
+        tmp_path / "w",
+        tmp_path / "o",
+        HalfSeparator(),
+        1,
+        ("hard tune",),
+        "voice",
+    )
+    (tuning,) = tunings
+    # 400 Hz is 165 cents under A440, so 35 cents above the equal-tempered grid
+    assert tuning == pytest.approx(1200 * np.log2(400 / 440) + 200, abs=3.0)
+    assert seen == [tuning]
+
+
 def test_each_named_effect_switches_on_its_setting():
     bare = replace(Settings(), octave_down_on=False, doubles_on=False)
     # the timbre the rounds picked is the default chain

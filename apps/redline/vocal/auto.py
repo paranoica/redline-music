@@ -6,15 +6,17 @@ and with a separator the medians are moved by what separation itself adds to the
 Closer to the references is all the numbers say; whether it sounds better is for the ear.
 """
 
+import threading
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
 
 import numpy as np
 import numpy.typing as npt
 
-from redline.engine.render import CACHE_BYTES, Engine, Rendered
+from redline.engine.render import CACHE_BYTES, Cancelled, Context, Engine, Rendered, master_target
 from redline.engine.settings import SPECS, Settings
+from redline.master.clip import master_clip
 from redline.measure.metrics import METRICS, finite, vocal_metrics
 from redline.measure.run import FileResult
 from redline.measure.separate import Separator
@@ -118,7 +120,7 @@ def distance(
 
 
 def spread_windows(
-    vocal: Samples, rate: int, count: int = 4, seconds: float = 8.0
+    vocal: Samples, rate: int, count: int = 3, seconds: float = 6.0
 ) -> list[tuple[int, int]]:
     """Windows of the given length spread evenly over the part of the track that is sung.
 
@@ -183,29 +185,47 @@ def after_master(rendered: Rendered) -> tuple[Samples, Samples]:
     return rendered.vocal * ratio, rendered.beat * ratio
 
 
-def separation_bias(
-    separator: Separator, windows: Sequence[Rendered], rate: int
-) -> dict[str, float]:
+def master_pooled(windows: Sequence[Rendered], settings: Settings, context: Context) -> Rendered:
+    """The windows joined and put through one master, as the whole track would be.
+
+    A master on each window alone would clip a quiet one deeper than the track's master does.
+
+    Args:
+        windows: Renders of the windows without a master, in order.
+        settings: The candidate; its master settings choose the target, as in the engine.
+        context: The track's; its loudness target serves an automatic master.
+
+    Returns:
+        The joined vocal and beat, their mix through master_clip and that one master; the mix
+        as it is and no master when the candidate's master is off.
+    """
+    vocal = np.concatenate([w.vocal for w in windows])
+    beat = np.concatenate([w.beat for w in windows])
+    mix = vocal + beat
+    target = master_target(settings, context)
+    final, master = (mix, None) if target is None else master_clip(mix, context.rate, target)
+    return Rendered(vocal, beat, final, windows[0].chain, master)
+
+
+def separation_bias(separator: Separator, pooled: Rendered, rate: int) -> dict[str, float]:
     """What separating a mastered mix adds to each metric, against the stems it was made of.
 
     Args:
-        separator: Splits a mix into vocal and beat; run once on each window's final.
-        windows: Renders of the windows, each with its master.
-        rate: Sample rate of the renders.
+        separator: Splits a mix into vocal and beat; run once, on the pooled final.
+        pooled: The windows joined under one master (see master_pooled).
+        rate: Sample rate of the render.
 
     Returns:
-        Per metric, the median over windows of the separated stems' value less the after-master
-        stems' value; windows missing the metric on either side are left out, and a metric no
-        window has on both is left out.
+        Per metric, the separated stems' value less the after-master stems' value; a metric
+        missing on either side is left out.
     """
-    differences: dict[str, list[float]] = {}
-    for rendered in windows:
-        clean = measure_processed(*after_master(rendered), rate)
-        separated = measure_processed(*separator(rendered.final, rate), rate)
-        for metric in SEARCHED:
-            if (a := separated[metric]) is not None and (b := clean[metric]) is not None:
-                differences.setdefault(metric, []).append(a - b)
-    return {metric: float(np.median(found)) for metric, found in differences.items()}
+    clean = measure_processed(*after_master(pooled), rate)
+    separated = measure_processed(*separator(pooled.final, rate), rate)
+    return {
+        metric: a - b
+        for metric in SEARCHED
+        if (a := separated[metric]) is not None and (b := clean[metric]) is not None
+    }
 
 
 def _coordinate_search(
@@ -255,6 +275,64 @@ def _level_to_target(
     return best, best_score
 
 
+class _Windows:
+    """The track's windows, each with its own engine and thread, measured joined."""
+
+    def __init__(self, engine: Engine, count: int, seconds: float) -> None:
+        self.context = engine.context
+        spans = spread_windows(engine.vocal, self.context.rate, count, seconds)
+        # built once, so a candidate reuses the stages it shares with those before it
+        self.pieces = [
+            Engine(engine.vocal[a:b], engine.beat[a:b], self.context, CACHE_BYTES // len(spans))
+            for a, b in spans
+        ]
+        self.stop = threading.Event()
+        self.pool = ThreadPoolExecutor(len(self.pieces))
+
+    def _run(self, piece: Engine, batch: Sequence[Settings]) -> list[Rendered]:
+        done = []
+        for settings in batch:
+            if self.stop.is_set():
+                raise Cancelled
+            done.append(piece.render(replace(settings, master_on=False), self.stop.is_set))
+        return done
+
+    def renders(self, batch: Sequence[Settings]) -> list[list[Rendered]]:
+        """Each candidate's windows, rendered without a master; the first error is raised."""
+        # one thread per window, so each piece's stage cache serves its candidates in order
+        jobs = [self.pool.submit(self._run, piece, batch) for piece in self.pieces]
+        finished, _ = wait(jobs, return_when=FIRST_EXCEPTION)
+        for job in finished:
+            if (error := job.exception()) is not None:
+                raise error
+        per_piece = [job.result() for job in jobs]
+        return [[done[i] for done in per_piece] for i in range(len(batch))]
+
+    def _measure(self, settings: Settings, windows: Sequence[Rendered]) -> dict[str, float | None]:
+        pooled = master_pooled(windows, settings, self.context)
+        return measure_processed(*after_master(pooled), self.context.rate)
+
+    def measure(self, batch: Sequence[Settings]) -> list[dict[str, float | None]]:
+        """Each candidate's metrics on its windows joined under one master."""
+        return list(self.pool.map(self._measure, batch, self.renders(batch)))
+
+    def cancel(self) -> None:
+        """Stop the renders at their next stage and drop what is queued, without waiting."""
+        self.stop.set()
+        self.pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _at_edge(settings: Settings) -> tuple[str, ...]:
+    edges = []
+    for key, grid in AXES.items():
+        # the level step sets vocal_db anywhere in its range, so only the range ends it
+        spec = SPECS[key]
+        low, high = (spec.low, spec.high) if key == "vocal_db" else (grid[0], grid[-1])
+        if not low < getattr(settings, key) < high:
+            edges.append(key)
+    return tuple(edges)
+
+
 def auto_settings(
     engine: Engine,
     refs: Sequence[FileResult],
@@ -266,11 +344,12 @@ def auto_settings(
 ) -> AutoResult:
     """Coordinate search over AXES for the settings whose render measures closest.
 
-    Renders only windows spread over the sung part of the track, each through the master,
-    and measures them pooled. Each pass goes through the keys in order and tries every grid
-    value with the other keys as currently best; the search ends early once a whole pass
-    moves no key. The windows render side by side, which leaves the result as it would be
-    one after another.
+    Renders only windows spread over the sung part of the track, without a master, and
+    measures them joined under one master (see master_pooled). Each pass goes through the
+    keys in order and tries every grid value with the other keys as currently best; the
+    search ends early once a whole pass moves no key. The windows render side by side, which
+    leaves the result as it would be one after another. An error in any window, Ctrl+C
+    included, stops the others at their next stage and is raised at once.
 
     Args:
         engine: The track's engine; its stems and context are used, its cache is not.
@@ -280,61 +359,40 @@ def auto_settings(
         seconds: Length of each window.
         passes: Most rounds over the keys.
         separator: The one the references were separated with. When given, it is run once
-            on each window's final at the base settings, and each target's median is moved
-            by the bias separation adds to that metric (see separation_bias).
+            on the pooled final at the base settings, and each target's median is moved by
+            the bias separation adds to that metric (see separation_bias).
 
     Returns:
         The chosen settings, the distances of the base and of the choice, the choice's
-        metrics, the targets, the keys whose chosen value is the first or last of its grid,
-        and the bias per metric.
+        metrics, the targets, the keys at an end of their search (the first or last grid
+        value, the ends of its range for vocal_db), and the bias per metric.
     """
     base = Settings() if base is None else base
     rate = engine.context.rate
-    windows = spread_windows(engine.vocal, rate, count, seconds)
-    # built once, so a candidate reuses the stages it shares with those before it
-    pieces = [
-        Engine(engine.vocal[a:b], engine.beat[a:b], engine.context, CACHE_BYTES // len(windows))
-        for a, b in windows
-    ]
+    windows = _Windows(engine, count, seconds)
     measured: dict[Settings, dict[str, float | None]] = {}
 
-    with ThreadPoolExecutor(len(pieces)) as pool:
+    def scores(batch: Sequence[Settings]) -> list[float]:
+        if new := [s for s in dict.fromkeys(batch) if s not in measured]:
+            measured.update(zip(new, windows.measure(new), strict=True))
+        return [distance(measured[s], targets) for s in batch]
 
-        def renders(batch: Sequence[Settings]) -> list[list[Rendered]]:
-            # one thread per window, so each piece's stage cache serves its candidates in order
-            jobs = [pool.submit(lambda p: [p.render(s) for s in batch], piece) for piece in pieces]
-            per_piece = [job.result() for job in jobs]
-            return [[done[i] for done in per_piece] for i in range(len(batch))]
-
-        def pooled(rendered: Sequence[Rendered]) -> dict[str, float | None]:
-            stems = [after_master(r) for r in rendered]
-            vocal = np.concatenate([v for v, _ in stems])
-            beat = np.concatenate([b for _, b in stems])
-            return measure_processed(vocal, beat, rate)
-
-        def measure_all(batch: Sequence[Settings]) -> None:
-            new = [s for s in dict.fromkeys(batch) if s not in measured]
-            if new:
-                measured.update(zip(new, pool.map(pooled, renders(new)), strict=True))
-
+    try:
         bias: dict[str, float] = {}
         if separator is not None:
-            (at_base,) = renders([base])
-            bias = separation_bias(separator, at_base, rate)
+            (at_base,) = windows.renders([base])
+            pooled = master_pooled(at_base, base, engine.context)
+            bias = separation_bias(separator, pooled, rate)
         targets = {
             metric: (median - bias.get(metric, 0.0), spread)
             for metric, (median, spread) in reference_targets(refs).items()
         }
-
-        def scores(batch: Sequence[Settings]) -> list[float]:
-            measure_all(batch)
-            return [distance(measured[s], targets) for s in batch]
-
         (before,) = scores([base])
         best, best_distance = _coordinate_search(scores, base, before, passes)
         if passes > 0:
             best, best_distance = _level_to_target(scores, measured, targets, best, best_distance)
-    at_edge = tuple(
-        key for key, grid in AXES.items() if not grid[0] < getattr(best, key) < grid[-1]
-    )
-    return AutoResult(best, before, best_distance, measured[best], targets, at_edge, bias)
+    except BaseException:
+        windows.cancel()
+        raise
+    windows.pool.shutdown()
+    return AutoResult(best, before, best_distance, measured[best], targets, _at_edge(best), bias)

@@ -6,8 +6,8 @@ Stage 2's vocal rounds (dirt, balance) live here; the stage 3 rounds use the sam
 import json
 import logging
 import secrets
-from collections.abc import Callable, Mapping
-from dataclasses import asdict, replace
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +15,14 @@ import numpy as np
 import numpy.typing as npt
 
 from redline.core.listen import write_listen_set
-from redline.engine.render import Engine, Rendered
+from redline.engine.render import Engine
 from redline.engine.settings import Settings
 from redline.engine.track import track_engine
+from redline.master.clip import MasterResult
 from redline.measure.run import keep_out_of_git, measure_inputs, new_run_dir
 from redline.measure.separate import Separator
 from redline.output import ORIGINAL, VocalRun, check_folders
-from redline.vocal.chain import ALL_LEVELS, DIRT_LEVELS, EXTRA, DirtLevel
+from redline.vocal.chain import ALL_LEVELS, DIRT_LEVELS, EXTRA, ChainResult, DirtLevel
 from redline.vocal.report import write_vocal_report
 
 Samples = npt.NDArray[np.floating]
@@ -34,6 +35,26 @@ PLAIN = replace(
     Settings(), octave_down_on=False, doubles_on=False, bass_drive_db=0.0, master_on=False
 )
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Heard:
+    """What a round keeps of a variant's render: the final it plays and what its record reads.
+
+    The vocal is kept only for the variants asked for; a round of several full-length
+    renders would otherwise hold every one's stems until it is written.
+    """
+
+    final: Samples
+    chain: ChainResult
+    master: MasterResult | None
+    vocal: Samples | None = None
+
+
+def _heard(engine: Engine, settings: Settings, keep_vocal: bool) -> Heard:
+    rendered = engine.render(settings)
+    vocal = rendered.vocal if keep_vocal else None
+    return Heard(rendered.final, rendered.chain, rendered.master, vocal)
 
 
 def _check_levels(levels: tuple[str, ...]) -> None:
@@ -75,8 +96,9 @@ def blind_round(
     out_dir: Path,
     axis: str,
     seed: int | None = None,
-    record: Callable[[dict[str, Rendered]], dict[str, Any]] = lambda rendered: {},
-) -> tuple[VocalRun, dict[str, Rendered]]:
+    record: Callable[[dict[str, Heard]], dict[str, Any]] = lambda heard: {},
+    keep_vocals: Collection[str] = (),
+) -> tuple[VocalRun, dict[str, Heard]]:
     """Render each variant and write the listening set, its key and the round's record.
 
     Args:
@@ -86,18 +108,20 @@ def blind_round(
         out_dir: Where <run>/listen/ gets one letter per variant, all at one loudness.
         axis: The round's axis, kept in the key.
         seed: The shuffle's seed; a random one when None.
-        record: Builds chain.json from the renders; the settings of each are added to it.
+        record: Builds chain.json from what was kept of the renders; the settings of each
+            are added to it.
+        keep_vocals: Variants whose rendered vocal is kept as well.
 
     Returns:
-        Where the files went, and the render of each settings variant.
+        Where the files went, and what was kept of each settings variant's render.
     """
-    renders: dict[str, Rendered] = {}
+    heard: dict[str, Heard] = {}
     mixes: dict[str, Samples] = {}
     for name, variant in variants.items():
         if isinstance(variant, Settings):
             log.info("%s: %s", axis, name)
-            renders[name] = engine.render(variant)
-            mixes[name] = renders[name].final
+            heard[name] = _heard(engine, variant, name in keep_vocals)
+            mixes[name] = heard[name].final
         else:
             mixes[name] = variant
     run_dir = new_run_dir(work_dir / "runs")
@@ -114,9 +138,9 @@ def blind_round(
     )
     settings = {n: asdict(v) for n, v in variants.items() if isinstance(v, Settings)}
     (run_dir / "chain.json").write_text(
-        json.dumps({**record(renders), "variants": settings}, indent=1), encoding="utf-8"
+        json.dumps({**record(heard), "variants": settings}, indent=1), encoding="utf-8"
     )
-    return VocalRun(run_dir, listen_dir), renders
+    return VocalRun(run_dir, listen_dir), heard
 
 
 def vocal_run(
@@ -149,8 +173,8 @@ def vocal_run(
     else:
         variants = {f"vocal {-offset}": level_settings(EXTRA, -offset) for offset in BALANCE_DB}
 
-    def record(renders: dict[str, Rendered]) -> dict[str, Any]:
-        chains = list(renders.values()) if axis == "dirt" else [renders["vocal 0"]]
+    def record(heard: dict[str, Heard]) -> dict[str, Any]:
+        chains = list(heard.values()) if axis == "dirt" else [heard["vocal 0"]]
         return {
             "rate": ctx.rate,
             "compared_up_to_hz": ctx.upper,
@@ -162,7 +186,9 @@ def vocal_run(
             "vocal_db": vocal_db,
         }
 
-    result, renders = blind_round(
+    # the report reads each processed vocal at its own level, before the balance moved it
+    kept = tuple(levels) if axis == "dirt" else ("vocal 0",)
+    result, heard = blind_round(
         engine,
         {ORIGINAL: engine.vocal + engine.beat, **variants},
         work_dir,
@@ -170,14 +196,15 @@ def vocal_run(
         axis,
         seed,
         record,
+        kept,
     )
-    # the report reads each processed vocal at its own level, before the balance moved it
+    rendered = {name: v for name, h in heard.items() if (v := h.vocal) is not None}
     vocals = {ORIGINAL: engine.vocal}
     if axis == "dirt":
         undo = np.float32(10 ** (-vocal_db / 20))
-        vocals.update({name: renders[name].vocal * undo for name in levels})
+        vocals.update({name: rendered[name] * undo for name in levels})
     else:
-        vocals[EXTRA.name] = renders["vocal 0"].vocal
+        vocals[EXTRA.name] = rendered["vocal 0"]
     write_vocal_report(
         result.run_dir / "report.md",
         vocals,

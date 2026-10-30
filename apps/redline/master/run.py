@@ -15,14 +15,14 @@ from redline.core.audio import true_peak_db
 from redline.core.listen import common_lufs
 from redline.core.loudness import gated_crest_db, integrated_lufs
 from redline.core.spectrum import low_end
-from redline.engine.render import Engine, Rendered, timbre_of
+from redline.engine.render import Engine, timbre_of
 from redline.engine.settings import SPECS, Settings
 from redline.engine.track import reference_loudness, track_engine
 from redline.master.report import write_final_report
 from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
 from redline.measure.separate import Separator
 from redline.output import ORIGINAL, VocalRun, check_folders
-from redline.vocal.rounds import blind_round
+from redline.vocal.rounds import Heard, blind_round
 
 Samples = npt.NDArray[np.floating]
 
@@ -77,7 +77,7 @@ def master_targets(refs: list[FileResult]) -> dict[str, float]:
     return {f"master {t:.1f}": t for t in targets}
 
 
-def _master_record(name: str, rendered: Rendered, rate: int) -> dict[str, Any]:
+def _master_record(name: str, rendered: Heard, rate: int) -> dict[str, Any]:
     if rendered.master is None:
         raise ValueError(f"{name}: rendered without a master")
     return {
@@ -109,7 +109,7 @@ def master_round(
     for name, target in targets.items():
         variants[name] = replace(chosen, master_auto=False, master_lufs=target)
 
-    def record(renders: dict[str, Rendered]) -> dict[str, Any]:
+    def record(renders: dict[str, Heard]) -> dict[str, Any]:
         return {
             "vocal": asdict(renders[NO_MASTER].chain),
             "vocal_db": chosen.vocal_db,
@@ -211,7 +211,7 @@ def bass_round(
     for name, drive_db in drives.items():
         variants[name] = replace(Settings(), bass_drive_db=drive_db)
 
-    def record(renders: dict[str, Rendered]) -> dict[str, Any]:
+    def record(renders: dict[str, Heard]) -> dict[str, Any]:
         masters = [
             {
                 **_master_record(name, renders[name], rate),

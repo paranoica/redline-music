@@ -85,6 +85,13 @@ def _key(settings: Settings, names: tuple[str, ...]) -> tuple:
     return tuple(getattr(settings, name) for name in names)
 
 
+def master_target(settings: Settings, context: Context) -> float | None:
+    """The loudness the master raises the mix to; None when the master is off."""
+    if not settings.master_on:
+        return None
+    return context.master_lufs if settings.master_auto else settings.master_lufs
+
+
 def dirt_level(settings: Settings) -> DirtLevel:
     """The chain's compression, drive and clip; named after a picked level when it is one."""
     if not settings.chain_on:
@@ -299,9 +306,9 @@ class Engine:
         return saturate_low(beat, self.context.rate, settings.bass_freq_hz, settings.bass_drive_db)
 
     def _master(self, mix: Samples, settings: Settings) -> tuple[Samples, MasterResult | None]:
-        if not settings.master_on:
+        target = master_target(settings, self.context)
+        if target is None:
             return mix, None
-        target = self.context.master_lufs if settings.master_auto else settings.master_lufs
         fixed = self._fixed_master
         if fixed is not None and self._loop is not None:
             # a loop reads louder or quieter than the whole track, so its own gain search
