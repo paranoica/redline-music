@@ -337,3 +337,56 @@ def test_the_exact_render_goes_through_the_racks_unless_classic(studio, monkeypa
     assert len(calls) == (0 if classic else 1)
     classic_final = studio.engine.render(Settings()).final
     assert bool(np.array_equal(rendered.final, classic_final)) is classic
+
+
+def test_an_analysis_asked_for_after_another_drops_the_waiting_and_cancels_the_running(
+    studio, monkeypatch
+):
+    from redline.studio import server as studio_server
+
+    entered, release = threading.Event(), threading.Event()
+    ran, outcomes = [], {}
+
+    def fake(engine, settings, cancelled=lambda: False):
+        ran.append(settings.drive_db)
+        if len(ran) == 1:
+            entered.set()
+            release.wait(10)
+            return {"cancelled": cancelled()}
+        return {"cancelled": cancelled()}
+
+    monkeypatch.setattr(studio_server.live, "analysis", fake)
+
+    def ask(drive):
+        try:
+            outcomes[drive] = studio.analysis(from_dict({"drive_db": drive}))
+        except studio_server.BadRequest as error:
+            outcomes[drive] = error.status
+
+    first = threading.Thread(target=ask, args=(10.0,))
+    first.start()
+    entered.wait(10)
+    waiting = threading.Thread(target=ask, args=(12.0,))
+    waiting.start()
+    while studio._analysis_asked < 2:
+        pass
+    ask_last = threading.Thread(target=ask, args=(14.0,))
+    ask_last.start()
+    while studio._analysis_asked < 3:
+        pass
+    release.set()
+    for thread in (first, waiting, ask_last):
+        thread.join(30)
+    assert outcomes[10.0] == {"cancelled": True}
+    assert outcomes[12.0] == 409
+    assert outcomes[14.0] == {"cancelled": False}
+    assert ran == [10.0, 14.0]
+
+
+def test_a_silent_vocal_is_named_before_the_studio_opens():
+    from redline.engine import live
+
+    vocal, beat = stems(4.0)
+    with pytest.raises(ValueError, match="vocal stem is silent"):
+        live.check_vocal(Engine(np.zeros_like(vocal), beat, context(vocal)))
+    live.check_vocal(Engine(vocal, beat, context(vocal)))

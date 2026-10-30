@@ -246,6 +246,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
     import webbrowser
 
     from redline.core.audio import decode
+    from redline.engine import live
     from redline.engine import settings as chain_settings
     from redline.engine.track import track_engine
     from redline.measure.run import measure_inputs, measure_own
@@ -270,6 +271,7 @@ def _studio(args: argparse.Namespace, separator: "Separator | None") -> int:
             # the offset is left out, so settings tuned on a pair survive moving it
             source = f"{args.vocal.resolve()}|{args.beat.resolve()}"
         engine = track_engine(inputs)
+        live.check_vocal(engine)
         stems = inputs.track_stems
         digest = hashlib.sha256(source.encode()).hexdigest()[:8]
         track_key = f"{named.stem}-{digest}"

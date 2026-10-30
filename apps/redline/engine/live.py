@@ -12,6 +12,7 @@ the vocal and the beat up before summing them (an offline render shifts each bac
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import fields
 from typing import Any
 
@@ -160,7 +161,23 @@ def _db(value: float) -> float | None:
     return 20 * math.log10(value) if value > 0 else None
 
 
-def analysis(engine: Engine, settings: Settings | None = None) -> dict[str, Any]:
+def check_vocal(engine: Engine) -> float:
+    """The vocal stem's loudness in LUFS.
+
+    Raises:
+        ValueError: The vocal stem is silent, so there is no voice to process.
+    """
+    loudness = integrated_lufs(engine.vocal, engine.context.rate)
+    if not math.isfinite(loudness):
+        raise ValueError("no vocal to analyse: the vocal stem is silent")
+    return loudness
+
+
+def analysis(
+    engine: Engine,
+    settings: Settings | None = None,
+    cancelled: Callable[[], bool] = lambda: False,
+) -> dict[str, Any]:
     """The numbers the racks need and a stream cannot measure, for these settings.
 
     Runs the engine's render (from its cache when it has one) and parts of the chain again.
@@ -169,6 +186,7 @@ def analysis(engine: Engine, settings: Settings | None = None) -> dict[str, Any]
     Args:
         engine: The track's engine.
         settings: The settings to measure for; the defaults when left out.
+        cancelled: Asked between the render's stages; True stops it.
 
     Returns:
         A JSON-ready mapping: the vocal's gain to the chain's level, the compressor's gate,
@@ -176,15 +194,17 @@ def analysis(engine: Engine, settings: Settings | None = None) -> dict[str, Any]
         offsets), the gain that gives the chain's output the stem's loudness back, the
         tuning, the peak the bitcrush scales to, the throws' threshold, the master's gain and
         trim (None with the master off), and the settings they were measured for.
+
+    Raises:
+        Cancelled: cancelled said so between the render's stages.
+        ValueError: The vocal stem is silent.
     """
     settings = Settings() if settings is None else settings
     ctx = engine.context
     rate = ctx.rate
-    rendered = engine.render(settings)
+    rendered = engine.render(settings, cancelled)
     level = dirt_level(settings)
-    loudness = integrated_lufs(engine.vocal, rate)
-    if not math.isfinite(loudness):
-        raise ValueError("no vocal to analyse: the vocal stem is silent")
+    loudness = check_vocal(engine)
     pre = PRE_GAIN_LUFS - loudness
     staged = engine.vocal * np.float32(10 ** (pre / 20))
     gate = makeup = peak = None

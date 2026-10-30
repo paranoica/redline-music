@@ -116,6 +116,7 @@ class Studio:
         self._render_lock = threading.Lock()
         self._preview_lock = threading.Lock()
         self._analysis_lock = threading.Lock()
+        self._analysis_asked = 0
 
     def _claim(self, seq: int) -> bool:
         with self._seq_lock:
@@ -180,11 +181,24 @@ class Studio:
         """What `live.analysis` measures for these settings.
 
         Raises:
-            BadRequest: The engine cannot measure these settings.
+            BadRequest: The engine cannot measure these settings, or a newer analysis was
+                asked for meanwhile (409).
         """
+        # the page drops a reply it no longer waits for, so only the newest is worth the work
+        with self._seq_lock:
+            self._analysis_asked += 1
+            mine = self._analysis_asked
+
+        def newer() -> bool:
+            return mine != self._analysis_asked
+
         with self._analysis_lock:
             try:
-                return live.analysis(self.engine, settings)
+                if newer():
+                    raise Cancelled
+                return live.analysis(self.engine, settings, newer)
+            except Cancelled as error:
+                raise BadRequest(HTTPStatus.CONFLICT, "a newer analysis was asked for") from error
             except ValueError as error:
                 raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
 
