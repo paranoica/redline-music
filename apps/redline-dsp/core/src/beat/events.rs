@@ -100,13 +100,22 @@ impl EventTable {
             .iter()
             .map(|s| s.swing.unwrap_or(score.swing))
             .collect();
+        let shift = |k: usize| (2.0 * swing[k] / 100.0 - 1.0) * step;
         // every time from the step's index, so nothing drifts over a long song
         let time = |k: usize, at: u64| -> f64 {
             let t = at as f64 * step;
             if at % 2 == 1 {
-                t + (2.0 * swing[k] / 100.0 - 1.0) * step
+                t + shift(k)
             } else {
                 t
+            }
+        };
+        // from a step's swung start to the next one's; exactly a step when straight
+        let span = |k: usize, at: u64| -> f64 {
+            if at % 2 == 1 {
+                step - shift(k)
+            } else {
+                step + shift(k)
             }
         };
         let frame = |t: f64| t.round() as u64;
@@ -174,9 +183,10 @@ impl EventTable {
                                         continue;
                                     }
                                     let t = time(k, at(s));
+                                    let span = span(k, at(s));
                                     for r in 0..n {
                                         events.push(Event {
-                                            start: frame(t + r as f64 * step / n as f64),
+                                            start: frame(t + r as f64 * span / n as f64),
                                             note: 60.0 + row.pitch.as_ref().map_or(0.0, |p| p[i]),
                                             vel: row
                                                 .velocity

@@ -8,12 +8,14 @@
 //! ring at their own delays. A sidechain's side is read from its sound's ring at the
 //! listening sound's delay, so it stays in step with the sound it ducks.
 
-use super::events::EventTable;
+use super::events::{Event, EventTable};
 use super::instruments::{Instrument, Kind};
 use super::score::Score;
 use super::voices::{self, sampler_for, Ctx, SampleBank, Voice};
 use crate::effect::{Rack, MAX_BLOCK};
 use crate::filters::flush_tiny;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 /// The most frames the racks may delay the mix by, sound racks and master together.
 pub const MAX_LATENCY: usize = 1 << 17;
@@ -50,7 +52,8 @@ impl Pool {
         }
     }
 
-    /// A free slot, or the one with the oldest event if none is free.
+    /// A free slot, or the one with the oldest event if none is free. The pools are sized
+    /// so none ever runs out; the steal is only a guard.
     fn take(&mut self) -> usize {
         match self.busy.iter().position(|b| !b) {
             Some(s) => s,
@@ -62,6 +65,20 @@ impl Pool {
         self.busy[slot] = alive;
         if alive {
             self.order.push(slot);
+        }
+    }
+
+    /// Renders every busy voice into `dry`, oldest event first, freeing the ones done.
+    fn render(&mut self, dry: &mut [[f32; 2]], ctx: &Ctx) {
+        let mut i = 0;
+        while i < self.order.len() {
+            let s = self.order[i];
+            if self.voices[s].render(dry, ctx) {
+                i += 1;
+            } else {
+                self.busy[s] = false;
+                self.order.remove(i);
+            }
         }
     }
 
@@ -134,6 +151,21 @@ impl Gain {
     }
 }
 
+/// A rack a swap fades out, kept after the fade until a later swap hands it back.
+#[derive(Default)]
+struct Fader {
+    rack: Option<Rack>,
+    delay: usize,
+    /// Its weight when the running fade began; it falls to 0 with the fade.
+    from: f32,
+}
+
+impl Fader {
+    fn heard(&self) -> bool {
+        self.rack.is_some() && self.from > 0.0
+    }
+}
+
 struct Channel {
     name: String,
     instrument: &'static Instrument,
@@ -142,13 +174,15 @@ struct Channel {
     pool: Pool,
     /// This block's voices, before gain.
     dry: Vec<[f32; 2]>,
+    /// Frames of this block the voices have rendered into `dry`.
+    rendered: usize,
     /// The recent dry blocks, when any sound is delayed.
     ring: Vec<[f32; 2]>,
     delay: usize,
     rack: Rack,
-    /// The rack a swap fades out, kept after the fade until the next swap hands it back.
-    outgoing: Option<Rack>,
-    outgoing_delay: usize,
+    /// Two, so a swap during a fade can let both racks heard fade on from where they are;
+    /// the first went out earlier.
+    faders: [Fader; 2],
     fade_left: u32,
     gain: Gain,
     sidechain: Option<usize>,
@@ -173,9 +207,9 @@ pub struct Player {
     crossfade: u32,
     gain_ramp: u32,
     wet: Vec<[f32; 2]>,
-    wet_old: Vec<[f32; 2]>,
+    wet_old: [Vec<[f32; 2]>; 2],
     side: Vec<[f32; 2]>,
-    side_old: Vec<[f32; 2]>,
+    side_old: [Vec<[f32; 2]>; 2],
 }
 
 /// A whole song rendered with its tail.
@@ -193,13 +227,26 @@ fn rack_at(json: &str, rate: f32, what: &str) -> Result<Rack, String> {
     Ok(rack)
 }
 
-fn pool_size(inst: &Instrument) -> usize {
-    // one more than can ring, so a cut voice can finish its fade
-    if inst.mono {
-        2
-    } else {
-        inst.max_voices + 1
+/// Per sound, the most of its events whose `[start, last)` overlap at any frame, at least 1:
+/// cut voices fade and released ones ring, so the instrument's voice count is not enough.
+fn peaks<'a>(
+    events: impl Iterator<Item = (&'a Event, u64)>,
+    sounds: usize,
+    mut carried: Vec<usize>,
+) -> Vec<usize> {
+    carried.resize(sounds, 0);
+    let mut ends: Vec<BinaryHeap<Reverse<u64>>> = vec![BinaryHeap::new(); sounds];
+    let mut most: Vec<usize> = carried.iter().map(|&c| c.max(1)).collect();
+    for (e, last) in events {
+        let k = e.sound as usize;
+        let open = &mut ends[k];
+        while open.peek().is_some_and(|r| r.0 <= e.start) {
+            open.pop();
+        }
+        open.push(Reverse(last));
+        most[k] = most[k].max(carried[k] + open.len());
     }
+    most
 }
 
 fn make_voices(
@@ -207,8 +254,9 @@ fn make_voices(
     library: Option<&str>,
     bank: &SampleBank,
     rate: f32,
+    count: usize,
 ) -> Result<Vec<Box<dyn Voice>>, String> {
-    (0..pool_size(inst))
+    (0..count)
         .map(|_| {
             if inst.name == "sampler" {
                 let index = library.and_then(|l| bank.library(l)).unwrap_or(NO_LIBRARY);
@@ -281,9 +329,26 @@ impl Player {
         } else {
             0
         };
+        let sizes = peaks(
+            table.events.iter().zip(last.iter().copied()),
+            score.sounds.len(),
+            Vec::new(),
+        );
         let mut channels = Vec::with_capacity(score.sounds.len());
-        for ((sound, mix), rack) in score.sounds.iter().zip(&score.mix.sounds).zip(racks) {
-            let voices = make_voices(sound.instrument, sound.library.as_deref(), &bank, rate)?;
+        for (((sound, mix), rack), size) in score
+            .sounds
+            .iter()
+            .zip(&score.mix.sounds)
+            .zip(racks)
+            .zip(sizes)
+        {
+            let voices = make_voices(
+                sound.instrument,
+                sound.library.as_deref(),
+                &bank,
+                rate,
+                size,
+            )?;
             channels.push(Channel {
                 name: sound.name.clone(),
                 instrument: sound.instrument,
@@ -291,11 +356,11 @@ impl Player {
                 params: sound.params.clone(),
                 pool: Pool::new(voices),
                 dry: vec![[0.0; 2]; MAX_BLOCK],
+                rendered: 0,
                 ring: vec![[0.0; 2]; ring_len],
                 delay: comp - rack.latency(),
                 rack,
-                outgoing: None,
-                outgoing_delay: 0,
+                faders: Default::default(),
                 fade_left: 0,
                 gain: Gain::new(pan_gains(mix.gain_db, mix.pan)),
                 sidechain: mix.sidechain,
@@ -316,9 +381,9 @@ impl Player {
             crossfade: ((CROSSFADE_S * rate as f64).round() as u32).max(1),
             gain_ramp: ((GAIN_RAMP_S * rate as f64).round() as u32).max(1),
             wet: vec![[0.0; 2]; MAX_BLOCK],
-            wet_old: vec![[0.0; 2]; MAX_BLOCK],
+            wet_old: [vec![[0.0; 2]; MAX_BLOCK], vec![[0.0; 2]; MAX_BLOCK]],
             side: vec![[0.0; 2]; MAX_BLOCK],
-            side_old: vec![[0.0; 2]; MAX_BLOCK],
+            side_old: [vec![[0.0; 2]; MAX_BLOCK], vec![[0.0; 2]; MAX_BLOCK]],
         })
     }
 
@@ -346,6 +411,17 @@ impl Player {
         self.comp
     }
 
+    /// The frame by which every voice is silent, the song's length at least: past it only
+    /// the racks' tails sound.
+    pub fn end(&self) -> u64 {
+        self.last
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .max(self.table.length)
+    }
+
     /// Voices playing now, every sound together.
     pub fn voices(&self) -> usize {
         self.channels.iter().map(|c| c.pool.order.len()).sum()
@@ -366,8 +442,13 @@ impl Player {
     pub fn rebuild_samplers(&mut self) -> Result<(), String> {
         for ch in &mut self.channels {
             if ch.instrument.name == "sampler" {
-                let voices =
-                    make_voices(ch.instrument, ch.library.as_deref(), &self.bank, self.rate)?;
+                let voices = make_voices(
+                    ch.instrument,
+                    ch.library.as_deref(),
+                    &self.bank,
+                    self.rate,
+                    ch.pool.voices.len(),
+                )?;
                 ch.pool = Pool::new(voices);
             }
         }
@@ -403,20 +484,11 @@ impl Player {
             bank: &self.bank,
         };
         for ch in &mut self.channels {
-            let dry = &mut ch.dry[..n];
-            dry.fill([0.0; 2]);
-            let pool = &mut ch.pool;
-            let mut i = 0;
-            while i < pool.order.len() {
-                let s = pool.order[i];
-                if pool.voices[s].render(dry, &ctx) {
-                    i += 1;
-                } else {
-                    pool.busy[s] = false;
-                    pool.order.remove(i);
-                }
-            }
+            ch.dry[..n].fill([0.0; 2]);
+            ch.rendered = 0;
         }
+        // a sound's voices are rendered up to each of its events before the event takes a
+        // slot, so which voices are done there cannot hang on the block size
         let end = self.position + n as u64;
         while let Some(e) = self.table.events.get(self.cursor) {
             if e.start >= end {
@@ -424,12 +496,17 @@ impl Player {
             }
             let ch = &mut self.channels[e.sound as usize];
             let from = e.start.saturating_sub(self.position) as usize;
+            if from > ch.rendered {
+                ch.pool.render(&mut ch.dry[ch.rendered..from], &ctx);
+                ch.rendered = from;
+            }
             let s = ch.pool.take();
-            let voice = &mut ch.pool.voices[s];
-            voice.start(e, &ch.params, &ctx);
-            let alive = voice.render(&mut ch.dry[from..n], &ctx);
-            ch.pool.keep(s, alive);
+            ch.pool.voices[s].start(e, &ch.params, &ctx);
+            ch.pool.keep(s, true);
             self.cursor += 1;
+        }
+        for ch in &mut self.channels {
+            ch.pool.render(&mut ch.dry[ch.rendered..n], &ctx);
         }
 
         if self.comp > 0 {
@@ -442,21 +519,26 @@ impl Player {
 
         out.fill([0.0; 2]);
         for k in 0..self.channels.len() {
-            let (delay, old_delay, fading) = {
+            let (delay, heard, old_delays) = {
                 let ch = &self.channels[k];
-                (ch.delay, ch.outgoing_delay, ch.fade_left > 0)
+                let fading = ch.fade_left > 0;
+                (
+                    ch.delay,
+                    [
+                        fading && ch.faders[0].heard(),
+                        fading && ch.faders[1].heard(),
+                    ],
+                    [ch.faders[0].delay, ch.faders[1].delay],
+                )
             };
             let side_len = if let Some(j) = self.channels[k].sidechain {
                 let src = &self.channels[j];
                 tap(&src.dry, &src.ring, self.write, delay, &mut self.side[..n]);
-                if fading {
-                    tap(
-                        &src.dry,
-                        &src.ring,
-                        self.write,
-                        old_delay,
-                        &mut self.side_old[..n],
-                    );
+                for i in 0..2 {
+                    if heard[i] {
+                        let side = &mut self.side_old[i][..n];
+                        tap(&src.dry, &src.ring, self.write, old_delays[i], side);
+                    }
                 }
                 n
             } else {
@@ -468,26 +550,37 @@ impl Player {
             let before = ch.gain;
             ch.gain.apply(wet);
             ch.rack.process_with(wet, &self.side[..side_len]);
-            if fading {
-                if let Some(old) = ch.outgoing.as_mut() {
-                    let wet_old = &mut self.wet_old[..n];
-                    tap(&ch.dry, &ch.ring, self.write, old_delay, wet_old);
-                    let mut gain = before;
-                    gain.apply(wet_old);
-                    old.process_with(wet_old, &self.side_old[..side_len]);
-                    let total = self.crossfade as f32;
-                    for (f, o) in wet.iter_mut().zip(wet_old.iter()) {
-                        if ch.fade_left == 0 {
-                            break;
-                        }
-                        let a = ch.fade_left as f32 / total;
-                        f[0] = f[0] * (1.0 - a) + o[0] * a;
-                        f[1] = f[1] * (1.0 - a) + o[1] * a;
-                        ch.fade_left -= 1;
+            if heard[0] || heard[1] {
+                for i in 0..2 {
+                    if let (true, Some(old)) = (heard[i], ch.faders[i].rack.as_mut()) {
+                        let wet_old = &mut self.wet_old[i][..n];
+                        tap(&ch.dry, &ch.ring, self.write, old_delays[i], wet_old);
+                        let mut gain = before;
+                        gain.apply(wet_old);
+                        old.process_with(wet_old, &self.side_old[i][..side_len]);
                     }
-                } else {
-                    ch.fade_left = 0;
                 }
+                let total = self.crossfade as f32;
+                let from = [ch.faders[0].from, ch.faders[1].from];
+                for (j, f) in wet.iter_mut().enumerate() {
+                    if ch.fade_left == 0 {
+                        break;
+                    }
+                    let a = ch.fade_left as f32 / total;
+                    let mut mixed = [f[0] * (1.0 - a), f[1] * (1.0 - a)];
+                    for i in 0..2 {
+                        if heard[i] {
+                            let o = self.wet_old[i][j];
+                            let w = from[i] * a;
+                            mixed[0] += o[0] * w;
+                            mixed[1] += o[1] * w;
+                        }
+                    }
+                    *f = mixed;
+                    ch.fade_left -= 1;
+                }
+            } else {
+                ch.fade_left = 0;
             }
             for (o, w) in out.iter_mut().zip(wet.iter()) {
                 o[0] += w[0];
@@ -552,10 +645,43 @@ impl Player {
         if !same {
             return Err("rebuild: the sounds' names, instruments or libraries changed".to_string());
         }
-        self.table = EventTable::build(score, self.rate);
-        self.last = last_frames(&self.table, score, self.rate);
+        let table = EventTable::build(score, self.rate);
+        let last = last_frames(&table, score, self.rate);
         let position = self.position;
-        self.cursor = self.table.events.partition_point(|e| e.start < position);
+        let cursor = table.events.partition_point(|e| e.start < position);
+        // for a seek, the whole table; from here on, the new events over the voices ringing
+        let whole = peaks(
+            table.events.iter().zip(last.iter().copied()),
+            self.channels.len(),
+            Vec::new(),
+        );
+        let ringing = self.channels.iter().map(|c| c.pool.order.len()).collect();
+        let ahead = peaks(
+            table.events[cursor..]
+                .iter()
+                .zip(last[cursor..].iter().copied()),
+            self.channels.len(),
+            ringing,
+        );
+        for ((ch, w), a) in self.channels.iter_mut().zip(whole).zip(ahead) {
+            let more = w.max(a).saturating_sub(ch.pool.voices.len());
+            if more > 0 {
+                let voices = make_voices(
+                    ch.instrument,
+                    ch.library.as_deref(),
+                    &self.bank,
+                    self.rate,
+                    more,
+                )?;
+                ch.pool.voices.extend(voices);
+                ch.pool.busy.resize(ch.pool.voices.len(), false);
+                let cap = ch.pool.voices.len();
+                ch.pool.order.reserve(cap - ch.pool.order.len());
+            }
+        }
+        self.table = table;
+        self.last = last;
+        self.cursor = cursor;
         for ((ch, sound), mix) in self
             .channels
             .iter_mut()
@@ -574,9 +700,10 @@ impl Player {
     /// 10 ms inside `process`. A rack is refused if it is later than the player compensates
     /// for ([`Player::stem_latency`]); a longer one needs a new player.
     ///
-    /// The rack being faded out keeps running, so what comes back is the rack this swap
-    /// retires: the one a previous swap faded out, None on a sound's first swap. A swap
-    /// during a fade keeps whichever of the two racks is heard more and retires the other.
+    /// Every rack being faded out keeps running from the weight it had, so what comes back
+    /// is a rack no longer heard, from an earlier swap, or None. A third swap within one
+    /// fade has no slot left: it retires the quietest of the racks fading, which is heard
+    /// as a step of that rack's weight.
     pub fn set_rack(&mut self, sound: usize, rack: Rack) -> Result<Option<Rack>, String> {
         let comp = self.comp;
         let crossfade = self.crossfade;
@@ -592,15 +719,25 @@ impl Player {
             ));
         }
         let delay = comp - rack.latency();
-        let new_heard_less = ch.fade_left * 2 > crossfade;
-        let retired = if ch.fade_left > 0 && new_heard_less {
-            // the old rack stays the one fading out
-            Some(std::mem::replace(&mut ch.rack, rack))
+        // the weights the next frame would have had: the fade restarts from them
+        let a = ch.fade_left as f32 / crossfade as f32;
+        let w = [ch.faders[0].from * a, ch.faders[1].from * a];
+        // the quietest goes; between equals, a rack over nothing, then the earlier one
+        let slot = if w[0] != w[1] {
+            usize::from(w[1] < w[0])
         } else {
-            let current = std::mem::replace(&mut ch.rack, rack);
-            ch.outgoing_delay = ch.delay;
-            ch.outgoing.replace(current)
+            usize::from(ch.faders[0].rack.is_none() && ch.faders[1].rack.is_some())
         };
+        let other = 1 - slot;
+        let current = std::mem::replace(&mut ch.rack, rack);
+        let retired = ch.faders[slot].rack.replace(current);
+        // the retired rack's weight goes to the one taking its slot, so the weights sum to 1
+        ch.faders[slot].from = (1.0 - a) + w[slot];
+        ch.faders[slot].delay = ch.delay;
+        ch.faders[other].from = w[other];
+        if slot == 0 {
+            ch.faders.swap(0, 1);
+        }
         ch.delay = delay;
         ch.fade_left = crossfade;
         Ok(retired)
@@ -615,8 +752,7 @@ pub fn render(score: &Score, rate: f32, bank: SampleBank) -> Result<Render, Stri
     let latency = player.latency() as u64;
     let stem_latency = player.stem_latency();
     let song = player.table.length;
-    let voices_end = player.last.iter().copied().max().unwrap_or(0).max(song);
-    let cap = voices_end + (TAIL_S * rate as f64).round() as u64;
+    let cap = player.end() + (TAIL_S * rate as f64).round() as u64;
     let quiet_for = (QUIET_S * rate as f64).round() as u64;
     let sounds = player.channels.len();
 

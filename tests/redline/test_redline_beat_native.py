@@ -252,3 +252,25 @@ def test_a_broken_score_is_refused_with_every_path():
         redline_dsp.beat_render(json.dumps(broken), RATE)
     with pytest.raises(ValueError, match="rate"):
         redline_dsp.BeatPlayer(json.dumps(SCORE), 0.0)
+
+
+def test_end_covers_a_release_that_runs_past_the_song():
+    release = 3.0
+    score = _score(
+        {"pad": {"instrument": "saw", "params": {"voices": 1, "release": release}}},
+        {"pad": [{"step": 8, "len": 8, "note": "A2", "vel": 1.0}]},
+        1,
+    )
+    player = redline_dsp.BeatPlayer(score, RATE)
+    rang = player.length + int(release * RATE)
+    assert player.end >= rang
+    mix, _ = _play(player, player.end + 9600, 4096)
+    # the release sounds past the song up to the end, and nothing after it
+    assert np.any(mix[rang - 4800 : rang] != 0.0)
+    assert not np.any(mix[player.end :] != 0.0)
+
+
+def test_end_is_the_length_when_nothing_rings_past_it():
+    score = _score({"hat": {"instrument": "hat_closed"}}, {"hat": "x..............."}, 1)
+    player = redline_dsp.BeatPlayer(score, RATE)
+    assert player.end == player.length

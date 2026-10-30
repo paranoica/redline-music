@@ -243,6 +243,14 @@ fn good_name(s: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+/// Section names are quoted back into the next agent request: plain text only.
+fn good_section_name(s: &str) -> bool {
+    (1..=48).contains(&s.len())
+        && !s.starts_with(' ')
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b' ' || b == b'_' || b == b'-')
+}
+
 fn good_library(s: &str) -> bool {
     (1..=48).contains(&s.len())
         && !s.starts_with('-')
@@ -917,8 +925,12 @@ impl Parser {
             let name = self.required(map, "name", &path).and_then(|v| {
                 let npath = join(&path, "name");
                 let s = self.string(v, &npath)?;
-                if s.is_empty() || s.len() > 48 {
-                    self.err(&npath, "a section name takes 1 to 48 characters");
+                if !good_section_name(s) {
+                    self.err(
+                        &npath,
+                        "a section name takes 1 to 48 of A-Z, a-z, 0-9, space, _ and -, not \
+                         starting with a space",
+                    );
                 }
                 Some(s.to_string())
             });
@@ -942,6 +954,24 @@ impl Parser {
                             continue;
                         }
                         play.push(k);
+                    }
+                }
+            }
+            // the fill is exempt: it replaces the played rows on the last bar
+            for (j, &a) in play.iter().enumerate() {
+                for &b in &play[j + 1..] {
+                    let shared = patterns[a]
+                        .rows
+                        .iter()
+                        .find(|(k, _)| patterns[b].rows.iter().any(|(m, _)| m == k));
+                    if let Some((k, _)) = shared {
+                        self.err(
+                            &join(&path, "play"),
+                            format!(
+                                "patterns {} and {} both have rows for sound {}",
+                                patterns[a].name, patterns[b].name, sounds[*k].name
+                            ),
+                        );
                     }
                 }
             }

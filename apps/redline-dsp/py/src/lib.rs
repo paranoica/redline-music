@@ -507,6 +507,13 @@ impl BeatPlayer {
         self.player.table().length
     }
 
+    /// The song frame by which every voice is silent, the length at least: past it only
+    /// the racks' tails sound.
+    #[getter]
+    fn end(&self) -> u64 {
+        self.player.end()
+    }
+
     /// The sounds' names, in the order of the stems.
     #[getter]
     fn sounds(&self) -> Vec<String> {

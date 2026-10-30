@@ -427,3 +427,37 @@ fn the_table_as_json_names_the_sounds_and_keeps_every_cut() {
     let hat = events.iter().find(|e| e["sound"] == json!(1)).unwrap();
     assert_eq!(hat["off"], Value::Null);
 }
+
+#[test]
+fn a_roll_spreads_over_its_swung_step() {
+    for swing in [75.0, 66.0] {
+        let s = score_with(
+            swing,
+            json!({"s": {"instrument": "snare"}}),
+            json!({"p": {"bars": 1, "rows": {"s": ".4x............."}}}),
+            json!([{"name": "a", "bars": 1, "play": ["p"]}]),
+        );
+        let t = table(&s);
+        let got: Vec<u64> = t.events.iter().map(|e| e.start).collect();
+        assert_eq!(got.len(), 5, "swing {swing}: {got:?}");
+        let from = STEP as f64 * (1.0 + 2.0 * swing / 100.0 - 1.0);
+        let next = 2 * STEP;
+        assert_eq!(got[4], next, "swing {swing}");
+        let span = next as f64 - from;
+        for r in 0..4 {
+            let want = from + r as f64 * span / 4.0;
+            assert!(
+                (got[r] as f64 - want).abs() <= 1.0,
+                "swing {swing}, hit {r}: {got:?}"
+            );
+            assert!(got[r] < next, "swing {swing}, hit {r}: {got:?}");
+        }
+    }
+    // straight time is untouched
+    let s = one_row("snare", json!(".4x............."), 1);
+    let got: Vec<u64> = table(&s).events.iter().map(|e| e.start).collect();
+    assert_eq!(
+        got,
+        vec![STEP, STEP + 1500, STEP + 3000, STEP + 4500, 2 * STEP]
+    );
+}

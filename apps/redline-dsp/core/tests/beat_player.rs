@@ -505,25 +505,32 @@ fn set_rack_crossfades_over_10_ms_and_hands_back_the_retired_rack() {
 }
 
 #[test]
-fn a_swap_during_a_fade_keeps_the_rack_heard_more() {
+fn a_swap_during_a_fade_hands_back_only_racks_no_longer_heard() {
     let s = kick_and_clap(json!([{"effect": "gain"}]));
     let kick = s.sound("kick").unwrap();
     let mut p = player(&s);
     play(&mut p, 2, 1000, 128);
     let two = reset_rack(json!([{"effect": "gain"}, {"effect": "gain"}]));
     assert!(p.set_rack(kick, two).unwrap().is_none());
-    // a quarter into the fade the score's rack is still heard most: the new one goes back
+    // a quarter into the fade both racks are heard: both fade on and nothing comes back
     play(&mut p, 2, 120, 120);
-    let back = p.set_rack(kick, reset_rack(json!([]))).unwrap().unwrap();
-    assert_eq!(back.len(), 2);
-    // three quarters in, the newest is heard most: the score's rack goes back
+    assert!(p.set_rack(kick, reset_rack(json!([]))).unwrap().is_none());
+    // three quarters into that fade three racks are heard: the quietest, the two-gain
+    // rack, is the one retired
     play(&mut p, 2, 360, 120);
     let back = p
         .set_rack(kick, reset_rack(json!([{"effect": "pan"}])))
         .unwrap()
         .unwrap();
+    assert_eq!(back.len(), 2);
+    // once the fade is over, the silent racks come back the earliest first
+    play(&mut p, 2, 600, 120);
+    let back = p.set_rack(kick, reset_rack(json!([]))).unwrap().unwrap();
     assert_eq!(back.len(), 1);
     assert_eq!(back.effect_name(0), Some("gain"));
+    play(&mut p, 2, 600, 120);
+    let back = p.set_rack(kick, reset_rack(json!([]))).unwrap().unwrap();
+    assert_eq!(back.len(), 0);
 }
 
 fn ducked(sidechain: bool) -> Vec<[f32; 2]> {
@@ -769,4 +776,148 @@ fn gain_and_pan_follow_the_equal_power_law_with_unity_in_the_centre() {
         checked += 1;
     }
     assert!(checked > 1000);
+}
+
+/// Four-note saw chords every bar with a 3 s release, so twelve voices ring at once, and a
+/// mono 808 with three notes on one step.
+fn piled_releases() -> Score {
+    let chords: Vec<Value> = (0..3u8)
+        .flat_map(|bar| {
+            [0u8, 3, 7, 10].map(|i| {
+                json!({"step": bar as u32 * 16, "len": 16, "note": n(48 + 2 * bar + i), "vel": 0.6})
+            })
+        })
+        .collect();
+    score(
+        json!({
+            "pad": {"instrument": "saw", "params": {"voices": 3, "release": 3.0}},
+            "bass": {"instrument": "bass808"}
+        }),
+        json!({"p": {"bars": 4, "rows": {
+            "pad": chords,
+            "bass": [
+                {"step": 4, "len": 4, "note": n(36), "vel": 1.0},
+                {"step": 4, "len": 4, "note": n(40), "vel": 1.0},
+                {"step": 4, "len": 4, "note": n(43), "vel": 1.0}
+            ]
+        }}}),
+        json!([{"name": "a", "bars": 4, "play": ["p"]}]),
+        json!({}),
+    )
+}
+
+#[test]
+fn overlapping_releases_render_alike_at_any_block_size() {
+    let s = piled_releases();
+    let k = s.sounds.len();
+    let n = (2 * BAR + BAR / 2) as usize;
+    let (want, want_stems) = play(&mut player(&s), k, n, 4096);
+    assert!(want_stems.iter().all(|x| x.iter().any(loud)));
+    for block in [1, 128] {
+        let (got, stems) = play(&mut player(&s), k, n, block);
+        for (sound, (g, w)) in stems.iter().zip(&want_stems).enumerate() {
+            assert!(
+                bits(g) == bits(w),
+                "block {block}: {} differs",
+                s.sounds[sound].name
+            );
+        }
+        assert_eq!(bits(&got), bits(&want), "block {block}");
+    }
+}
+
+#[test]
+fn seek_into_overlapping_releases_plays_as_the_whole_render() {
+    let s = piled_releases();
+    let full = render(&s, RATE, bank()).unwrap();
+    let k = s.sounds.len();
+    // inside the cut voices' fades on the third chord, later in its releases, and inside
+    // the 808's three-note step
+    for frame in [2 * BAR + 100, 2 * BAR + 3 * STEP, 4 * STEP + 100] {
+        let mut p = player(&s);
+        p.seek(frame);
+        let n = BAR as usize / 2;
+        let (_, stems) = play(&mut p, k, n, 128);
+        let at = frame as usize;
+        for (sound, (got, want)) in stems.iter().zip(&full.stems).enumerate() {
+            assert!(
+                bits(got) == bits(&want[at..at + n]),
+                "{} differs after seek({frame})",
+                s.sounds[sound].name
+            );
+        }
+    }
+}
+
+/// The largest step between neighbouring samples, either channel.
+fn largest_jump(x: &[[f32; 2]]) -> f32 {
+    x.windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs().max((w[1][1] - w[0][1]).abs()))
+        .fold(0.0, f32::max)
+}
+
+#[test]
+fn a_second_swap_mid_fade_does_not_click() {
+    let s = score(
+        json!({"pad": {"instrument": "saw", "params": {"voices": 1, "cutoff": 100}}}),
+        json!({"p": {"bars": 1, "rows": {"pad": [{"step": 0, "len": 16, "note": n(33), "vel": 1.0}]}}}),
+        json!([{"name": "a", "bars": 1, "play": ["p"]}]),
+        json!({}),
+    );
+    let swap = 24000;
+    let mut p = player(&s);
+    let (before, _) = play(&mut p, 1, swap, 128);
+    let steady = largest_jump(&before[swap / 2..]);
+    assert!(steady > 1e-4, "{steady}");
+    p.set_rack(
+        0,
+        reset_rack(json!([{"effect": "gain", "params": {"db": -20}}])),
+    )
+    .unwrap();
+    // 3 ms in, the first rack is still heard most
+    let (first, _) = play(&mut p, 1, 144, 16);
+    p.set_rack(
+        0,
+        reset_rack(json!([{"effect": "gain", "params": {"db": -6}}])),
+    )
+    .unwrap();
+    let (second, _) = play(&mut p, 1, 2000, 16);
+    let mut joined = vec![before[swap - 1]];
+    joined.extend_from_slice(&first);
+    joined.extend_from_slice(&second);
+    let jump = largest_jump(&joined);
+    // the weights move by at most 1/480 a frame on a signal no louder than before
+    let limit = 1.5 * steady;
+    assert!(jump < limit, "a jump of {jump} against {limit}");
+}
+
+#[test]
+fn end_is_where_the_last_voice_falls_silent() {
+    let short = score(
+        json!({"hat": {"instrument": "hat_closed"}}),
+        json!({"p": {"bars": 1, "rows": {"hat": "x..............."}}}),
+        json!([{"name": "a", "bars": 1, "play": ["p"]}]),
+        json!({}),
+    );
+    assert_eq!(player(&short).end(), BAR);
+
+    let release = 3.0;
+    let s = score(
+        json!({"pad": {"instrument": "saw", "params": {"voices": 1, "release": release}}}),
+        json!({"p": {"bars": 1, "rows": {"pad": [{"step": 8, "len": 8, "note": n(45), "vel": 1.0}]}}}),
+        json!([{"name": "a", "bars": 1, "play": ["p"]}]),
+        json!({}),
+    );
+    let mut p = player(&s);
+    let end = p.end();
+    let rang = BAR + (release * RATE as f64) as u64;
+    assert!(end >= rang, "{end} against {rang}");
+    let (mix, _) = play(&mut p, 1, end as usize + 9600, 4096);
+    // the release sounds past the song, up to the end and nothing after it
+    assert!(mix[(rang - 4800) as usize..rang as usize].iter().any(loud));
+    assert!(!mix[end as usize..].iter().any(loud));
+    // render runs to the same end
+    let r = render(&s, RATE, bank()).unwrap();
+    assert!(r.mix.len() as u64 <= end);
+    assert_eq!(bits(&r.mix), bits(&mix[..r.mix.len()]));
 }
