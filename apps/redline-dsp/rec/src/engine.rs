@@ -558,6 +558,20 @@ impl Control {
     /// Records the mic into a new file at `path` from the next period on, beat frame 0 at
     /// take frame 0 once `offset`, the round trip in frames, is dropped.
     pub fn start(&mut self, path: &Path, offset: u64) -> Result<(), String> {
+        if self.stopping {
+            // a stop that timed out: the writer may have finished the take since
+            match self.done.try_recv() {
+                Ok(_) | Err(mpsc::TryRecvError::Disconnected) => {
+                    self.recording = false;
+                    self.stopping = false;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    return Err(
+                        "the last take is still being finished; stop again to wait for it".into(),
+                    )
+                }
+            }
+        }
         if self.recording {
             return Err("a take is already being recorded".into());
         }
@@ -585,8 +599,12 @@ impl Control {
     }
 
     /// Ends the take at the next period; [`Control::wait_take`] has its report.
+    /// Once asked, asking again only goes back to waiting for the take.
     pub fn request_stop(&mut self) -> Result<(), String> {
-        if !self.recording || self.stopping {
+        if self.stopping {
+            return Ok(());
+        }
+        if !self.recording {
             return Err("no take is being recorded".into());
         }
         if self.to_audio.push(ToAudio::Stop).is_err() {

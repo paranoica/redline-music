@@ -497,3 +497,60 @@ fn the_protocol_loop_answers_each_line_and_stops_at_quit() {
     assert!(matches!(&replies[3], Reply::Error { error } if error.contains("no take")));
     assert_eq!(replies[4], Reply::Quit);
 }
+
+/// A stop whose take is not finished in time: the audio side does not run until after the
+/// wait has given up, then the writer completes the take late.
+fn stop_times_out(e: &mut Engine, c: &mut Control, at: u64) {
+    c.request_stop().unwrap();
+    let late = c.wait_take(Duration::from_millis(20)).unwrap_err();
+    assert!(late.contains("did not finish"), "{late}");
+    let mut l = [0.0; 64];
+    let mut r = [0.0; 64];
+    e.cycle(&[0.0; 64], &mut l, &mut r, at);
+}
+
+#[test]
+fn a_stop_that_timed_out_is_collected_by_the_next_stop() {
+    let (mut e, mut c) = setup(48000);
+    let path = take_path("late-stop.wav");
+    c.start(&path, 0).unwrap();
+    cycle(&mut e, &[0.1; 64], 0, 64, 0);
+    stop_times_out(&mut e, &mut c, 64);
+    match c.handle(Command::Stop) {
+        Reply::Stop { take } => assert_eq!((take.path.clone(), take.frames), (path.clone(), 64)),
+        other => panic!("the late take was not collected: {other:?}"),
+    }
+    assert!(!c.meters().recording);
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn a_start_after_a_stop_that_timed_out_takes_the_late_report_and_records() {
+    let (mut e, mut c) = setup(48000);
+    let first = take_path("late-start-1.wav");
+    c.start(&first, 0).unwrap();
+    cycle(&mut e, &[0.1; 64], 0, 64, 0);
+    stop_times_out(&mut e, &mut c, 64);
+    // the writer polls every few ms
+    std::thread::sleep(Duration::from_millis(200));
+    let second = take_path("late-start-2.wav");
+    c.start(&second, 0).unwrap();
+    cycle(&mut e, &[0.3; 64], 0, 64, 128);
+    let take = finish(&mut e, &mut c, 192);
+    assert_eq!(take.path, second);
+    assert_eq!(samples(&second), vec![0.3; 64]);
+    assert_eq!(samples(&first).len(), 64);
+}
+
+#[test]
+fn a_start_while_the_late_take_is_still_unfinished_is_refused_and_says_so() {
+    let (_e, mut c) = setup(48000);
+    let path = take_path("late-unfinished.wav");
+    c.start(&path, 0).unwrap();
+    c.request_stop().unwrap();
+    assert!(c.wait_take(Duration::from_millis(10)).is_err());
+    let error = c.start(&take_path("late-unfinished-2.wav"), 0).unwrap_err();
+    assert!(error.contains("stop again"), "{error}");
+    drop(c);
+    std::fs::remove_file(&path).unwrap();
+}
