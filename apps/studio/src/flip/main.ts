@@ -17,7 +17,9 @@ import {
   BPM_MAX,
   BPM_MIN,
   deleteBlock,
+  draftProblem,
   duplicateBlock,
+  finishedSince,
   fitEffects,
   MAX_BARS,
   mayAdoptDraft,
@@ -25,6 +27,7 @@ import {
   nudgeDownbeat,
   paintEffect,
   playToSource,
+  renderOutcome,
   sameBpm,
   scaleBpm,
   setRange,
@@ -124,6 +127,8 @@ export const mount: Mount = async (root, options) => {
   let building = false;
   let editSeq = 0;
   let closed = false;
+  let parked = false;
+  let refused = false;
   const player = new TakePlayer(
     (key) => api.audio(Number(key)),
     () => {
@@ -157,10 +162,29 @@ export const mount: Mount = async (root, options) => {
     errorList.replaceChildren(...problems.map((p) => h("li", {}, p)));
   }
 
+  // a refusal the page can see itself: shown at once, and the draft counts as failed
+  function refuse(): boolean {
+    const problem = doc ? draftProblem(doc) : null;
+    if (problem) {
+      failed = true;
+      problems = [problem];
+      refused = true;
+    } else if (refused) {
+      failed = false;
+      problems = [];
+      refused = false;
+    }
+    return refused;
+  }
+
   function touch(): void {
     edited = true;
     editSeq += 1;
     scope.clearTimeout(saveTimer);
+    if (refuse()) {
+      paintStatus();
+      return;
+    }
     saveTimer = scope.setTimeout(() => void flush(), SAVE_MS);
     paintStatus();
   }
@@ -170,6 +194,10 @@ export const mount: Mount = async (root, options) => {
     scope.clearTimeout(saveTimer);
     if (saving) await saving;
     if (!edited || !doc) return !failed;
+    if (refuse()) {
+      paintStatus();
+      return false;
+    }
     const snapshot = doc;
     edited = false;
     const request = api.saveDraft(snapshot).then(
@@ -650,6 +678,7 @@ export const mount: Mount = async (root, options) => {
     }
     building = true;
     drawAll();
+    const stamp = jobs.find((j) => j.kind === "flip_render")?.finished ?? null;
     try {
       pendingPlay = await api.render();
       say(null);
@@ -660,7 +689,23 @@ export const mount: Mount = async (root, options) => {
       return;
     }
     jobsPoller.setWanted(true);
+    const render = jobs.find((j) => j.kind === "flip_render");
+    if (finishedSince(stamp, render)) {
+      building = false;
+      await refresh();
+      if (closed) return;
+      settle(render);
+    }
     await tick();
+  }
+
+  function settle(render: Job | undefined): void {
+    if (pendingPlay === null) return;
+    const n = pendingPlay;
+    pendingPlay = null;
+    const outcome = renderOutcome({ failed: render?.state === "failed", present: state?.renders.includes(n) ?? false, parked });
+    if (outcome === "failed") say(`Сборка не вышла: ${render?.reason ?? "причина не названа"}`);
+    else if (outcome === "play") void player.toggle(String(n));
   }
 
   function markPlaying(): void {
@@ -722,12 +767,7 @@ export const mount: Mount = async (root, options) => {
     if (done.length > 0) {
       await refresh();
       if (closed) return;
-      if (pendingPlay !== null && done.includes("flip_render")) {
-        const n = pendingPlay;
-        if (render?.state === "failed") say(`Сборка не вышла: ${render.reason ?? "причина не названа"}`);
-        else if (state?.renders.includes(n)) void player.toggle(String(n));
-        pendingPlay = null;
-      }
+      if (done.includes("flip_render")) settle(render);
     } else if (!same) drawAll();
     jobsPoller.setWanted(flipJobs.some(jobActive) || pendingPlay !== null || building);
   }
@@ -775,6 +815,7 @@ export const mount: Mount = async (root, options) => {
     dirty,
     setActive: () => {},
     hold: (on) => {
+      parked = on;
       if (on) player.stop();
     },
     dispose: async () => {

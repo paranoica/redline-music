@@ -8,6 +8,9 @@ import {
   barCount,
   beatSurface,
   deleteBlock,
+  draftProblem,
+  finishedSince,
+  renderOutcome,
   duplicateBlock,
   moveBlock,
   nudgeDownbeat,
@@ -222,4 +225,43 @@ test("the beat header names the file or the flip version", () => {
 test("a param range keeps the unit the server gives", () => {
   assert.deepEqual(rangeOf({ low: 0.1, high: 2, default: 0.5, unit: "с" }), { low: 0.1, high: 2, def: 0.5, unit: "с" });
   assert.equal(rangeOf({ low: 0, high: 1 })?.unit, null);
+});
+
+const doc = (bpm, bassMode, hatsMode, bars) => ({
+  grid: { bpm, downbeat_s: 0, swing: 0 },
+  bass808: { mode: bassMode, params: {} },
+  hats: { mode: hatsMode, remove: [], patterns: ["8ths"] },
+  arrangement: [block("a", 0, bars)],
+});
+
+test("our parts refuse a tempo outside 40..220 and only then", () => {
+  assert.ok(draftProblem(doc(230, "ours", "original", 8)));
+  assert.ok(draftProblem(doc(39.9, "original", "ours", 8)));
+  assert.equal(draftProblem(doc(230, "original", "original", 8)), null);
+  assert.equal(draftProblem(doc(40, "ours", "ours", 8)), null);
+  assert.equal(draftProblem(doc(220, "ours", "ours", 8)), null);
+});
+
+test("a play length over fifteen minutes is refused at the limit", () => {
+  assert.equal(draftProblem(doc(60, "original", "original", 225)), null);
+  assert.ok(draftProblem(doc(60, "original", "original", 226)));
+  assert.equal(draftProblem(doc(130, "original", "original", 100)), null);
+});
+
+test("a finished render is told by a newer stamp", () => {
+  const job = (state, finished) => ({ kind: "flip_render", state, reason: null, started: 1, finished });
+  assert.equal(finishedSince(null, undefined), false);
+  assert.equal(finishedSince(5, job("done", 5)), false);
+  assert.equal(finishedSince(5, job("done", 6)), true);
+  assert.equal(finishedSince(5, job("failed", 6)), true);
+  assert.equal(finishedSince(null, job("done", 1)), true);
+  assert.equal(finishedSince(5, job("running", null)), false);
+  assert.equal(finishedSince(5, job("running", 9)), false);
+});
+
+test("a parked flip keeps a finished render ready without playing it", () => {
+  assert.equal(renderOutcome({ failed: false, present: true, parked: false }), "play");
+  assert.equal(renderOutcome({ failed: false, present: true, parked: true }), "ready");
+  assert.equal(renderOutcome({ failed: true, present: false, parked: true }), "failed");
+  assert.equal(renderOutcome({ failed: false, present: false, parked: false }), "missing");
 });

@@ -1,6 +1,6 @@
 // The flip as the page edits it: the document, and the pure edits of its arrangement, effects and grid.
 
-import type { BeatStation } from "../song/api.ts";
+import type { BeatStation, Job } from "../song/api.ts";
 
 export const MAX_BARS = 512;
 export const BPM_MIN = 30;
@@ -179,6 +179,37 @@ export function useConfirm(n: number, takes: number): string {
 // the bpm field shows two places: entering the shown value back is no change
 export function sameBpm(a: number, b: number): boolean {
   return Math.round(a * 100) === Math.round(b * 100);
+}
+
+const OURS_BPM = [40, 220] as const;
+const MAX_PLAY_S = 15 * 60;
+
+// the refusals of the server's draft check that the page can see for itself
+export function draftProblem(d: FlipDoc): string | null {
+  const bpm = d.grid.bpm;
+  if ((d.bass808.mode === "ours" || d.hats.mode === "ours") && !(bpm >= OURS_BPM[0] && bpm <= OURS_BPM[1])) {
+    return `Наши 808 и хэты играют только на ${OURS_BPM[0]}–${OURS_BPM[1]} BPM, а в сетке ${bpm}.`;
+  }
+  if (bpm > 0 && (totalBars(d.arrangement) * BEATS_PER_BAR * 60) / bpm > MAX_PLAY_S) {
+    return `Расстановка играет дольше ${MAX_PLAY_S / 60} минут: убери такты или поправь темп.`;
+  }
+  return null;
+}
+
+export type RenderOutcome = "failed" | "play" | "ready" | "missing";
+
+// what a finished render means for the page: parked, it stays ready and does not start playing
+export function renderOutcome(r: { failed: boolean; present: boolean; parked: boolean }): RenderOutcome {
+  if (r.failed) return "failed";
+  if (!r.present) return "missing";
+  return r.parked ? "ready" : "play";
+}
+
+// a job that is over with a stamp newer than the one noted before it was started
+export function finishedSince(stamp: number | null, job: Job | undefined): boolean {
+  if (!job || job.finished === null) return false;
+  if (job.state === "queued" || job.state === "running" || job.state === "cancelling") return false;
+  return stamp === null || job.finished > stamp;
 }
 
 export interface AdoptState {
