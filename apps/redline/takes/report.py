@@ -20,10 +20,12 @@ from redline.takes.rank import (
     DROPOUT_POINTS,
     FLOOR_STEP_DB,
     FLOOR_TOLERANCE_DB,
+    LONGER_S,
     TIMING_STEP_MS,
     TIMING_TOLERANCE_MS,
     RankedTake,
     Ranking,
+    Skip,
 )
 
 SCORE = (
@@ -132,7 +134,10 @@ def ranking_json(ranking: Ranking, voice: str | None) -> object:
                 }
                 for t in ranking.takes
             ],
-            "skipped": [{"name": name, "reason": reason} for name, reason in ranking.skipped],
+            "skipped": [
+                {"name": s.name, "code": s.code, "reason": s.reason, "values": s.values}
+                for s in ranking.skips
+            ],
             "voice": voice,
         }
     )
@@ -180,6 +185,25 @@ def _markdown_table(ranking: Ranking) -> list[str]:
     return lines
 
 
+def skip_reason_ru(skip: Skip) -> str:
+    """Why a take was left out, in plain Russian."""
+    v = skip.values
+    match skip.code:
+        case "other_rate":
+            return f"частота {v['rate']} Гц, у остальных дублей {v['others']} Гц"
+        case "silent":
+            return "дубль пустой или почти без звука"
+        case "too_long":
+            return (
+                f"дубль {v['seconds']:.1f} с, бит {v['beat_seconds']:.1f} с: дубль длиннее "
+                f"бита больше чем на {LONGER_S:g} с"
+            )
+        case "unreadable":
+            return f"файл не удалось прочитать ({skip.reason})"
+        case _:
+            return skip.reason
+
+
 def _notes(ranking: Ranking) -> list[str]:
     lines = []
     for take in ranking.takes:
@@ -188,8 +212,14 @@ def _notes(ranking: Ranking) -> list[str]:
                 f"- {take.name}: бит слышен в микрофоне (корреляция {take.metrics.bleed:.2f}, "
                 f"порог {BLEED_FLAG:g}) — нужны наушники."
             )
+        if take.metrics.short:
+            beat = f", бит {ranking.beat_seconds:.1f} с" if ranking.beat_seconds else ""
+            lines.append(
+                f"- {take.name}: дубль короткий, {take.metrics.seconds:.1f} с{beat}. "
+                "Замерен только по участку, где он совпадает с битом и другими дублями."
+            )
         lines += [f"- {take.name}: {note}" for note in take.metrics.notes]
-    lines += [f"- {name}: пропущен — {reason}" for name, reason in ranking.skipped]
+    lines += [f"- {s.name}: пропущен — {skip_reason_ru(s)}" for s in ranking.skips]
     return lines
 
 

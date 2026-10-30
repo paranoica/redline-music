@@ -3,6 +3,8 @@ import json
 import pytest
 from redline.cli import main
 from redline.takes import rank as rank_module
+from redline.takes.rank import rank_folder
+from redline.takes.report import write_outputs
 from takes_signals import click_beat, put, vocal
 
 
@@ -113,7 +115,7 @@ def test_the_parser_needs_beat_and_dir(capsys):
 
 def test_takes_that_are_all_skipped_get_a_report_and_exit_2(tmp_path, beat, capsys):
     folder = tmp_path / "takes"
-    put(folder, "take-01.wav", vocal(1, seconds=2.0))
+    put(folder, "take-01.wav", 1e-4 * vocal(1))
     work = tmp_path / "work"
     code = main(["takes", "--beat", str(beat), "--dir", str(folder), "--work", str(work)])
     assert code == 2
@@ -121,3 +123,23 @@ def test_takes_that_are_all_skipped_get_a_report_and_exit_2(tmp_path, beat, caps
     data = json.loads((work / "takes" / "takes" / "ranking.json").read_text(encoding="utf-8"))
     assert data["takes"] == [] and data["voice"] is None
     assert [s["name"] for s in data["skipped"]] == ["take-01"]
+
+
+def test_the_report_words_skips_and_short_takes_in_russian(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(2))
+    put(folder, "take-03.wav", vocal(3, seconds=3.0))
+    put(folder, "take-04.wav", vocal(4, rate=44100), rate=44100)
+    put(folder, "take-05.wav", 1e-4 * vocal(5))
+    ranking = rank_folder(beat, folder)
+    out = tmp_path / "out"
+    text = write_outputs(out, ranking, "song", None).read_text(encoding="utf-8")
+    assert "- take-04: пропущен — частота 44100 Гц, у остальных дублей 48000 Гц" in text
+    assert "- take-05: пропущен — дубль пустой или почти без звука" in text
+    assert "- take-03: дубль короткий, 3.0 с, бит 12.0 с." in text
+    assert "Hz" not in text
+    data = json.loads((out / "ranking.json").read_text(encoding="utf-8"))
+    codes = {s["name"]: (s["code"], s["reason"]) for s in data["skipped"]}
+    assert codes["take-04"] == ("other_rate", "44100 Hz, the other takes are at 48000 Hz")
+    assert codes["take-05"][0] == "silent"

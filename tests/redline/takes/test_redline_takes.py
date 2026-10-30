@@ -131,15 +131,54 @@ def test_an_unreadable_sidecar_is_a_note_not_a_crash(tmp_path, beat):
     assert any("take-02.json" in note for note in takes["take-02"].metrics.notes)
 
 
-def test_a_take_at_another_rate_or_far_from_the_beat_is_skipped(tmp_path, beat):
+def test_a_take_at_another_rate_or_far_past_the_beat_is_skipped(tmp_path, beat):
     folder = tmp_path / "takes"
     put(folder, "take-01.wav", vocal(1))
     put(folder, "take-02.wav", vocal(2))
     put(folder, "take-03.wav", vocal(3, rate=44100), rate=44100)
     put(folder, "take-04.wav", vocal(4, seconds=SECONDS + 10))
-    put(folder, "take-05.wav", vocal(5, seconds=SECONDS / 4))
     ranking = rank_folder(beat, folder)
     assert sorted(t.name for t in ranking.takes) == ["take-01", "take-02"]
-    skipped = dict(ranking.skipped)
-    assert set(skipped) == {"take-03", "take-04", "take-05"}
-    assert "44100" in skipped["take-03"]
+    skipped = {s.name: s for s in ranking.skips}
+    assert set(skipped) == {"take-03", "take-04"}
+    assert "44100" in skipped["take-03"].reason
+    assert skipped["take-03"].code == "other_rate"
+    assert skipped["take-04"].code == "too_long"
+
+
+def test_a_short_take_is_ranked_over_the_range_it_shares(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(2))
+    put(folder, "take-03.wav", vocal(3, shift_s=0.05, seconds=SECONDS / 4))
+    ranking = rank_folder(beat, folder)
+    assert ranking.skips == []
+    takes = by_name(ranking)
+    short = takes["take-03"]
+    assert short.metrics.short and not takes["take-01"].metrics.short
+    assert short.metrics.seconds == pytest.approx(SECONDS / 4)
+    # measured against the others over its own range: 50 ms late shows
+    assert short.metrics.timing_ms is not None and short.metrics.timing_ms > 30
+    assert short.rank == 3
+    assert ranking.beat_seconds == pytest.approx(SECONDS)
+
+
+def test_a_take_just_over_half_the_beat_is_not_short(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(2, seconds=SECONDS * 0.55))
+    put(folder, "take-03.wav", vocal(3, seconds=SECONDS * 0.45))
+    takes = by_name(rank_folder(beat, folder))
+    assert not takes["take-02"].metrics.short
+    assert takes["take-03"].metrics.short
+
+
+@pytest.mark.parametrize("seconds", [SECONDS, SECONDS / 4])
+def test_a_silent_take_is_skipped_however_long(tmp_path, beat, seconds):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(2))
+    put(folder, "take-03.wav", 1e-4 * vocal(3, seconds=seconds))
+    ranking = rank_folder(beat, folder)
+    assert sorted(t.name for t in ranking.takes) == ["take-01", "take-02"]
+    assert [(s.name, s.code) for s in ranking.skips] == [("take-03", "silent")]

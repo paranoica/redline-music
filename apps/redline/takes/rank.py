@@ -45,7 +45,10 @@ TAKE_NAME = re.compile(r"take-(\d+)\.wav", re.IGNORECASE)
 RECORDER_RATE = 48000
 # a take may run past the beat by the time it takes to press stop
 LONGER_S = 2.0
+# a take shorter than this share of the beat is measured over the overlap and reported as short
 SHORTER_SHARE = 0.5
+# a take whose peak stays under this is empty for our purposes (-40 dBFS)
+SILENT_PEAK = 0.01
 ONSET_RATE = 22050
 ONSET_HOP = 128
 # farther than this from a take's onset, another take's onset is a different syllable
@@ -117,6 +120,7 @@ class TakeMetrics:
     level_spread_lu: float | None
     deep_distance: float | None = None
     notes: tuple[str, ...] = ()
+    short: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +141,16 @@ class RankedTake:
 
 
 @dataclass(frozen=True)
+class Skip:
+    """A take left out: a stable code, an English reason and the numbers the report words."""
+
+    name: str
+    code: str
+    reason: str
+    values: dict[str, float | int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Ranking:
     """The takes in rank order, the ones left out with the reason, and the beat's grid."""
 
@@ -144,7 +158,13 @@ class Ranking:
     rate: int | None
     grid: Grid
     takes: list[RankedTake]
-    skipped: list[tuple[str, str]] = field(default_factory=list)
+    skips: list[Skip] = field(default_factory=list)
+    beat_seconds: float | None = None
+
+    @property
+    def skipped(self) -> list[tuple[str, str]]:
+        """The left-out takes as (name, English reason)."""
+        return [(s.name, s.reason) for s in self.skips]
 
     @property
     def ranked(self) -> bool:
@@ -373,30 +393,40 @@ def _rate_of(decoded: Sequence[Decoded]) -> int:
     return max(counts, key=lambda r: (counts[r], r == RECORDER_RATE))
 
 
-def _kept(paths: Sequence[Path], beat_s: float) -> tuple[list[_Take], list[tuple[str, str]]]:
+def _kept(paths: Sequence[Path], beat_s: float) -> tuple[list[_Take], list[Skip]]:
     decoded, skipped = [], []
     for path in paths:
         try:
             decoded.append(decode(path))
         except AudioError as error:
-            skipped.append((path.stem, str(error)))
+            skipped.append(Skip(path.stem, "unreadable", str(error)))
     if not decoded:
         return [], skipped
     rate = _rate_of(decoded)
     kept = []
     for d in decoded:
         seconds = len(d.samples) / d.rate
+        name = d.path.stem
         if d.rate != rate:
-            skipped.append((d.path.stem, f"{d.rate} Hz, the other takes are at {rate} Hz"))
-        elif seconds > beat_s + LONGER_S or seconds < SHORTER_SHARE * beat_s:
-            skipped.append((d.path.stem, f"{seconds:.1f} s against a beat of {beat_s:.1f} s"))
+            reason = f"{d.rate} Hz, the other takes are at {rate} Hz"
+            skipped.append(Skip(name, "other_rate", reason, {"rate": d.rate, "others": rate}))
+        elif d.samples.size == 0 or float(np.abs(d.samples).max()) < SILENT_PEAK:
+            skipped.append(Skip(name, "silent", "empty or almost silent", {"seconds": seconds}))
+        elif seconds > beat_s + LONGER_S:
+            values = {"seconds": seconds, "beat_seconds": beat_s}
+            reason = f"{seconds:.1f} s against a beat of {beat_s:.1f} s"
+            skipped.append(Skip(name, "too_long", reason, values))
         else:
             kept.append(_Take(d.path, d, onset_times(d.samples.mean(axis=1), d.rate)))
     return kept, skipped
 
 
 def _measure(
-    take: _Take, timing: tuple[float | None, float | None, float | None], grid: Grid, beat: Decoded
+    take: _Take,
+    timing: tuple[float | None, float | None, float | None],
+    grid: Grid,
+    beat: Decoded,
+    beat_seconds: float,
 ) -> TakeMetrics:
     samples, rate = take.decoded.samples, take.decoded.rate
     clip_share, clip_runs = clipping(samples)
@@ -420,6 +450,7 @@ def _measure(
         bleed=bleed(samples.mean(axis=1), rate, beat.samples.mean(axis=1), beat.rate),
         lufs=lufs if math.isfinite(lufs) else None,
         level_spread_lu=short_term_spread(samples, rate),
+        short=take.seconds < SHORTER_SHARE * beat_seconds,
     )
 
 
@@ -478,8 +509,9 @@ def _ordered(measured: Sequence[tuple[_Take, TakeMetrics]]) -> list[RankedTake]:
 def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
     """Measure every take-NN.wav in a folder against the beat and the other takes, and rank.
 
-    A take that cannot be decoded, is at another rate than most, or whose length is far from
-    the beat's is left out with the reason.
+    A take that cannot be decoded, is at another rate than most, is empty or almost silent,
+    or runs well past the beat is left out with the reason. A take shorter than half the beat
+    is kept: it is measured over the range it shares with the beat and the other takes.
 
     Args:
         beat: The beat the takes were recorded over; frame 0 of a take is frame 0 of it.
@@ -496,11 +528,12 @@ def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
     paths = find_takes(folder)
     beat_decoded = decode(beat)
     beat_mono = beat_decoded.samples.mean(axis=1)
-    takes, skipped = _kept(paths, len(beat_mono) / beat_decoded.rate)
+    beat_seconds = len(beat_mono) / beat_decoded.rate
+    takes, skipped = _kept(paths, beat_seconds)
     grid = beat_grid(beat_mono, beat_decoded.rate)
     timing = agreement([t.onsets for t in takes], [t.seconds for t in takes])
     measured = [
-        (take, _measure(take, timed, grid, beat_decoded))
+        (take, _measure(take, timed, grid, beat_decoded, beat_seconds))
         for take, timed in zip(takes, timing, strict=True)
     ]
     if deep is not None:
@@ -510,4 +543,4 @@ def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
             for (take, metrics), distance in zip(measured, distances, strict=True)
         ]
     rate = takes[0].decoded.rate if takes else None
-    return Ranking(beat, rate, grid, _ordered(measured), skipped)
+    return Ranking(beat, rate, grid, _ordered(measured), skipped, beat_seconds)
