@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redline — студия</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body data-view="quick" data-state="loading" data-playing="false">
+  <p class="narrow">Студия — инструмент для экрана шире 1024 пикселей. Растяни окно или открой её на компьютере.</p>
+
+  <div class="app">
+    <header class="deck">
+      <div class="deck__brand">
+        <span class="brand">Redline</span>
+        <span class="deck__track" id="track-name">загрузка</span>
+      </div>
+
+      <div class="deck__transport" role="group" aria-label="Воспроизведение">
+        <button class="play" id="play" type="button" aria-pressed="false" aria-label="Играть (пробел)">
+          <svg class="play__icon play__icon--play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>
+          <svg class="play__icon play__icon--pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z"/></svg>
+        </button>
+        <button class="toggle" id="loop" type="button" aria-pressed="true" title="Петля (L)">Петля <kbd>L</kbd></button>
+        <p class="clock"><span class="clock__now num" id="time">00:00.0</span><span class="clock__total num"><span aria-hidden="true">/</span> <span id="total">00:00.0</span></span></p>
+      </div>
+
+      <div class="deck__ab" id="ab">
+        <div class="deck__ref" id="ref-pick"></div>
+        <p class="deck__gain" id="ab-gain" aria-live="polite"></p>
+      </div>
+
+      <div class="deck__actions">
+        <span class="analysis" id="analysis-state" data-state="done">анализ свежий</span>
+        <button class="btn btn--line" id="render" type="button">Точный рендер</button>
+        <button class="btn btn--signal" id="save" type="button" disabled>Сохранить</button>
+      </div>
+    </header>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+
+    <section class="wave" id="wave" tabindex="0" role="slider" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"
+      aria-label="Трек: стрелки перематывают, [ и ] ставят края петли на позицию">
+      <canvas class="wave__canvas" id="wave-canvas" data-cursor="seek"></canvas>
+      <p class="wave__legend">
+        <span class="wave__key wave__key--red">красное сверху — где мастер срезал громкость, рисуется по ходу</span>
+        <span class="wave__key">клик — перемотка · края петли тянутся · Shift + протяжка — новая петля</span>
+      </p>
+    </section>
+
+    <div class="tools" id="tools"></div>
+
+    <div class="layout">
+      <main class="desk" id="desk"></main>
+      <div id="strip-slot"></div>
+    </div>
+  </div>
+</body>
+</html>

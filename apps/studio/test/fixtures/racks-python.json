@@ -1,0 +1,2999 @@
+{
+ "numbers": {
+  "rate": 48000,
+  "pre_gain_db": 7.25,
+  "gate_db": -63.5,
+  "makeup_db": 21.75,
+  "peak_db": -4.5,
+  "eq_fit_db": [
+   1.5,
+   -2.0,
+   0.0,
+   3.25,
+   -1.0,
+   2.5
+  ],
+  "post_gain_db": 2.5,
+  "tuning_cents": 13.0,
+  "bitcrush_peak_db": -3.0,
+  "throw_threshold_db": -31.0,
+  "master_target_lufs": -9.0,
+  "master_gain_db": 11.5,
+  "master_trim_db": -0.4
+ },
+ "cases": {
+  "defaults": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "chain off": {
+   "settings": {
+    "version": 2,
+    "chain_on": false,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "no drive": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 0.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "clip off": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": false,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "off",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "eq offsets": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 3.0,
+    "eq_400": 0.0,
+    "eq_1000": -12.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 12.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 4.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 1000.0,
+        "gain": -12.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 14.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "eq fit off": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": false,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 4.5,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 4.5,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "tune and formant": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 60.0,
+    "formant": 1.25,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "tune",
+       "on": true,
+       "params": {
+        "key": "C",
+        "scale": "chromatic",
+        "reference": 13.0,
+        "speed": 80.0,
+        "humanize": 0.0,
+        "mix": 1.0
+       }
+      },
+      {
+       "effect": "formant",
+       "on": true,
+       "params": {
+        "semitones": 0.0,
+        "factor": 1.25
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "octave and nightcore": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": -1,
+    "nightcore": true,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "pitch",
+       "on": true,
+       "params": {
+        "semitones": -12.0,
+        "preserve": "on"
+       }
+      },
+      {
+       "effect": "pitch",
+       "on": true,
+       "params": {
+        "semitones": 12.0,
+        "preserve": "off"
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "layers": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": false,
+    "octave_down_db": -9.5,
+    "octave_up_on": true,
+    "octave_up_db": -6.0,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 6.0,
+    "bitcrush_on": true,
+    "bitcrush_bits": 5,
+    "bitcrush_hold": 4,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.0,
+        "up": 0.5011872336272722,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 5.0
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 3.0
+       }
+      },
+      {
+       "effect": "bitcrush",
+       "on": true,
+       "params": {
+        "bits": 5,
+        "hold": 4
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "fx": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": true,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": true,
+    "reverb_mix_db": -10.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      },
+      {
+       "effect": "throws",
+       "on": true,
+       "params": {
+        "time": 375.0,
+        "feedback": 0.4,
+        "tone": 4000.0,
+        "level": -6.0,
+        "threshold": -31.0,
+        "gap": 200.0,
+        "tail": 300.0
+       }
+      },
+      {
+       "effect": "room",
+       "on": true,
+       "params": {
+        "mix": 0.24025307335204213,
+        "predelay": 25.0,
+        "width": 1.0,
+        "decay": 1.8,
+        "damping": 5000.0
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 2.386621
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "loud vocal": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": 6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 8.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "quiet vocal": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -24.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -21.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "beat": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 3.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 0.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 3.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": []
+  },
+  "master off": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": false,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": []
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": []
+    }
+   },
+   "lanes": []
+  },
+  "user rack": {
+   "settings": {
+    "version": 2,
+    "chain_on": true,
+    "comp_threshold_db": -38.0,
+    "comp_ratio": 30.0,
+    "comp_attack_ms": 1.0,
+    "comp_release_ms": 40.0,
+    "drive_db": 30.0,
+    "clip_on": true,
+    "clip_below_peak_db": 12.0,
+    "vocal_db": -6.0,
+    "eq_fit": true,
+    "eq_200": 0.0,
+    "eq_400": 0.0,
+    "eq_1000": 0.0,
+    "eq_2500": 0.0,
+    "eq_5000": 0.0,
+    "eq_8000": 0.0,
+    "hard_tune": 0.0,
+    "formant": 1.0,
+    "voice_octave": 0,
+    "nightcore": false,
+    "octave_down_on": true,
+    "octave_down_db": -9.5,
+    "octave_up_on": false,
+    "octave_up_db": -9.5,
+    "doubles_on": true,
+    "doubles_db": -4.0,
+    "doubles_left_ms": 18.0,
+    "doubles_right_ms": 27.0,
+    "doubles_wander_ms": 2.0,
+    "bitcrush_on": false,
+    "bitcrush_bits": 8,
+    "bitcrush_hold": 3,
+    "stutter_on": false,
+    "stutter_ms": 90.0,
+    "stutter_repeats": 3,
+    "throw_on": false,
+    "throw_db": -6.0,
+    "throw_ms": 375.0,
+    "throw_feedback": 0.4,
+    "throw_tone_hz": 4000.0,
+    "reverb_on": false,
+    "reverb_mix_db": -16.0,
+    "reverb_decay_s": 1.8,
+    "reverb_predelay_ms": 25.0,
+    "reverb_tone_hz": 5000.0,
+    "beat_db": 0.0,
+    "bass_freq_hz": 120.0,
+    "bass_drive_db": 12.0,
+    "master_on": true,
+    "master_auto": true,
+    "master_lufs": -9.0,
+    "rack": [
+     {
+      "effect": "delay",
+      "on": true,
+      "params": {
+       "mode": "pingpong",
+       "time": 250.0
+      },
+      "automation": []
+     },
+     {
+      "effect": "gain",
+      "on": false,
+      "params": {
+       "db": -3.0
+      },
+      "automation": [
+       {
+        "param": "db",
+        "points": [
+         [
+          0.0,
+          -3.0
+         ],
+         [
+          2.0,
+          0.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "racks": {
+    "vocal": {
+     "effects": [
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": 7.25
+       }
+      },
+      {
+       "effect": "chain_compressor",
+       "on": true,
+       "params": {
+        "threshold": -38.0,
+        "ratio": 30.0,
+        "attack": 1.0,
+        "release": 40.0,
+        "gate": -63.5,
+        "makeup": 21.75
+       }
+      },
+      {
+       "effect": "chain_clip",
+       "on": true,
+       "params": {
+        "drive": 30.0,
+        "clip": "on",
+        "below": 12.0,
+        "peak": -4.5
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "lowshelf",
+        "freq": 200.0,
+        "gain": 1.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 400.0,
+        "gain": -2.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 2500.0,
+        "gain": 3.25,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "peak",
+        "freq": 5000.0,
+        "gain": -1.0,
+        "q": 1.0
+       }
+      },
+      {
+       "effect": "eq",
+       "on": true,
+       "params": {
+        "kind": "highshelf",
+        "freq": 8000.0,
+        "gain": 2.5,
+        "q": 0.7071067811865475
+       }
+      },
+      {
+       "effect": "gain",
+       "on": true,
+       "params": {
+        "db": -3.5
+       }
+      },
+      {
+       "effect": "octaver",
+       "on": true,
+       "params": {
+        "down": 0.33496543915782767,
+        "up": 0.0,
+        "dry": 1.0
+       }
+      },
+      {
+       "effect": "doubler",
+       "on": true,
+       "params": {
+        "level": -4.0,
+        "delay": 18.0,
+        "depth": 2.0
+       }
+      },
+      {
+       "effect": "delay",
+       "on": true,
+       "params": {
+        "mode": "pingpong",
+        "time": 250.0
+       }
+      },
+      {
+       "effect": "gain",
+       "on": false,
+       "params": {
+        "db": -3.0
+       }
+      }
+     ]
+    },
+    "beat": {
+     "effects": [
+      {
+       "effect": "bass_drive",
+       "on": true,
+       "params": {
+        "freq": 120.0,
+        "drive": 12.0
+       }
+      }
+     ]
+    },
+    "master": {
+     "effects": [
+      {
+       "effect": "master",
+       "on": true,
+       "params": {
+        "gain": 11.5,
+        "trim": -0.4,
+        "ceiling": -0.1
+       }
+      }
+     ]
+    }
+   },
+   "lanes": [
+    {
+     "slot": 12,
+     "param": "db",
+     "points": [
+      [
+       0.0,
+       -3.0
+      ],
+      [
+       2.0,
+       0.0
+      ]
+     ]
+    }
+   ]
+  }
+ }
+}
