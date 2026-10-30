@@ -343,3 +343,14 @@ def test_model_writing_no_stems_is_a_clear_error(tmp_path):
     separator = RoformerSeparator(run=writes_nothing, run_on_cpu=writes_nothing)
     with pytest.raises(SeparationError, match="no readable stems"):
         separate(audio(), separator, tmp_path)
+
+
+def test_a_cache_entry_left_half_written_is_replaced(tmp_path):
+    clip = audio()
+    fake = FakeSeparator()
+    folder = tmp_path / "stems" / cache_key(clip, fake.id)
+    folder.mkdir(parents=True)
+    (folder / "vocal.wav").write_bytes(b"not audio")
+    stems = separate(clip, fake, tmp_path)
+    assert not stems.cached and len(fake.calls) == 1
+    assert separate(clip, fake, tmp_path).cached

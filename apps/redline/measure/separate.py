@@ -98,6 +98,9 @@ def separate(audio: Audio, separator: Separator, cache_dir: Path) -> Stems:
     vocal = (vocal / scale).astype(np.float32)
     beat = (beat / scale).astype(np.float32)
     folder.parent.mkdir(parents=True, exist_ok=True)
+    if folder.exists() and not _complete(folder):
+        # left by a run killed outside the staging rename; it would block the rename forever
+        shutil.rmtree(folder, ignore_errors=True)
     staging = Path(tempfile.mkdtemp(prefix=".tmp-", dir=folder.parent))
     try:
         sf.write(staging / "vocal.wav", vocal, audio.rate, subtype="FLOAT")
