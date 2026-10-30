@@ -16,7 +16,7 @@ from redline.core.listen import common_lufs
 from redline.core.loudness import gated_crest_db, integrated_lufs
 from redline.core.spectrum import low_end
 from redline.engine.render import Engine, timbre_of
-from redline.engine.settings import SPECS, Settings
+from redline.engine.settings import SPECS, Settings, to_dict
 from redline.engine.track import reference_loudness, track_engine
 from redline.master.report import write_final_report
 from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
@@ -287,7 +287,7 @@ def write_result(
         "vocal_db": settings.vocal_db,
         "timbre": timbre_of(settings),
         "bass_drive_db": settings.bass_drive_db,
-        "settings": asdict(settings),
+        "settings": to_dict(settings),
         "tuning_cents": engine.context.tuning_cents,
         "vocal": asdict(chain),
         "master": None if master is None else {**asdict(master), "final_lufs": final_lufs},

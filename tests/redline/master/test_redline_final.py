@@ -848,3 +848,15 @@ def test_cli_run_with_no_audio_in_the_folder_exits_2(inputs, tmp_path):
     empty = tmp_path / "none"
     empty.mkdir()
     assert main(run_args([empty], refs, tmp_path), separator=HalfSeparator()) == 2
+
+
+def test_a_run_with_a_rack_writes_settings_that_load_back(inputs, tmp_path):
+    from redline.engine.settings import RackEffect, from_dict
+
+    track, refs = inputs
+    racked = replace(Settings(), rack=(RackEffect("gain", True, (("db", -6.0),), ()),))
+    folder = run_track(
+        track, sorted(refs.iterdir()), tmp_path / "w", tmp_path / "o", HalfSeparator(), racked
+    )
+    record = json.loads((folder / "chain.json").read_text())
+    assert from_dict(record["settings"]) == racked
