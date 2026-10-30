@@ -510,3 +510,43 @@ def test_the_result_folder_appears_whole_in_one_rename(own, tmp_path, no_auto, m
     monkeypatch.setattr(Path, "replace", spy)
     assert main(voice_args(own, tmp_path, "--no-auto"), separator=CountingSeparator()) == 0
     assert seen and "report.md" in seen[0] and "final.wav" in seen[0]
+
+
+def test_a_killed_build_leaves_no_visible_result_folder(own, tmp_path, no_auto, monkeypatch):
+    from pathlib import Path
+
+    from redline.master import run as run_module
+
+    def die(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    # a SIGKILL runs none of the cleanup
+    monkeypatch.setattr(run_module, "write_final_report", die)
+    monkeypatch.setattr(run_module.shutil, "rmtree", lambda *a, **k: None)
+    monkeypatch.setattr(Path, "rmdir", lambda self: None)
+    with pytest.raises(KeyboardInterrupt):
+        main(voice_args(own, tmp_path, "--no-auto"), separator=CountingSeparator())
+    names = [p.name for p in (tmp_path / "o").iterdir()]
+    assert names and all(name.startswith(".tmp-") for name in names)
+
+
+def test_the_result_takes_a_name_that_does_not_exist_yet(own, tmp_path, no_auto, monkeypatch):
+    from redline.master import run as run_module
+
+    real = run_module.claim_tmp_dir
+    taken = []
+
+    def claim(out_dir, stamp):
+        folder = real(out_dir, stamp)
+        (out_dir / stamp).mkdir()
+        (out_dir / stamp / "keep.txt").write_text("x")
+        taken.append(out_dir / stamp)
+        return folder
+
+    monkeypatch.setattr(run_module, "claim_tmp_dir", claim)
+    assert main(voice_args(own, tmp_path, "--no-auto"), separator=CountingSeparator()) == 0
+    (kept,) = taken
+    assert [p.name for p in kept.iterdir()] == ["keep.txt"]
+    others = [p for p in (tmp_path / "o").iterdir() if p != kept]
+    assert len(others) == 1 and (others[0] / "final.wav").is_file()
+    assert not others[0].name.startswith(".")

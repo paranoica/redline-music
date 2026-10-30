@@ -34,13 +34,15 @@ def _song(args: argparse.Namespace) -> int | None:
         return 2
 
 
+def _stored(path: Path | str) -> str:
+    return model.relative_to_root(Path.cwd() / path)
+
+
 def _new(args: argparse.Namespace) -> int:
-    if args.beat_seed is not None:
-        beat = {"own": args.beat_seed}
-    else:
-        beat = {"file": model.relative_to_root(args.beat)}
-    suno = None if args.suno is None else model.relative_to_root(args.suno)
-    refs = tuple(model.relative_to_root(p) for p in args.ref or ())
+    own = args.beat_seed is not None
+    beat = {"own": args.beat_seed} if own else {"file": _stored(args.beat)}
+    suno = None if args.suno is None else _stored(args.suno)
+    refs = tuple(_stored(p) for p in args.ref or ())
     song = model.new_song(args.name, beat, suno, refs)
     if args.text_seed is not None:
         song = replace(song, text=_latest_text(args.text_seed))
@@ -67,7 +69,7 @@ def _latest_text(seed: int) -> dict[str, int]:
 
 def _refs(args: argparse.Namespace) -> int:
     song = model.load(args.name)
-    refs = tuple(model.relative_to_root(p) for p in args.ref)
+    refs = tuple(_stored(p) for p in args.ref)
     for stored in refs:
         model.resolve_inside(stored, where="--ref")
     saved = model.save(replace(song, references=refs), song.rev)

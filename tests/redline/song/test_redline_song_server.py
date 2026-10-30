@@ -14,7 +14,7 @@ from redline.cli import main
 from redline.engine.render import Engine
 from redline.record.session import Outcome
 from redline.song import model
-from redline.song.rec import NotReady
+from redline.song.rec import NotReady, TakeRunning
 from redline.song.server import SongApp, close_all, job_argv, make_server
 from redline.studio.server import Studio
 from redline_signals import engine_context, engine_stems
@@ -40,14 +40,16 @@ class FakeRec:
         self.ready = False
         self.is_taking = False
         self.down = False
+        self.reason = None
+        self.open_error = None
 
     def snapshot(self):
         from redline.song.rec import RecSnapshot
 
-        stage = "ready" if self.ready else "idle"
+        stage = "ready" if self.ready else "closed" if self.reason else "idle"
         return RecSnapshot(
             stage,
-            None,
+            self.reason,
             False,
             False,
             self.is_taking,
@@ -71,8 +73,13 @@ class FakeRec:
         return self.is_taking
 
     def open(self, request):
+        if self.open_error is not None:
+            raise self.open_error
+        if self.is_taking:
+            raise TakeRunning("a take is running")
         self.calls.append(("open", request))
         self.ready = True
+        self.reason = None
 
     def toggle(self):
         if not self.ready:
@@ -83,8 +90,9 @@ class FakeRec:
     def discard_last(self):
         return Outcome("nothing_to_discard")
 
-    def close(self):
+    def close(self, reason=None):
         self.ready = False
+        self.reason = reason
 
     def shutdown(self):
         self.down = True
@@ -374,22 +382,28 @@ def test_the_mix_routes_are_the_studios(made, root):
     assert api(made, "GET", "/api/mix/variants")[0] == 404
 
 
-def test_keeping_a_variant_stores_its_settings_and_none_clears_the_slot(made, root):
+def variants_file(made, key=None):
     state = made.app._state_dir()
     variants = {
+        "key": key or model.mix_inputs(model.load(NAME)).key(),
         "auto": {"formant": 1.0, "distance_before": 3.0, "distance_after": 1.0, "at_edge": []},
         "variants": [{"settings": {"formant": 1.2}, "axis": "formant", "distance": 2.0}],
         "seed": 7,
     }
     (state / "variants.json").write_text(json.dumps(variants), encoding="utf-8")
+
+
+def test_keeping_a_variant_stores_its_settings_and_none_clears_the_slot(made, root):
+    ready_mix(made, root)
+    variants_file(made)
     assert api(made, "GET", "/api/mix/variants")[1]["seed"] == 7
-    assert api(made, "POST", "/api/song", {"rev": 1, "set": {"mix_variant": 1}})[0] == 200
+    assert api(made, "POST", "/api/song", {"rev": 2, "set": {"mix_variant": 1}})[0] == 200
     song = model.load(NAME)
     assert song.mix == {"settings": f"private/songs/{NAME}/mix.json", "variant": 1}
     mix = root / "private" / "songs" / NAME / "mix.json"
     assert json.loads(mix.read_text())["formant"] == 1.2
     assert mix.stat().st_mode & 0o777 == 0o600
-    assert api(made, "POST", "/api/song", {"rev": 2, "set": {"mix_variant": None}})[0] == 200
+    assert api(made, "POST", "/api/song", {"rev": 3, "set": {"mix_variant": None}})[0] == 200
     assert model.load(NAME).mix["variant"] is None and model.load(NAME).mix["settings"]
 
 
@@ -416,6 +430,124 @@ def test_a_beat_change_while_a_take_runs_is_409(made):
     assert model.load(NAME).beat == {"file": "input/beat.wav"}
     made.app.rec.is_taking = False
     assert api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})[0] == 200
+
+
+def render_beat(root, seed, seconds=1.0):
+    path = root / "work" / "beats" / str(seed) / "beat.wav"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(path, tone(seconds), 8000)
+    return path
+
+
+def opens(made):
+    return [call[1] for call in made.app.rec.calls if call[0] == "open"]
+
+
+def test_a_beat_changed_to_an_unrendered_seed_closes_the_open_engine(made):
+    assert api(made, "POST", "/api/rec/open", {})[0] == 202
+    assert api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})[0] == 200
+    assert not made.app.rec.ready
+    state = api(made, "GET", "/api/rec/state")[1]
+    assert state["stage"] == "closed" and "not rendered" in state["error"]
+    assert api(made, "POST", "/api/rec/toggle", {})[1]["code"] == "not_ready"
+
+
+def test_a_beat_changed_to_a_rendered_seed_relaunches_the_open_engine(made, root):
+    path = render_beat(root, 4)
+    api(made, "POST", "/api/rec/open", {})
+    assert api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})[0] == 200
+    assert [r.beat for r in opens(made)] == [(root / "input" / "beat.wav").resolve(), path]
+    assert made.app.rec.ready
+
+
+def test_a_changed_beat_file_relaunches_the_open_engine_unless_a_take_runs(made, root):
+    render_beat(root, 4)
+    api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
+    api(made, "POST", "/api/rec/open", {})
+    assert api(made, "GET", "/api/rec/state")[0] == 200 and len(opens(made)) == 1
+    render_beat(root, 4, 2.0)
+    made.app.rec.is_taking = True
+    assert api(made, "GET", "/api/rec/state")[0] == 200 and len(opens(made)) == 1
+    made.app.rec.is_taking = False
+    api(made, "GET", "/api/rec/state")
+    assert len(opens(made)) == 2
+    api(made, "GET", "/api/rec/state")
+    assert len(opens(made)) == 2
+
+
+def test_a_beat_file_that_goes_missing_closes_the_engine_and_a_closed_one_stays_closed(made, root):
+    path = render_beat(root, 4)
+    api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
+    api(made, "POST", "/api/rec/open", {})
+    path.unlink()
+    api(made, "GET", "/api/rec/state")
+    assert not made.app.rec.ready
+    render_beat(root, 4)
+    api(made, "GET", "/api/rec/state")
+    assert len(opens(made)) == 1 and not made.app.rec.ready
+
+
+def test_a_beat_change_is_not_saved_when_the_relaunch_finds_a_take_running(made, root):
+    render_beat(root, 4)
+    api(made, "POST", "/api/rec/open", {})
+    made.app.rec.open_error = TakeRunning("a take is running")
+    status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
+    assert status == 409 and data["code"] == "take_running"
+    assert model.load(NAME).beat == {"file": "input/beat.wav"} and model.load(NAME).rev == 1
+
+
+def test_a_stale_rev_keeping_a_variant_writes_no_settings_file(made, root):
+    ready_mix(made, root)
+    variants_file(made)
+    status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"mix_variant": 1}})
+    assert status == 412 and data["code"] == "stale"
+    assert not (root / "private" / "songs" / NAME / "mix.json").exists()
+    assert not (root / "work" / "studio" / NAME / "settings.json").exists()
+    assert model.load(NAME).mix["variant"] is None
+
+
+def test_variants_of_another_mix_are_409_and_cannot_be_kept(made, root):
+    ready_mix(made, root)
+    variants_file(made, key="0" * 64)
+    status, data = api(made, "GET", "/api/mix/variants")
+    assert status == 409 and data["code"] == "stale_variants"
+    status, data = api(made, "POST", "/api/song", {"rev": 2, "set": {"mix_variant": 1}})
+    assert status == 409 and data["code"] == "stale_variants"
+    assert model.load(NAME).rev == 2
+    assert not (root / "private" / "songs" / NAME / "mix.json").exists()
+    variants_file(made)
+    assert api(made, "GET", "/api/mix/variants")[0] == 200
+    assert api(made, "POST", "/api/song", {"rev": 2, "set": {"mix_variant": 1}})[0] == 200
+
+
+def test_variants_without_a_key_are_stale(made, root):
+    ready_mix(made, root)
+    variants_file(made)
+    path = made.app._state_dir() / "variants.json"
+    data = json.loads(path.read_text())
+    del data["key"]
+    path.write_text(json.dumps(data))
+    assert api(made, "GET", "/api/mix/variants")[1]["code"] == "stale_variants"
+
+
+def test_the_takes_folder_the_engine_needs_is_made_private(made, root):
+    import shutil
+
+    shutil.rmtree(root / "input" / "takes" / NAME)
+    assert api(made, "POST", "/api/rec/open", {})[0] == 202
+    folder = root / "input" / "takes" / NAME
+    assert folder.is_dir() and folder.stat().st_mode & 0o777 == 0o700
+
+
+def test_a_build_that_was_killed_shows_no_result_and_hidden_folders_are_never_listed(made, root):
+    out = root / "output" / NAME
+    (out / ".tmp-20260101-000000").mkdir(parents=True)
+    assert api(made, "GET", "/api/song")[1]["stations"]["result"] == {"folder": None}
+    (out / "20251231-235959").mkdir()
+    (out / ".tmp-20260102-000000").mkdir()
+    assert api(made, "GET", "/api/song")[1]["stations"]["result"] == {
+        "folder": f"output/{NAME}/20251231-235959"
+    }
 
 
 def test_a_suno_voice_is_not_recorded(made, root):

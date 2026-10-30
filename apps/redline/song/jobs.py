@@ -44,12 +44,14 @@ class _Job:
     follow_up: _Request | None = None
     started: float | None = None
     finished: float | None = None
+    paused: bool = False
     thread: threading.Thread | None = field(default=None, repr=False)
 
     def info(self) -> dict[str, Any]:
         """The job as plain data for a poll."""
         return {
             "state": self.state,
+            "paused": self.paused,
             "reason": self.reason,
             "result": str(self.request.result) if self.state == DONE else None,
             "log": str(_log_of(self.request.result)),
@@ -92,7 +94,8 @@ class JobRunner:
         """Set up the runner.
 
         Args:
-            hold: Heavy jobs stay queued while this returns True (a take is recording).
+            hold: Heavy jobs stay queued, and running ones are stopped, while this returns
+                True (a take is recording).
             kill_after: Seconds between SIGTERM and SIGKILL on a cancel.
             tick: Seconds between looks at the hold while a job is queued.
         """
@@ -162,6 +165,9 @@ class JobRunner:
                 job.state, job.finished = CANCELLED, time.time()
             elif job.state == RUNNING:
                 job.state = CANCELLING
+                if job.paused:
+                    self._signal(job, signal.SIGCONT)
+                    job.paused = False
                 self._signal(job, signal.SIGTERM)
                 threading.Thread(target=self._reap, args=(job,), daemon=True).start()
             return job.info()
@@ -207,15 +213,25 @@ class JobRunner:
                 self._signal(job, signal.SIGKILL)
 
     def _promote(self) -> None:
-        """Launch every queued job the hold lets go; keep a watcher while some wait."""
+        """Launch every queued job the hold lets go and stop or continue the running heavy ones.
+
+        A watcher stays while some job waits or runs heavy.
+        """
         waiting = False
-        for job in self._jobs.values():
-            if job.state != QUEUED:
+        held = self._hold()
+        for job in list(self._jobs.values()):
+            if job.state == RUNNING and job.request.heavy:
+                waiting = True
+                if held != job.paused:
+                    self._signal(job, signal.SIGSTOP if held else signal.SIGCONT)
+                    job.paused = held
+            elif job.state != QUEUED:
                 continue
-            if job.request.heavy and self._hold():
+            elif job.request.heavy and held:
                 waiting = True
             else:
                 self._launch(job)
+                waiting = waiting or (job.state == RUNNING and job.request.heavy)
         if waiting and self._watcher is None and not self._closed:
             self._watcher = threading.Thread(target=self._watch, daemon=True)
             self._watcher.start()
@@ -225,7 +241,10 @@ class JobRunner:
             time.sleep(self._tick)
             with self._lock:
                 self._promote()
-                if not any(j.state == QUEUED for j in self._jobs.values()):
+                if not any(
+                    j.state == QUEUED or (j.state == RUNNING and j.request.heavy)
+                    for j in self._jobs.values()
+                ):
                     self._watcher = None
                     return
 
@@ -261,6 +280,7 @@ class JobRunner:
         result = job.request.result
         with self._lock:
             cancelled = job.state == CANCELLING
+            job.paused = False
             if cancelled:
                 job.state = CANCELLED
             elif code == 0 and result.is_file():

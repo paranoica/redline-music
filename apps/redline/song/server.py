@@ -55,6 +55,7 @@ SNAPSHOT_TTL_S = 0.04
 LYRICS = "private/lyrics"
 BUILD = "private/lyrics/build"
 MAX_SEED = 2**31 - 1
+BEAT_GONE = "the beat changed and is not rendered"
 
 REC_ERRORS = (
     (rec.OutOfSync, HTTPStatus.CONFLICT, "out_of_sync"),
@@ -225,6 +226,9 @@ class SongApp:
         self._studio_lock = threading.Lock()
         self._beat: BeatStudio | None = None
         self._beat_lock = threading.Lock()
+        self._engine_lock = threading.Lock()
+        self._engine_sig: tuple[str, int, int] | None = None
+        self._take_gate = threading.Lock()
         self._grids: dict[tuple[str, int, int], float | None] = {}
         self._snap: tuple[float, dict[str, Any]] | None = None
         self._snap_lock = threading.Lock()
@@ -415,28 +419,47 @@ class SongApp:
         only(changes, "text", "voice_chosen", "beat", "mix_variant")
         song = self.song()
         moved_beat = False
+        kept: str | None = None
         if "text" in changes:
             song = replace(song, text=self._new_text(changes["text"]))
         if "voice_chosen" in changes:
             song = replace(song, voice=self._new_voice(song, changes["voice_chosen"]))
         if "beat" in changes:
-            if self.rec.taking():
-                raise ApiError(HTTPStatus.CONFLICT, "a take is running", "take_running")
             song, moved_beat = replace(song, beat=self._new_beat(changes["beat"])), True
         if "mix_variant" in changes:
-            song = self._new_variant(song, changes["mix_variant"])
+            song, kept = self._new_variant(song, changes["mix_variant"])
+        if not moved_beat:
+            return self._save(song, expected, kept)
+        with self._take_gate:
+            if self.rec.taking():
+                raise ApiError(HTTPStatus.CONFLICT, "a take is running", "take_running")
+            if self.song().rev != expected:
+                raise self._stale()
+            try:
+                self._sync_engine(song)
+            except rec.TakeRunning:
+                raise ApiError(HTTPStatus.CONFLICT, "a take is running", "take_running") from None
+            return self._save(song, expected, kept)
+
+    def _stale(self) -> ApiError:
+        return ApiError(
+            HTTPStatus.PRECONDITION_FAILED,
+            "the song changed: read it again",
+            "stale",
+            **self._payload(self.song()),
+        )
+
+    def _save(self, song: model.Song, expected: int, kept: str | None) -> Reply:
         try:
             saved = model.save(song, expected, self.root)
         except model.StaleRev:
-            current = self.song()
-            raise ApiError(
-                HTTPStatus.PRECONDITION_FAILED,
-                "the song changed: read it again",
-                "stale",
-                **self._payload(current),
-            ) from None
-        if moved_beat:
-            self._relaunch()
+            raise self._stale() from None
+        if kept is not None:
+            make_private_dir(model.song_dir(self.name, self.root), self.root)
+            write_private(model.song_dir(self.name, self.root) / "mix.json", kept)
+            # the Studio opens from the settings saved under its track key
+            studio_folder = make_private_dir(self.work / "studio" / self.name, self.root)
+            write_private(studio_folder / "settings.json", kept)
         return reply_json(HTTPStatus.OK, self._payload(saved))
 
     def _new_text(self, value: Any) -> dict[str, int] | None:
@@ -482,27 +505,29 @@ class SongApp:
         except model.SongError as error:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(error)) from None
 
-    def _new_variant(self, song: model.Song, slot: Any) -> model.Song:
+    def _new_variant(self, song: model.Song, slot: Any) -> tuple[model.Song, str | None]:
         if slot is None:
-            return replace(song, mix={**song.mix, "variant": None})
+            return replace(song, mix={**song.mix, "variant": None}), None
         slot = _int(slot, "mix_variant")
         try:
-            data = json.loads((self._state_dir() / "variants.json").read_text(encoding="utf-8"))
+            data = self._variants_data(song)
+        except ApiError as error:
+            if error.payload.get("code") != "no_variants":
+                raise
+            raise ApiError(
+                HTTPStatus.UNPROCESSABLE_ENTITY, f"there is no variant {slot}", "no_variant"
+            ) from None
+        try:
             chosen = data["auto"] if slot == 0 else data["variants"][slot - 1]["settings"]
             known = to_dict(Settings())
             settings = from_dict({k: v for k, v in chosen.items() if k in known})
-        except (OSError, ValueError, KeyError, IndexError, TypeError):
+        except (ValueError, KeyError, IndexError, TypeError):
             raise ApiError(
                 HTTPStatus.UNPROCESSABLE_ENTITY, f"there is no variant {slot}", "no_variant"
             ) from None
         text = json.dumps(to_dict(settings), indent=1) + "\n"
-        make_private_dir(model.song_dir(self.name, self.root), self.root)
-        write_private(model.song_dir(self.name, self.root) / "mix.json", text)
-        # the Studio opens from the settings saved under its track key
-        studio_folder = make_private_dir(self.work / "studio" / self.name, self.root)
-        write_private(studio_folder / "settings.json", text)
         rel = f"private/songs/{self.name}/mix.json"
-        return replace(song, mix={"settings": rel, "variant": slot})
+        return replace(song, mix={"settings": rel, "variant": slot}), text
 
     # text
 
@@ -585,6 +610,7 @@ class SongApp:
 
     def rec_state(self) -> Reply:
         """The recording snapshot, shared by pollers within one sampler tick."""
+        self._follow_beat()
         return reply_json(HTTPStatus.OK, self._snapshot())
 
     def _open_request(self, song: model.Song) -> OpenRequest:
@@ -594,7 +620,7 @@ class SongApp:
         if not beat.is_file():
             raise ApiError(HTTPStatus.CONFLICT, f"the beat is not rendered: {beat.name}", "no_beat")
         folder = model.resolve_inside(song.voice["takes"], self.root, "voice.takes")
-        folder.mkdir(parents=True, exist_ok=True)
+        make_private_dir(folder, self.root)
         settings = None
         if song.mix["settings"] is not None:
             path = model.resolve_inside(song.mix["settings"], self.root, "mix.settings")
@@ -613,16 +639,53 @@ class SongApp:
             separator = RoformerSeparator()
         return OpenRequest(beat, folder, self.work, refs, separator, settings)
 
-    def _relaunch(self) -> None:
+    def _beat_sig(self, song: model.Song) -> tuple[str, int, int] | None:
+        try:
+            path = model.beat_file(song, self.root)
+            stat = path.stat()
+        except (model.SongError, OSError):
+            return None
+        return (str(path), stat.st_mtime_ns, stat.st_size)
+
+    def _launch_engine(self, song: model.Song) -> None:
+        request = self._open_request(song)
+        sig = self._beat_sig(song)
+        self.rec.open(request)
+        self._engine_sig = sig
+
+    def _sync_engine(self, song: model.Song) -> None:
+        """Point an open engine at the song's beat as it is now; close it when it is not rendered.
+
+        Raises:
+            rec.TakeRunning: A take runs, so the engine stays where it is.
+        """
         if self.rec.snapshot().stage in ("idle", "closed", "failed"):
             return
+        with self._engine_lock:
+            sig = self._beat_sig(song)
+            if sig == self._engine_sig:
+                return
+            if sig is None:
+                if self.rec.taking():
+                    raise rec.TakeRunning("a take is running")
+                self.rec.close(reason=BEAT_GONE)
+                self._engine_sig = None
+                return
+            self._launch_engine(song)
+
+    def _follow_beat(self) -> None:
         with contextlib.suppress(rec.RecError, ApiError, model.SongError):
-            self.rec.open(self._open_request(self.song()))
+            self._sync_engine(self.song())
 
     def rec_command(self, name: str, body: dict) -> Reply:
         """open, toggle, discard, calibrate or close; the errors are 409 with a code."""
         self._snap = None
         try:
+            if name in ("toggle", "calibrate"):
+                self._follow_beat()
+            if name == "toggle":
+                with self._take_gate:
+                    return self._rec_run(name, body)
             return self._rec_run(name, body)
         except rec.RecError as error:
             for kind, status, code in REC_ERRORS:
@@ -635,7 +698,8 @@ class SongApp:
     def _rec_run(self, name: str, body: dict) -> Reply:
         if name == "open":
             only(body)
-            self.rec.open(self._open_request(self.song()))
+            with self._engine_lock:
+                self._launch_engine(self.song())
             return reply_json(HTTPStatus.ACCEPTED, {"code": "opening", "values": {}})
         if name == "calibrate":
             only(body, "mode")
@@ -827,12 +891,25 @@ class SongApp:
             except (model.StaleRev, model.SongError):
                 continue
 
-    def _variants(self) -> Reply:
+    def _variants_data(self, song: model.Song) -> dict[str, Any]:
         try:
             data = json.loads((self._state_dir() / "variants.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise ApiError(HTTPStatus.NOT_FOUND, "no auto mix has run yet", "no_variants") from None
-        return reply_json(HTTPStatus.OK, data)
+        try:
+            current = model.mix_inputs(song, self.root).key()
+        except (model.SongError, OSError):
+            current = None
+        if not isinstance(data, dict) or current is None or data.get("key") != current:
+            raise ApiError(
+                HTTPStatus.CONFLICT,
+                "the variants are of another mix: run auto again",
+                "stale_variants",
+            )
+        return data
+
+    def _variants(self) -> Reply:
+        return reply_json(HTTPStatus.OK, self._variants_data(self.song()))
 
     # beat
 

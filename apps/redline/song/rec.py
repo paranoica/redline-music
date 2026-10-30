@@ -285,9 +285,12 @@ class RecOwner:
             opening=True,
         )
 
-    def close(self, timeout: float | None = None) -> None:
-        """Keep a take still running, quit the engine, and leave the owner idle."""
-        self._submit("close", self._close, False, timeout)
+    def close(self, timeout: float | None = None, reason: str | None = None) -> None:
+        """Keep a take still running, quit the engine, and leave the owner idle.
+
+        The reason, if given, stays in the snapshot's error.
+        """
+        self._submit("close", lambda cmd: self._close(cmd, reason), False, timeout)
 
     def snapshot(self) -> RecSnapshot:
         """The state at the last tick, without touching the engine.
@@ -457,11 +460,19 @@ class RecOwner:
             if ready is not None and ready.engine.exited():
                 state.stage = "failed"
                 state.error = str(error)
+                self._forget_take(state)
             elif is_desync(error):
                 state.out_of_sync = True
                 state.error = str(error)
             else:
                 state.error = str(error)
+
+    @staticmethod
+    def _forget_take(state: _State) -> None:
+        state.take = None
+        state.stopping = False
+        state.latest = None
+        state.peaks = None
 
     def _view(self) -> None:
         ready = self._ready
@@ -470,13 +481,17 @@ class RecOwner:
         session = ready.session
         current = session.current or session.pending
         with self._lock:
-            self._state.take = current.stem if current is not None else None
+            self._state.take = (
+                current.stem if current is not None and self._state.stage != "failed" else None
+            )
             self._state.kept = len(session.recorded)
 
     def _holds_take(self) -> bool:
         ready = self._ready
-        return ready is not None and (
-            ready.session.current is not None or ready.session.pending is not None
+        return (
+            ready is not None
+            and self._state.stage != "failed"
+            and (ready.session.current is not None or ready.session.pending is not None)
         )
 
     def _logged(self, path: Path) -> None:
@@ -541,9 +556,13 @@ class RecOwner:
         finally:
             self._ready = None
 
-    def _close(self, command: _Command) -> None:
+    def _close(self, command: _Command, reason: str | None = None) -> None:
         self._close_session()
-        self._set(stage="closed", out_of_sync=False, take=None, stopping=False)
+        with self._lock:
+            self._state.stage, self._state.out_of_sync = "closed", False
+            self._forget_take(self._state)
+            if reason is not None:
+                self._state.error = reason
         self._request = None
 
     def _open(self, command: _Command, request: OpenRequest) -> None:
@@ -576,7 +595,10 @@ class RecOwner:
         try:
             ready = self._opener(request, self._stage, self._sample_for_session, self._logged)
         except Exception as error:  # the page shows why, the thread goes on  # noqa: BLE001
-            self._set(stage="failed", error=str(error) or type(error).__name__)
+            with self._lock:
+                self._state.stage = "failed"
+                self._state.error = str(error) or type(error).__name__
+                self._forget_take(self._state)
             return
         self._ready = ready
         self._set(
@@ -616,7 +638,9 @@ class RecOwner:
 
     def _finish(self) -> None:
         self._close_session()
-        self._set(stage="closed", stopping=False, take=None)
+        with self._lock:
+            self._state.stage = "closed"
+            self._forget_take(self._state)
         while True:
             try:
                 item = self._queue.get_nowait()

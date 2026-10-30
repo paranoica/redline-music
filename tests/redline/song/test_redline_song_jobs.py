@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from redline.song.jobs import Busy, JobRunner
@@ -49,7 +50,8 @@ def test_a_job_runs_in_its_own_group_at_niceness_ten_with_a_private_log(runner, 
     runner.start("s", "sep", job(code, result), result)
     info = wait_for(runner, "s", "sep", ("failed",))
     log = (tmp_path / "r.json.log").read_text()
-    assert log.split() == ["True", "10"]
+    # niceness adds to the parent's, which a run of the tests may already have raised
+    assert log.split() == ["True", str(min(os.nice(0) + 10, 19))]
     assert (tmp_path / "r.json.log").stat().st_mode & 0o777 == 0o600
     assert info["log"] == str(tmp_path / "r.json.log")
 
@@ -248,3 +250,77 @@ def test_many_threads_starting_one_slot_get_one_run_and_the_rest_busy(runner, tm
     for t in threads:
         t.join()
     assert sorted(outcomes) == ["busy"] * 7 + ["started"]
+
+
+FIFTY_SLEEPS = (
+    "import sys, time; p = sys.argv[1]\n"
+    "for _ in range(50): time.sleep(0.02)\n"
+    "open(p + '.tmp', 'w').write('{}'); import os; os.replace(p + '.tmp', p)"
+)
+
+
+def proc_state(pid):
+    text = Path(f"/proc/{pid}/stat").read_text()
+    return text[text.rindex(")") + 2]
+
+
+def stopped(pid, want=True, timeout=5.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if (proc_state(pid) == "T") is want:
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_a_running_heavy_job_is_stopped_while_the_hold_is_on_and_continues_after(tmp_path):
+    held = threading.Event()
+    runner = JobRunner(hold=held.is_set, tick=0.02, kill_after=0.3)
+    try:
+        result = tmp_path / "r.json"
+        runner.start("s", "sep", job(FIFTY_SLEEPS, result), result, heavy=True)
+        info = wait_for(runner, "s", "sep", ("running",))
+        assert info["paused"] is False
+        pid = info["pid"]
+        held.set()
+        assert stopped(pid)
+        assert runner.state("s")["sep"]["paused"] is True
+        assert runner.state("s")["sep"]["state"] == "running"
+        time.sleep(1.3)
+        assert not result.exists()
+        held.clear()
+        assert stopped(pid, want=False)
+        wait_for(runner, "s", "sep", ("done",))
+        assert result.is_file() and runner.state("s")["sep"]["paused"] is False
+    finally:
+        runner.close(timeout=5)
+
+
+def test_a_light_job_is_not_stopped_by_the_hold(tmp_path):
+    runner = JobRunner(hold=lambda: True, tick=0.02, kill_after=0.3)
+    try:
+        result = tmp_path / "r.json"
+        runner.start("s", "sep", job(FIFTY_SLEEPS, result), result, heavy=False)
+        pid = wait_for(runner, "s", "sep", ("running",))["pid"]
+        time.sleep(0.2)
+        assert proc_state(pid) != "T"
+        wait_for(runner, "s", "sep", ("done",))
+    finally:
+        runner.close(timeout=5)
+
+
+def test_cancelling_a_paused_job_lets_it_exit(tmp_path):
+    held = threading.Event()
+    runner = JobRunner(hold=held.is_set, tick=0.02, kill_after=0.5)
+    try:
+        result = tmp_path / "r.json"
+        runner.start("s", "sep", job(SLEEP, result), result, heavy=True)
+        pid = wait_for(runner, "s", "sep", ("running",))["pid"]
+        held.set()
+        assert stopped(pid)
+        runner.cancel("s", "sep")
+        info = wait_for(runner, "s", "sep", ("cancelled",), timeout=3.0)
+        assert info["paused"] is False
+        assert not Path(f"/proc/{pid}").exists()
+    finally:
+        runner.close(timeout=5)

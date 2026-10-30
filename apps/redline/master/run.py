@@ -1,10 +1,12 @@
 """Stage 3: the blind rounds on the master, the timbre and the 808, and the run itself."""
 
+import errno
 import json
 import re
 import shutil
 import statistics
 from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ from redline.engine.render import Engine, timbre_of
 from redline.engine.settings import SPECS, Settings, to_dict
 from redline.engine.track import reference_loudness, track_engine
 from redline.master.report import write_final_report
-from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs, new_run_dir
+from redline.measure.run import FileResult, Inputs, keep_out_of_git, measure_inputs
 from redline.measure.separate import Separator
 from redline.output import ORIGINAL, VocalRun, check_folders
 from redline.vocal.rounds import Heard, blind_round
@@ -247,6 +249,42 @@ def run_track(
     return write_result(inputs, engine, out_dir, track.stem, settings, classic=classic)
 
 
+def run_stamp(label: str) -> str:
+    """The time and the label a result folder is named by."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    label = re.sub(r"[^\w.-]+", "_", label).strip("._")[:40]
+    return f"{stamp}-{label}" if label else stamp
+
+
+def claim_tmp_dir(out_dir: Path, stamp: str) -> Path:
+    """Make the hidden folder a result is built in; the visible name is taken only at the end."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for attempt in range(100):
+        folder = out_dir / f".tmp-{stamp}{'' if attempt == 0 else f'-{attempt}'}"
+        try:
+            folder.mkdir()
+        except FileExistsError:
+            continue
+        return folder
+    raise RuntimeError(f"cannot create a build folder under {out_dir}")
+
+
+def publish(folder: Path, out_dir: Path, stamp: str) -> Path:
+    """Rename the built folder to a result name that does not exist yet."""
+    for attempt in range(100):
+        target = out_dir / (stamp if attempt == 0 else f"{stamp}-{attempt}")
+        if target.exists():
+            continue
+        try:
+            folder.replace(target)
+        except OSError as error:
+            if error.errno in (errno.EEXIST, errno.ENOTEMPTY):
+                continue
+            raise
+        return target
+    raise RuntimeError(f"cannot name a result folder under {out_dir}")
+
+
 def write_result(
     inputs: Inputs,
     engine: Engine,
@@ -277,8 +315,8 @@ def write_result(
     vocal, beat, final = rendered.vocal, rendered.beat, rendered.final
     chain, master = rendered.chain, rendered.master
     final_lufs = integrated_lufs(final, rate)
-    target = new_run_dir(out_dir, label)
-    folder = target.with_name(f".tmp-{target.name}")
+    stamp = run_stamp(label)
+    folder = claim_tmp_dir(out_dir, stamp)
     try:
         keep_out_of_git(folder)
         (folder / "stems").mkdir()
@@ -325,9 +363,7 @@ def write_result(
             after,
             [r.values for r in inputs.refs],
         )
-        folder.replace(target)
+        return publish(folder, out_dir, stamp)
     except BaseException:
         shutil.rmtree(folder, ignore_errors=True)
-        target.rmdir()
         raise
-    return target

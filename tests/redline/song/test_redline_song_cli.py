@@ -11,6 +11,7 @@ def root(tmp_path, monkeypatch):
     for top in model.ALLOWED:
         (base / top).mkdir(parents=True)
     monkeypatch.setattr(model, "ROOT", base)
+    monkeypatch.chdir(base)
     return base
 
 
@@ -107,3 +108,26 @@ def test_refs_replaces_the_references_and_bumps_the_rev(root, capsys):
     assert song.references == ("input/refs/a.wav", "input/refs/b.mp3") and song.rev == 2
     assert main(["song", "refs", "demo", "--ref", "../outside.wav"]) != 0
     assert model.load("demo").references == ("input/refs/a.wav", "input/refs/b.mp3")
+
+
+def test_relative_paths_are_taken_from_the_working_folder_not_the_repository_root(
+    root, monkeypatch
+):
+    (root / "input" / "sub").mkdir()
+    monkeypatch.chdir(root / "input" / "sub")
+    args = ["song", "new", "t", "--beat", "b.wav", "--suno", "../s.wav", "--ref", "r.wav"]
+    assert main(args) == 0
+    data = model.load("t").to_json()
+    assert data["beat"] == {"file": "input/sub/b.wav"}
+    assert data["voice"] == {"suno": "input/s.wav"}
+    assert data["references"] == ["input/sub/r.wav"]
+    assert main(["song", "refs", "t", "--ref", "x.wav", "../y.wav"]) == 0
+    assert model.load("t").references == ("input/sub/x.wav", "input/y.wav")
+
+
+def test_a_relative_path_out_of_the_repository_is_refused_from_a_subfolder(
+    root, monkeypatch, capsys
+):
+    monkeypatch.chdir(root / "input")
+    assert main(["song", "new", "t", "--beat", "../../b.wav"]) == 2
+    assert model.list_songs() == []

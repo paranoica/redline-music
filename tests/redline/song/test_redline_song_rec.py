@@ -528,3 +528,43 @@ def test_close_leaves_the_owner_idle_and_open_works_again(ready, fix):
     ready.open(fix.request())
     assert until(lambda: ready.snapshot().stage == "ready")
     assert Path(fix.tmp / "takes" / "take-01.wav").exists()
+
+
+def test_a_closed_session_is_not_taking_and_holds_no_jobs(ready, fix):
+    ready.toggle()
+    assert until(lambda: ready.taking())
+    ready.close()
+    assert not ready.taking() and not ready.snapshot().recording
+
+
+def test_an_engine_that_dies_mid_take_stops_taking_and_can_be_reopened(ready, fix):
+    ready.toggle()
+    assert until(lambda: ready.snapshot().recording)
+    engine = fix.engine
+
+    def dead():
+        raise EngineError("the engine exited")
+
+    engine.meters = dead
+    engine.exited = lambda: True
+    assert until(lambda: ready.snapshot().stage == "failed")
+    snap = ready.snapshot()
+    assert not ready.taking() and not snap.recording and snap.take is None
+    ready.open(fix.request())
+    assert until(lambda: ready.snapshot().stage == "ready")
+    assert not ready.taking()
+
+
+def test_a_failed_launch_after_a_take_is_not_taking(ready, fix):
+    ready.toggle()
+    ready.close()
+    fix.fail = "no engine"
+    ready.open(fix.request())
+    assert until(lambda: ready.snapshot().stage == "failed")
+    assert not ready.taking()
+
+
+def test_close_with_a_reason_keeps_it_in_the_snapshot(ready, fix):
+    ready.close(reason="the beat changed")
+    snap = ready.snapshot()
+    assert snap.stage == "closed" and snap.error == "the beat changed"
