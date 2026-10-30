@@ -643,3 +643,22 @@ test("a pre-roll is not metered: no level, loudness or gain reduction comes from
   }
   assert.ok(mastered.later.master.gr > 5, JSON.stringify(mastered.later));
 });
+
+for (const [what, from, to, want] of [
+  ["changed", [[0, 0]], [{ slot: 0, param: "db", points: [[0, -40]] }], AT_LANE],
+  ["taken away", [[0, -40]], [], 0.5],
+]) {
+  test(`a lane ${what} while paused rules from the first frame of the next play, without a glide`, () => {
+    const { engine } = setup({ vocal: dc(RATE, 0.5) });
+    engine.handle({ type: "rack", track: "vocal", version: 2, json: gainRack, lanes: [{ slot: 0, param: "db", points: from }] });
+    engine.handle({ type: "play", playing: true });
+    run(engine, 4096);
+    engine.handle({ type: "play", playing: false });
+    run(engine, 2048);
+    engine.handle({ type: "lanes", version: 2, lanes: to });
+    engine.handle({ type: "play", playing: true });
+    const out = run(engine, 4096);
+    // past the fade in from silence
+    for (const i of [400, 4000]) assert.ok(Math.abs(left(out, i) - want) < want * 0.02, `${left(out, i)} at ${i}`);
+  });
+}

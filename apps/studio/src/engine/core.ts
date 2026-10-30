@@ -194,7 +194,10 @@ export class Engine {
         return this.#set(m.track, m.version, m.slot, m.param, m.value);
       case "lanes": {
         const inst = this.#racks.vocal.version(m.version);
-        if (inst) this.#setLanes(inst, m.lanes);
+        if (!inst) return;
+        this.#setLanes(inst, m.lanes);
+        // the next play starts at the new values rather than gliding to them
+        if (!this.#running) inst.heard = false;
         return;
       }
       case "play":
@@ -422,11 +425,12 @@ export class Engine {
     inst.heard = false;
   }
 
-  // a play from a stop: a rack made or given lanes since it last played
+  // a play from a stop: a rack made, or with its lanes changed, since it last played; the reset
+  // that lands its params also drops the tail it held
   #snapUnheard(): void {
     for (const rack of Object.values(this.#racks)) {
       const inst = rack.current;
-      if (inst && !inst.heard && inst.lanes.length) this.#snap(rack, inst, this.#read);
+      if (inst && !inst.heard) this.#snap(rack, inst, this.#read);
     }
   }
 
