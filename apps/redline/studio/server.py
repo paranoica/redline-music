@@ -177,20 +177,28 @@ class Studio:
             return engine.beat
         return engine.vocal + engine.beat
 
-    def analysis(self, settings: Settings) -> dict[str, Any]:
+    def analysis(self, settings: Settings, newest_only: bool = True) -> dict[str, Any]:
         """What `live.analysis` measures for these settings.
+
+        Args:
+            settings: The settings to measure.
+            newest_only: Give way to an analysis asked for later, as the page's edits do.
+                The session's analysis does not: no later one replaces it, so it neither
+                cancels nor is cancelled.
 
         Raises:
             BadRequest: The engine cannot measure these settings, or a newer analysis was
                 asked for meanwhile (409).
         """
-        # the page drops a reply it no longer waits for, so only the newest is worth the work
-        with self._seq_lock:
-            self._analysis_asked += 1
-            mine = self._analysis_asked
+        mine = 0
+        if newest_only:
+            # the page drops a reply it no longer waits for, so only the newest is worth the work
+            with self._seq_lock:
+                self._analysis_asked += 1
+                mine = self._analysis_asked
 
         def newer() -> bool:
-            return mine != self._analysis_asked
+            return newest_only and mine != self._analysis_asked
 
         with self._analysis_lock:
             try:
@@ -321,7 +329,7 @@ class Handler(LocalHandler):
     def _session(self) -> dict[str, Any]:
         studio = self.server.studio
         settings = studio.current()
-        numbers = studio.analysis(settings)
+        numbers = studio.analysis(settings, newest_only=False)
         frames = len(studio.engine.vocal)
         return {
             "track": {

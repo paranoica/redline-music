@@ -2,6 +2,7 @@
 // levels to the meters and the waveform, and the A/B at equal loudness.
 
 import { Superseded, api, type SessionReply } from "./api.ts";
+import { analysisFailure, retryDelay } from "./core/analysis.ts";
 import { catalogueOf } from "./core/diff.ts";
 import { clock, formatNumber } from "./core/format.ts";
 import { History } from "./core/history.ts";
@@ -93,6 +94,7 @@ class Studio {
   #presetList: Record<string, Settings>;
   #analysing: AbortController | null = null;
   #analysisTimer = 0;
+  #analysisRetries = 0;
   #loop: Loop;
   #loopOn = true;
   #playing = false;
@@ -263,6 +265,7 @@ class Studio {
   #scheduleAnalysis(): void {
     const analysed = this.#numbers.settings;
     if (analysed && !needsAnalysis(changedKeys(analysed, this.#settings), this.#stale)) return;
+    this.#analysisRetries = 0;
     clearTimeout(this.#analysisTimer);
     this.#analysisTimer = window.setTimeout(() => void this.#analyse(), ANALYSIS_WAIT_MS);
   }
@@ -286,10 +289,17 @@ class Studio {
       } else {
         this.#pushRacks();
       }
+      this.#analysisRetries = 0;
       ui.analysis.dataset.state = "done";
       ui.analysis.textContent = "анализ свежий";
     } catch (error) {
-      if (control.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      const outcome = analysisFailure(error, control.signal.aborted);
+      if (outcome === "quiet") return;
+      if (outcome === "again") {
+        clearTimeout(this.#analysisTimer);
+        this.#analysisTimer = window.setTimeout(() => void this.#analyse(), retryDelay(this.#analysisRetries++));
+        return;
+      }
       ui.analysis.dataset.state = "error";
       ui.analysis.textContent = "анализ не прошёл";
       status(`Анализ не прошёл: ${message(error)}. Звук идёт с прошлыми числами.`, "error");

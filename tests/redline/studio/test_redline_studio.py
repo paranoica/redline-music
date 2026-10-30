@@ -2,6 +2,7 @@ import http.client
 import io
 import json
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -381,6 +382,50 @@ def test_an_analysis_asked_for_after_another_drops_the_waiting_and_cancels_the_r
     assert outcomes[12.0] == 409
     assert outcomes[14.0] == {"cancelled": False}
     assert ran == [10.0, 14.0]
+
+
+@pytest.mark.parametrize("session_first", [False, True])
+def test_the_session_and_an_analysis_do_not_cancel_each_other(
+    server, studio, monkeypatch, session_first
+):
+    from redline.studio import server as studio_server
+
+    real = studio_server.live.analysis
+    entered, release = threading.Event(), threading.Event()
+    seen = []
+
+    def held(engine, settings, cancelled=lambda: False):
+        if not seen:
+            entered.set()
+            release.wait(10)
+        seen.append(settings.drive_db)
+        return real(engine, settings, cancelled)
+
+    monkeypatch.setattr(studio_server.live, "analysis", held)
+    outcomes = {}
+
+    def session():
+        outcomes["session"] = call(server, "GET", "/api/session")[0]
+
+    def analysis():
+        try:
+            studio.analysis(from_dict({"drive_db": 10.0}))
+            outcomes["analysis"] = 200
+        except studio_server.BadRequest as error:
+            outcomes["analysis"] = error.status
+
+    first, second = (session, analysis) if session_first else (analysis, session)
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    threads[0].start()
+    assert entered.wait(30)
+    threads[1].start()
+    # the second is in: it waits for the lock the first one holds
+    time.sleep(0.5)
+    release.set()
+    for thread in threads:
+        thread.join(120)
+    assert outcomes == {"session": 200, "analysis": 200}
+    assert len(seen) == 2
 
 
 def test_a_silent_vocal_is_named_before_the_studio_opens():
