@@ -18,7 +18,7 @@ interface Card {
   params: Map<string, { set: (v: number | string) => void }>;
 }
 
-function isInteger(p: ParamSpec): boolean {
+export function isInteger(p: ParamSpec): boolean {
   return INTEGER_UNITS.has(p.unit) || INTEGER_NAMES.has(p.name) || /^s\d+$/.test(p.name);
 }
 
@@ -146,7 +146,7 @@ export class RackEditor {
       ),
       spec?.offline_only ? h("p", { class: "fx__note" }, "Вживую — с большой задержкой; точно звучит в точном рендере") : null,
       spec ? null : h("p", { class: "fx__note" }, "Этого эффекта нет в движке страницы"),
-      automated.size ? h("p", { class: "fx__note" }, `Автоматизация: ${[...automated].map(paramLabel).join(", ")}`) : null,
+      automated.size ? h("p", { class: "fx__note" }, `Автоматизация: ${[...automated].map(paramLabel).join(", ")} — точки на линиях под волной`) : null,
       body,
     );
     this.#dragAndKeys(root, grip, index);

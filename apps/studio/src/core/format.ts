@@ -59,6 +59,12 @@ export function formatValue(value: number, unit: string, step?: number): string 
   return GLUED.has(shown) ? `${number}${shown}` : `${number}${NB}${shown}`;
 }
 
+// no level yet reads as a dash; silence heard while playing is a real −∞
+export function peakReadout(db: number, playing: boolean): string {
+  if (Number.isFinite(db)) return formatNumber(db, 1);
+  return playing ? `${MINUS}∞` : "—";
+}
+
 export function clock(seconds: number): string {
   const tenths = Math.max(0, Math.round(seconds * 10));
   const m = Math.floor(tenths / 600);

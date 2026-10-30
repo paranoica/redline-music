@@ -2,6 +2,7 @@
 // took gain off, painted in as the track plays.
 
 import { clock } from "../core/format.ts";
+import { secondsToX, xToSeconds } from "../core/lanes.ts";
 import { dragLoop, hitLoop, type Loop, type LoopGrip } from "../core/loop.ts";
 import { peaks } from "../core/peaks.ts";
 
@@ -84,7 +85,7 @@ export class Waveform {
 
   #toSeconds(clientX: number): number {
     const rect = this.#canvas.getBoundingClientRect();
-    return Math.min(this.#duration, Math.max(0, ((clientX - rect.left) / rect.width) * this.#duration));
+    return xToSeconds(clientX - rect.left, this.#duration, rect.width);
   }
 
   #wire(): void {
@@ -179,7 +180,7 @@ export class Waveform {
     const lane = Math.round(hgt * 0.16);
     const mid = lane + (hgt - lane) / 2;
     const amp = (hgt - lane) / 2 - 2 * dpr;
-    const x = (s: number) => (s / this.#duration) * w;
+    const x = (s: number) => secondsToX(s, this.#duration, w);
     if (this.#loopOn && this.#loop.end > this.#loop.start) {
       g.fillStyle = colors.loop;
       g.fillRect(x(this.#loop.start), 0, x(this.#loop.end) - x(this.#loop.start), hgt);

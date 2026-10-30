@@ -15,6 +15,7 @@ import type { EngineClient } from "./engine/client.ts";
 import { startHost } from "./engine/host.ts";
 import type { Levels, Source } from "./engine/protocol.ts";
 import { ChainPanels } from "./ui/chain.ts";
+import { LanesView } from "./ui/lanes.ts";
 import { Dropdown, Segmented } from "./ui/controls.ts";
 import { byId, h } from "./ui/dom.ts";
 import { Meters } from "./ui/meters.ts";
@@ -41,6 +42,7 @@ const ui = {
   track: byId<HTMLElement>("track-name"),
   wave: byId<HTMLElement>("wave"),
   canvas: byId<HTMLCanvasElement>("wave-canvas"),
+  lanes: byId<HTMLElement>("lanes"),
   tools: byId<HTMLElement>("tools"),
   desk: byId<HTMLElement>("desk"),
   stripSlot: byId<HTMLElement>("strip-slot"),
@@ -78,6 +80,8 @@ class Studio {
   readonly #meters = new Meters();
   readonly #chain: ChainPanels;
   readonly #rack: RackEditor;
+  readonly #lanes: LanesView;
+  readonly #refs: Dropdown<number>;
   readonly #ab: Segmented<Source>;
   readonly #presets: Dropdown<string>;
   readonly #undo: HTMLButtonElement;
@@ -96,6 +100,7 @@ class Studio {
   #side: Source = "result";
   readonly #lufs: Record<Source, number | null> = { result: null, original: null, reference: null, render: null };
   #reference: { index: number; name: string; data: Float32Array } | null = null;
+  #referenceSeq = 0;
   #render: { key: string; data: Float32Array; lufs: number | null; seconds: number } | null = null;
   #renderSeq = 0;
   #rendering: AbortController | null = null;
@@ -131,6 +136,10 @@ class Studio {
       input: (rack) => this.#change({ ...this.#settings, rack }, false),
       commit: (rack) => this.#change({ ...this.#settings, rack }, true),
     });
+    this.#lanes = new LanesView(ui.lanes, session.schema.effects, original.frames / this.#rate, {
+      input: (rack) => this.#change({ ...this.#settings, rack }, false),
+      commit: (rack) => this.#change({ ...this.#settings, rack }, true),
+    });
     const panels = this.#chain.panels;
     const grid = h("div", { class: "panels" }, ...panels.slice(0, 4), this.#rack.root, ...panels.slice(4));
     ui.desk.append(this.#chain.flow, grid);
@@ -151,15 +160,16 @@ class Studio {
     );
     ui.ab.prepend(this.#ab.root);
     this.#abAvailability();
-    const refs = new Dropdown<number>(
+    const first = session.references[0];
+    this.#refs = new Dropdown<number>(
       "Какой референс",
       session.references.map((r) => ({ value: r.index, label: r.name })),
-      null,
+      first?.index ?? null,
       (i) => void this.#loadReference(i),
-      session.references.length ? "референс…" : "нет референсов",
+      first ? "референс…" : "нет референсов",
     );
-    refs.setDisabled(!session.references.length);
-    ui.refPick.append(refs.root);
+    this.#refs.setDisabled(!first);
+    ui.refPick.append(this.#refs.root);
 
     const view = new Segmented<"quick" | "full">(
       "Какие настройки показывать",
@@ -207,6 +217,8 @@ class Studio {
     this.#measureOriginal();
     this.#listen("result");
     if (s.racks) status("Готово. Пробел — играть. Крути — звук меняется сразу.", "done");
+    const first = s.references[0];
+    if (first) void this.#loadReference(first.index, true);
   }
 
   // --- settings ---
@@ -230,6 +242,7 @@ class Studio {
   #refresh(): void {
     this.#chain.show(this.#settings);
     this.#rack.show((this.#settings.rack ?? []) as UserEffect[]);
+    this.#lanes.show((this.#settings.rack ?? []) as UserEffect[]);
     this.#undo.disabled = !this.#history.canUndo;
     this.#redo.disabled = !this.#history.canRedo;
     this.#showSave();
@@ -370,6 +383,7 @@ class Studio {
   #setLoop(loop: Loop, done: boolean): void {
     this.#loop = loop;
     this.#wave.setLoop(loop, this.#loopOn);
+    this.#lanes.setLoop(loop, this.#loopOn);
     if (!done) return;
     const frame = this.#frame;
     // the engine jumps into a loop that the position is outside of; the clock follows it
@@ -426,6 +440,7 @@ class Studio {
   #showPosition(seconds: number): void {
     ui.time.textContent = clock(seconds);
     this.#wave.setPosition(seconds);
+    this.#lanes.setPosition(seconds);
   }
 
   // --- A/B at equal loudness ---
@@ -462,14 +477,18 @@ class Studio {
     ui.abGain.textContent = Math.abs(offset) < 0.05 ? "уровень как есть" : `тише на ${formatNumber(-offset, 1)} дБ для честного сравнения`;
   }
 
-  async #loadReference(index: number): Promise<void> {
+  // the first reference loads quietly at the start, so the status keeps its "ready"
+  async #loadReference(index: number, quiet = false): Promise<void> {
     const chosen = this.#session.references.find((r) => r.index === index);
     if (!chosen) return;
-    status(`Загружаю референс «${chosen.name}»…`, "busy");
+    const seq = ++this.#referenceSeq;
+    this.#refs.set(index);
+    if (!quiet) status(`Загружаю референс «${chosen.name}»…`, "busy");
     try {
       const audio = await api.reference(index);
       // a reference may have another rate: the context resamples it to the track's
       const buffer = await this.#ctx.decodeAudioData(audio.bytes);
+      if (seq !== this.#referenceSeq) return;
       const l = buffer.getChannelData(0);
       const r = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : l;
       const data = new Float32Array(2 * buffer.length);
@@ -480,8 +499,9 @@ class Studio {
       this.#reference = { index, name: chosen.name, data };
       this.#placeReference();
       this.#abAvailability();
-      status(`Референс «${chosen.name}»: R или кнопка «Референс». Играет его самый громкий кусок длиной с петлю, на той же громкости.`, "done");
+      if (!quiet) status(`Референс «${chosen.name}»: R или кнопка «Референс». Играет его самый громкий кусок длиной с петлю, на той же громкости.`, "done");
     } catch (error) {
+      if (seq !== this.#referenceSeq) return;
       status(`Референс не загрузился: ${message(error)}`, "error");
     }
   }

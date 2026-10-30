@@ -536,6 +536,69 @@ body[data-state="failed"] .layout {
   background: var(--signal);
 }
 
+/* ---------- automation lanes ---------- */
+
+/* the waveform's side margins and border, so a second sits at the same x in both */
+.lanes {
+  margin: 0 var(--s5);
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: var(--well);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.lanes[hidden] {
+  display: none;
+}
+
+.lane {
+  position: relative;
+}
+
+.lane + .lane {
+  border-top: 1px solid var(--line);
+}
+
+.lane__canvas {
+  display: block;
+  width: 100%;
+  height: 44px;
+  touch-action: none;
+}
+
+.lane__canvas[data-cursor="add"] {
+  cursor: crosshair;
+}
+
+.lane__canvas[data-cursor="grab"] {
+  cursor: grab;
+}
+
+.lane__canvas:focus-visible {
+  outline-offset: -2px;
+}
+
+.lane__label {
+  position: absolute;
+  top: 2px;
+  left: var(--s2);
+  display: flex;
+  gap: var(--s3);
+  padding: 0 var(--s1);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: rgb(8 9 11 / 0.8);
+  pointer-events: none;
+}
+
+.lane__value {
+  color: var(--text);
+}
+
+.lane[data-on="false"] .lane__canvas {
+  opacity: 0.45;
+}
+
 /* ---------- tools ---------- */
 
 .tools {
@@ -832,9 +895,11 @@ body[data-state="failed"] .layout {
 
 /* ---------- panels ---------- */
 
+/* a wrapping row rather than a grid: the panels of a line grow to fill it, so no line
+   ends in an empty cell whatever panels the view hides */
 .panels {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 1px;
   background: var(--line);
   border: 1px solid var(--line);
@@ -842,6 +907,7 @@ body[data-state="failed"] .layout {
 }
 
 .panel {
+  flex: 1 1 330px;
   background: var(--surface);
   padding: var(--s4) var(--s4) var(--s5);
   scroll-margin-top: 120px;
@@ -911,9 +977,23 @@ body[data-view="quick"] .is-detail {
   max-width: 60ch;
 }
 
+/* a panel alone on a wide line sets its rows in columns instead of one long strip */
 .panel__rows {
-  display: grid;
-  gap: var(--s1);
+  columns: 300px;
+  column-gap: var(--s6);
+  column-rule: 1px solid var(--line);
+}
+
+.panel__rows > * {
+  break-inside: avoid;
+}
+
+:where(.panel__rows > * + *) {
+  margin-top: var(--s1);
+}
+
+.panel__sub {
+  break-after: avoid;
 }
 
 /* ---------- rows ---------- */
@@ -1131,7 +1211,7 @@ body[data-view="quick"] .is-detail {
 /* ---------- rack ---------- */
 
 .rack {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
 }
 
 .rack .panel__head {

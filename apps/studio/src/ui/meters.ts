@@ -1,7 +1,7 @@
 // The meter strip: vocal, beat and master levels, the master's gain reduction hanging
 // in red from the top, and the result's loudness.
 
-import { formatNumber } from "../core/format.ts";
+import { formatNumber, peakReadout } from "../core/format.ts";
 import type { Level, Levels } from "../engine/protocol.ts";
 import { h } from "./dom.ts";
 
@@ -28,7 +28,7 @@ class Meter {
   constructor(label: string, extra?: HTMLElement) {
     this.#rms = h("span", { class: "meter__rms" });
     this.#peak = h("span", { class: "meter__peak" });
-    this.#readout = h("span", { class: "meter__db num" }, "−∞");
+    this.#readout = h("span", { class: "meter__db num" }, "—");
     this.root = h(
       "div",
       { class: "meter", role: "img", "aria-label": `${label}: уровень` },
@@ -38,7 +38,7 @@ class Meter {
     );
   }
 
-  show(level: Level, now: number): void {
+  show(level: Level, now: number, playing: boolean): void {
     const peak = toDb(level.peak);
     const rms = toDb(level.rms);
     if (peak >= this.#hold || now - this.#holdAt > HOLD_MS) {
@@ -48,8 +48,10 @@ class Meter {
     this.#rms.style.setProperty("--level", String(share(rms)));
     this.#peak.style.setProperty("--level", String(share(this.#hold)));
     this.root.dataset.over = String(this.#hold > -0.1);
-    this.#readout.textContent = Number.isFinite(this.#hold) ? formatNumber(this.#hold, 1) : "−∞";
-    this.root.setAttribute("aria-label", `${this.root.querySelector(".meter__label")?.textContent ?? ""}: пик ${this.#readout.textContent} дБ`);
+    this.#readout.textContent = peakReadout(this.#hold, playing);
+    const label = this.root.querySelector(".meter__label")?.textContent ?? "";
+    const idle = !playing && !Number.isFinite(this.#hold);
+    this.root.setAttribute("aria-label", idle ? `${label}: не играет` : `${label}: пик ${this.#readout.textContent} дБ`);
   }
 }
 
@@ -82,9 +84,9 @@ export class Meters {
 
   show(levels: Levels): void {
     const now = performance.now();
-    this.#vocal.show(levels.vocal, now);
-    this.#beat.show(levels.beat, now);
-    this.#master.show(levels.master, now);
+    this.#vocal.show(levels.vocal, now, levels.playing);
+    this.#beat.show(levels.beat, now, levels.playing);
+    this.#master.show(levels.master, now, levels.playing);
     const gr = levels.master.gr;
     this.#gr.style.setProperty("--gr", String(gr === null ? 0 : Math.min(1, gr / GR_RANGE_DB)));
     this.#grText.textContent = gr === null ? "мастер выключен" : `${formatNumber(gr, 1)} дБ`;
