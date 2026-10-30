@@ -54,6 +54,9 @@ REATTACK_FAST = 1.3
 REATTACK_RISE_S = 0.02
 # how near a sixteenth (as a share of one) a shallow strike must start
 ON_GRID_SHARE = 0.15
+ON_GRID_RISE_S = 0.05
+BEFORE_DIP_S = 0.04
+REATTACK_OVER = 1.1
 DIP_S = 0.03
 
 
@@ -305,8 +308,13 @@ def _reattacks(env: Floats, start: int, top: int, grid: Grid | None = None) -> b
         return True
     if grid is not None:
         # a mono 808 struck again cuts the last note with no gap: the rise is shallow and blurred
-        # by the envelope, but it lands on the grid, which a ripple on a held note does not
-        return rise >= REATTACK_FAST and _on_grid(start / ANALYSIS_RATE, grid)
+        # by the envelope, but it lands on the grid, which a ripple on a held note does not; a
+        # held note ducked by the kick on the grid comes back slower than a strike
+        quick = (top - dip_at) * ENV_HOP / ANALYSIS_RATE <= ON_GRID_RISE_S
+        # a strike rises above where the note was before the dip; a duck only comes back to it
+        before = float(env[max(0, at - int(BEFORE_DIP_S * ANALYSIS_RATE / ENV_HOP))])
+        above = float(env[top]) >= REATTACK_OVER * before
+        return quick and above and rise >= REATTACK_FAST and _on_grid(start / ANALYSIS_RATE, grid)
     return fast and rise >= REATTACK_FAST
 
 

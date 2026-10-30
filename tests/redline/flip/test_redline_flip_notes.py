@@ -199,3 +199,15 @@ def test_a_root_808_struck_on_every_eighth_is_sixteen_notes(tau):
         out[k * span : (k + 1) * span] = hit
     notes, _ = find_notes(out, RATE, grid_for(8.0))
     assert [n.midi for n in notes] == [29] * 16
+
+
+def test_a_held_808_ducked_on_the_grid_and_coming_back_slowly_stays_one_note():
+    held = phrase([(0, 32, 30)], seconds=8.0, tau=4.0)
+    level = np.ones(held.size, dtype=np.float32)
+    recover = int(0.08 * RATE)
+    # sidechained to a kick on every beat: down to 40 % at once, back over 80 ms
+    for beat in range(1, 8):
+        at = int(beat * 4 * STEP_S * RATE)
+        level[at : at + recover] = np.linspace(0.4, 1.0, recover)
+    notes, _ = find_notes(held * level, RATE, grid_for(8.0))
+    assert [n.midi for n in notes] == [30]

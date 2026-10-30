@@ -35,7 +35,6 @@ MIN_ONSETS = 8
 # an onset farther than this from its sixteenth is off the grid and does not steer the fit
 FIT_TOLERANCE_S = 0.02
 DOWNBEAT_SHARE = 0.8
-ZERO_SNAP_S = 0.005
 END_MARGIN_S = 0.01
 
 
@@ -200,8 +199,12 @@ def _downbeat(times: Floats, weights: Floats, index: Floats, offset: float, slop
 
 
 def _inside_file(downbeat: float, step_s: float) -> float:
-    """The first downbeat inside the file; a bar line just before its start moves on a bar."""
-    if downbeat < -ZERO_SNAP_S:
+    """The first downbeat inside the file; a bar line well before its start moves on a bar.
+
+    Within the fit's own tolerance below 0 the file starts on the bar line, and loose timing
+    put the fitted line a little early.
+    """
+    if downbeat < -FIT_TOLERANCE_S:
         return downbeat + step_s * STEPS_PER_BAR
     return max(0.0, downbeat)
 

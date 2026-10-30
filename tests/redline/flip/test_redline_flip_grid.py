@@ -130,3 +130,22 @@ def test_a_file_that_starts_just_after_a_bar_line_keeps_its_phase():
     grid = find_grid(drums, drums, RATE, bpm=140.0)
     bar_s = 60.0 / 140.0 * 4
     assert grid.downbeat_s == pytest.approx(bar_s - late, abs=0.005)
+
+
+def test_a_file_that_starts_on_a_bar_line_keeps_its_first_bar_through_loose_timing():
+    rng = np.random.default_rng(1)
+    body = kick()
+    moved = 0
+    for bpm in (90.0, 140.0, 160.0):
+        step = 60.0 / bpm / 4
+        for _ in range(30):
+            out = np.zeros(int(16 * 16 * step * RATE) + RATE, np.float32)
+            for bar in range(16):
+                for pos, gain in {0: 1.0, 4: 0.6, 8: 0.8, 10: 0.7, 12: 0.6}.items():
+                    # the first kick is exactly at the start; the rest are played by hand
+                    jitter = rng.normal(0, 0.006) if bar * 16 + pos else 0.0
+                    at = max(0, int(((bar * 16 + pos) * step + jitter) * RATE))
+                    n = min(body.size, out.size - at)
+                    out[at : at + n] += gain * body[:n]
+            moved += find_grid(out, out, RATE, bpm=bpm).downbeat_s > 0.05
+    assert moved == 0
