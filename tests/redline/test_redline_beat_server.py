@@ -461,7 +461,10 @@ def test_save_never_overwrites_a_score_written_meanwhile(place, monkeypatch):
 def test_a_mark_is_appended_and_shows_in_the_session(server, place):
     root, _, _ = place
     status, _, body = call(
-        server, "POST", "/api/beat/mark", {"bar": 2, "verdict": "bad", "note": "too busy"}
+        server,
+        "POST",
+        "/api/beat/mark",
+        {"bar": 2, "verdict": "bad", "note": "too busy", "base": "score-1.json"},
     )
     assert status == 200
     mark = json.loads(body)
@@ -475,7 +478,7 @@ def test_a_mark_is_appended_and_shows_in_the_session(server, place):
     assert mark["excerpt"].startswith("bar 2 of 2")
     lines = (root / "marks.jsonl").read_text(encoding="utf-8").splitlines()
     assert [json.loads(line) for line in lines] == [mark]
-    call(server, "POST", "/api/beat/mark", {"bar": 1, "verdict": "good"})
+    call(server, "POST", "/api/beat/mark", {"bar": 1, "verdict": "good", "base": "score-1.json"})
     session = json.loads(call(server, "GET", "/api/beat/session")[2])
     assert [m["bar"] for m in session["marks"]] == [2, 1]
 
@@ -490,12 +493,40 @@ def test_a_mark_is_appended_and_shows_in_the_session(server, place):
         {"bar": 1, "verdict": "bad", "note": 5},
         {"bar": 1, "verdict": "bad", "note": "x" * 2001},
         {"bar": 1, "verdict": "bad", "extra": 1},
+        {"bar": 1, "verdict": "bad", "base": None},
+        {"bar": 1, "verdict": "bad", "base": "../score-1.json"},
+        {"bar": 1, "verdict": "bad", "base": "recipe.json"},
+        {"bar": 1, "verdict": "bad", "base": 1},
     ],
 )
 def test_a_bad_mark_is_refused_and_not_written(server, place, body):
     root, _, _ = place
+    body = {"base": "score-1.json", **body}
+    if body["base"] is None:
+        del body["base"]
     assert error_of(call(server, "POST", "/api/beat/mark", body))[0] == 400
     assert not (root / "marks.jsonl").exists()
+
+
+def test_a_mark_on_a_score_that_is_not_the_newest_is_a_conflict(server, place):
+    root, _, _ = place
+    edited = score_body(kick="x.......x.x.....")
+    saved = call(server, "POST", "/api/beat/save", {"score": edited, "base": "score-1.json"})
+    assert saved[0] == 200
+    stale = {"bar": 1, "verdict": "bad", "base": "score-1.json"}
+    status, message = error_of(call(server, "POST", "/api/beat/mark", stale))
+    assert status == 409 and "score-2.json" in message
+    assert not (root / "marks.jsonl").exists()
+    # a base that was never saved is no newer score either
+    missing = {"bar": 1, "verdict": "bad", "base": "score-9.json"}
+    assert error_of(call(server, "POST", "/api/beat/mark", missing))[0] == 409
+    status, _, body = call(
+        server, "POST", "/api/beat/mark", {"bar": 1, "verdict": "good", "base": "score-2.json"}
+    )
+    assert status == 200
+    mark = json.loads(body)
+    assert mark["score"] == "score-2.json"
+    assert mark["excerpt"].splitlines()[1].startswith("kick: x.......x.x.....")
 
 
 # render

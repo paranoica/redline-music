@@ -6,6 +6,7 @@ The render goes to `work/beats/<seed>/`: `beat.wav`, `stems/<sound>.wav` and `re
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ import redline_dsp
 import soundfile as sf
 
 from redline.beat import library
+from redline.core.private import write_private
 from redline.measure.beat import measure_beat, write_beat_report
 from redline.measure.separate import Separator
 
@@ -175,10 +177,12 @@ class _Writers:
     """The mix file and one file per stem, written as frames come."""
 
     def __init__(self, folder: Path, sounds: list[str], rate: int) -> None:
-        (folder / "stems").mkdir(parents=True)
+        folder.mkdir(mode=0o700)
+        (folder / "stems").mkdir(mode=0o700)
 
         def open_(path: Path) -> sf.SoundFile:
-            return sf.SoundFile(path, "w", samplerate=rate, channels=2, subtype="FLOAT")
+            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+            return sf.SoundFile(fd, "w", samplerate=rate, channels=2, subtype="FLOAT", format="WAV")
 
         self.mix = open_(folder / "beat.wav")
         self.stems = [open_(folder / "stems" / f"{name}.wav") for name in sounds]
@@ -197,19 +201,22 @@ class _Writers:
 
 
 def _stream(player: Any, writers: _Writers, rate: int, block: int) -> None:
-    """Play the song and its tail: on until the mix stays quiet for QUIET_S past the song.
+    """Play the song and its tail, as the binding's whole render does.
 
-    Quiet frames past the song are held back and dropped at the end, so the files end on the
-    last loud frame (never before the song's end), as the binding's whole render does.
+    Runs past `player.end` (the song or the last voice's end, whichever is later) until the mix
+    stays under QUIET for QUIET_S, or TAIL_S past `end` at the latest. Quiet frames past the
+    song are held back and dropped at the end, so the files end on the last loud frame, never
+    before the song's end.
     """
     song = player.length
-    cap = song + round(TAIL_S * rate)
+    end = player.end
+    cap = end + round(TAIL_S * rate)
     quiet_for = round(QUIET_S * rate)
     aligned = _Aligned(len(player.sounds), player.latency, player.stem_latency)
     held: list[Block] = []
     held_frames = 0
     done = 0
-    while not (done >= song and (held_frames >= quiet_for or done >= cap)):
+    while not (done >= end and (held_frames >= quiet_for or done >= cap)):
         mix, stems = aligned.push(*player.process(block))
         if done < song:
             head = min(song - done, len(mix))
@@ -268,7 +275,7 @@ def render_seed(
     libraries = _load_samplers(player, text, body, float(rate), work / "sounds", manifest)
     sounds = list(player.sounds)
     folder = work / "beats" / str(seed)
-    folder.mkdir(parents=True, exist_ok=True)
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     partial = folder / ".partial"
     shutil.rmtree(partial, ignore_errors=True)
     try:
@@ -292,7 +299,7 @@ def render_seed(
         "libraries": libraries,
         "non_commercial": non_commercial,
     }
-    (folder / "render.json").write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
+    write_private(folder / "render.json", json.dumps(report, indent=1) + "\n")
     return Rendered(folder, writers.frames, tuple(sounds), tuple(non_commercial))
 
 

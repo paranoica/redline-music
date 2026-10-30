@@ -13,6 +13,7 @@ from typing import Any
 
 from redline.core.audio import Audio, Samples, decode, to_analysis
 from redline.core.dynamics import low_end_kurtosis
+from redline.core.private import write_private
 from redline.core.spectrum import low_end
 from redline.measure.compare import (
     FEW_REFS,
@@ -21,6 +22,7 @@ from redline.measure.compare import (
     NO_DATA,
     REFS_HIGHER,
     REFS_LOWER,
+    SPREAD_MARGIN,
     Metric,
     metric_verdict,
 )
@@ -137,6 +139,13 @@ def _outside(value: float | None, refs: list[float]) -> float | None:
     return max(min(refs) - value, value - max(refs), 0.0)
 
 
+def _tolerance(refs: list[float], floor: float) -> float | None:
+    """How far past [min, max] a value may sit and still count as inside, as metric_verdict."""
+    if len(refs) < 2:
+        return None
+    return SPREAD_MARGIN * (max(refs) - min(refs)) + floor
+
+
 def _trend(now: float | None, before: Any, floor: float) -> str | None:
     if now is None or not isinstance(before, int | float) or not math.isfinite(before):
         return None
@@ -170,6 +179,7 @@ def compare_beat(measured: BeatMeasured, previous: dict[str, Any] | None) -> lis
                 "refs": refs,
                 "refs_min": min(known, default=None),
                 "refs_max": max(known, default=None),
+                "tolerance": _tolerance(known, metric.floor),
                 "status": STATUS[verdict.status],
                 "outside": outside,
                 "trend": _trend(outside, before.get(key), metric.floor),
@@ -220,7 +230,7 @@ def write_beat_report(folder: Path, measured: BeatMeasured, label: str) -> tuple
         "metrics": rows,
         "info": measured.info,
     }
-    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    write_private(json_path, json.dumps(payload, ensure_ascii=False, indent=1))
     against = f" (против прошлого замера: {payload['previous']})" if previous else ""
     lines = [
         f"# Бит против референсов: {label}",
@@ -234,15 +244,22 @@ def write_beat_report(folder: Path, measured: BeatMeasured, label: str) -> tuple
         "",
         "Числа показывают только, ближе ли бит к референсам или дальше от них.",
         "",
-        f"| Метрика | Рендер | Референсы, мин…макс | Где | Тренд{against} |",
-        "|---|---|---|---|---|",
+        f"| Метрика | Рендер | Референсы, мин…макс | Допуск, ± | Где | Тренд{against} |",
+        "|---|---|---|---|---|---|",
     ]
     for row in rows:
         unit = f", {row['unit']}" if row["unit"] else ""
         span = f"{_number(row['refs_min'])}…{_number(row['refs_max'])}"
+        tolerance = "—" if row["tolerance"] is None else f"±{_number(row['tolerance'])}"
         lines.append(
-            f"| {row['label']}{unit} | {_number(row['render'])} | {span} | "
+            f"| {row['label']}{unit} | {_number(row['render'])} | {span} | {tolerance} | "
             f"{SHOWN[row['status']]} | {TRENDS[row['trend']]} |"
         )
-    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines += [
+        "",
+        "«Внутри» значит, что рендер выходит за мин…макс референсов не дальше допуска: "
+        "допуск — половина разброса референсов (макс - мин) плюс порог метрики, так что "
+        "значение чуть ниже минимума или выше максимума тоже считается внутри.",
+    ]
+    write_private(md_path, "\n".join(lines) + "\n")
     return md_path, json_path

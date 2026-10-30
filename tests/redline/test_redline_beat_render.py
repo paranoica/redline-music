@@ -170,6 +170,44 @@ def test_render_drops_each_racks_latency(tmp_path):
         np.testing.assert_array_equal(a[:n], b[:n])
 
 
+def test_a_long_release_rings_past_the_song_as_the_core_render_keeps_it(tmp_path):
+    root, work = tmp_path / "beats", tmp_path / "work"
+    score = {
+        "version": 1,
+        "bpm": 120,
+        "swing": 50,
+        "seed": 3,
+        "key": "A minor",
+        "sounds": {"pad": {"instrument": "saw", "params": {"release": 8.0}}},
+        "patterns": {
+            "p": {"bars": 1, "rows": {"pad": [{"step": 0, "len": 16, "note": "A3", "vel": 0.9}]}}
+        },
+        "sections": [{"name": "a", "bars": 1, "play": ["p"]}],
+    }
+    place(root, 6, score)
+    render.render_seed(6, root=root, work=work, block=1000)
+    mix = read(work / "beats/6/beat.wav")
+    # the note is released at the song's end and rings for up to 8 s more
+    assert len(mix) > song_frames(score) + TAIL_CAP
+    np.testing.assert_array_equal(mix, redline_dsp.beat_render(json.dumps(score), RATE))
+    stem = read(work / "beats/6/stems/pad.wav")
+    assert len(stem) == len(mix)
+
+
+def test_render_files_are_the_owners_only(tmp_path):
+    root, work = tmp_path / "beats", tmp_path / "work"
+    place(root, 4, body())
+    render.render_seed(4, root=root, work=work)
+    folder = work / "beats" / "4"
+    for path in (folder / "beat.wav", folder / "render.json", folder / "stems/kick.wav"):
+        assert path.stat().st_mode & 0o777 == 0o600, path
+    assert (folder / "stems").stat().st_mode & 0o777 == 0o700
+    # a second render replaces them with the same modes
+    render.render_seed(4, root=root, work=work)
+    assert (folder / "render.json").stat().st_mode & 0o777 == 0o600
+    assert (folder / "beat.wav").stat().st_mode & 0o777 == 0o600
+
+
 def test_render_report_names_the_score_and_no_library(tmp_path):
     root, work = tmp_path / "beats", tmp_path / "work"
     path = place(root, 4, body())
@@ -350,6 +388,32 @@ def test_a_white_render_against_pink_refs_is_outside_then_a_pink_one_closer(tmp_
     assert row["trend"] == "further"
 
 
+def test_the_report_shows_the_tolerance_that_decides_inside(tmp_path):
+    values = {key: None for key in beat_measure.BEAT_METRICS}
+    measured = beat_measure.BeatMeasured(
+        values={**values, "beat.crest_db": 8.0},
+        info={},
+        refs=(
+            ("a.wav", {**values, "beat.crest_db": 10.0}),
+            ("b.wav", {**values, "beat.crest_db": 13.0}),
+        ),
+        upper=20000.0,
+        separator="fake",
+    )
+    markdown, data = beat_measure.write_beat_report(tmp_path, measured, "score-1.json")
+    # half the refs' spread of 3 dB plus the crest's 1 dB threshold
+    row = next(r for r in json.loads(data.read_text())["metrics"] if r["key"] == "beat.crest_db")
+    assert row["tolerance"] == pytest.approx(2.5)
+    assert row["status"] == "inside"
+    text = markdown.read_text(encoding="utf-8")
+    line = next(x for x in text.splitlines() if x.startswith("| крест-фактор бита"))
+    assert "±2.50" in line and "внутри" in line
+    assert "Допуск" in text and "половина разброса референсов" in text
+    # no tolerance where the refs give no spread to take half of
+    tilt = next(r for r in json.loads(data.read_text())["metrics"] if r["key"] == "beat.lufs")
+    assert tilt["tolerance"] is None
+
+
 def test_measure_without_a_render_says_to_render_first(tmp_path, pink_refs):
     with pytest.raises(render.RenderError, match="redline beat render --seed 7"):
         render.measure_seed(7, pink_refs, tmp_path / "work", BeatOnly())
@@ -364,6 +428,8 @@ def test_the_cli_measure_writes_both_reports(tmp_path, pink_refs, capsys):
     assert _beat(args, BeatOnly()) == 0
     assert str(work / "beats" / "7" / "measure.md") in capsys.readouterr().out
     assert (work / "beats/7/measure.json").exists()
+    for name in ("measure.md", "measure.json"):
+        assert (work / "beats/7" / name).stat().st_mode & 0o777 == 0o600, name
 
 
 # marks

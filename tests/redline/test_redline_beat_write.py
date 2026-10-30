@@ -239,6 +239,17 @@ def test_total_bars_keep_inside_the_recipes_range(bars, bad):
     assert any(e.startswith("sections: ") for e in errors) == bad
 
 
+@pytest.mark.parametrize(("bars", "bad"), [((200.0,), True), ((8.0,), True), ((8.0, 8), False)])
+def test_whole_bar_counts_written_as_floats_are_held_to_the_range(bars, bad):
+    errors = errors_of(score(bars=bars))
+    assert any(e.startswith("sections: ") for e in errors) == bad
+
+
+def test_a_bar_count_with_a_fraction_is_not_counted():
+    errors = errors_of(score(bars=(200.5,)))
+    assert not any(e.startswith("sections: ") for e in errors)
+
+
 @pytest.mark.parametrize(("bpm", "bad"), [(140.4, False), (139.6, False), (141, True), (120, True)])
 def test_the_bpm_is_the_recipes(bpm, bad):
     errors = errors_of(score(bpm=bpm))
@@ -360,6 +371,22 @@ def test_the_prompt_lists_every_live_effect_and_no_offline_one():
     assert listed
     names = {n.strip() for n in listed.group(1).replace("\n", " ").split(",")}
     assert names == {e["effect"] for e in effects if not e["offline_only"]}
+
+
+def test_the_sampler_list_changes_only_the_sampler_choice(monkeypatch):
+    from redline.beat import recipe as recipe_module
+
+    def drawn(samplers):
+        monkeypatch.setattr(recipe_module, "_samplers", lambda: samplers)
+        return [make_recipe(seed) for seed in range(40)]
+
+    def without_library(r):
+        return replace(r, sounds=tuple(replace(s, library=None) for s in r.sounds))
+
+    none, some = drawn(()), drawn(("lib_a", "lib_b", "lib_c"))
+    assert [without_library(r) for r in none] == [without_library(r) for r in some]
+    # the choice itself is still drawn when there is something to choose
+    assert any(s.library for r in some for s in r.sounds)
 
 
 # handoff
@@ -534,3 +561,26 @@ def test_the_cli_refuses_a_bad_option_with_exit_2(tmp_path, capsys):
     argv = ["beat", "write", "--seed", "6", "--key", "H minor", "--root", str(tmp_path)]
     assert main(argv) == 2
     assert "H minor" in capsys.readouterr().err
+
+
+def test_a_saved_draft_never_replaces_a_score_written_meanwhile(tmp_path, monkeypatch):
+    answer(start(tmp_path), fitting(tmp_path))
+    folder = tmp_path / "5"
+    real = handoff._next_score
+
+    # the studio saves score-1.json between the number being picked and the write
+    def racing(where):
+        found = real(where)
+        found.write_text("{}", encoding="utf-8")
+        return found
+
+    monkeypatch.setattr(handoff, "_next_score", racing)
+    saved = start(tmp_path)
+    assert isinstance(saved, handoff.Saved)
+    assert saved.path == folder / "score-2.json"
+    assert (folder / "score-1.json").read_text(encoding="utf-8") == "{}"
+    assert json.loads(saved.path.read_text(encoding="utf-8")) == fitting(tmp_path)
+    assert saved.path.stat().st_mode & 0o777 == 0o600
+    state = json.loads((folder / "state.json").read_text(encoding="utf-8"))
+    assert state["score"] == "score-2.json"
+    assert [p.name for p in folder.iterdir() if p.name.endswith(".tmp")] == []

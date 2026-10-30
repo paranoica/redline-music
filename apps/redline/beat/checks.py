@@ -142,8 +142,9 @@ def _total_bars(body: dict[str, Any]) -> int | None:
     sections = body.get("sections")
     if not isinstance(sections, list):
         return None
-    bars = [_dict(s).get("bars") for s in sections]
-    whole = [b for b in bars if isinstance(b, int) and not isinstance(b, bool)]
+    bars = [_number(_dict(s).get("bars")) for s in sections]
+    # the core takes 64.0 as 64 bars, so a float with no fraction counts
+    whole = [int(b) for b in bars if b is not None and b.is_integer()]
     return sum(whole) if len(whole) == len(bars) else None
 
 

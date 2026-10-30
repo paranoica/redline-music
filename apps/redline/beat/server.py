@@ -10,7 +10,6 @@ page must not play what the render cannot.
 import contextlib
 import io
 import json
-import os
 import re
 import threading
 from collections.abc import Callable
@@ -26,7 +25,8 @@ import soundfile as sf
 
 from redline.beat import library
 from redline.beat.checks import Caution, check_score
-from redline.beat.marks import MarkError, add_mark, seed_marks
+from redline.beat.handoff import write_new_score
+from redline.beat.marks import MarkError, StaleMark, add_mark, seed_marks
 from redline.beat.recipe import Recipe, recipe_from_json
 from redline.beat.render import (
     RATE,
@@ -311,15 +311,32 @@ class BeatStudio:
             if errors:
                 raise Refused(errors)
             text = json.dumps(score, ensure_ascii=False, indent=1) + "\n"
-            name = _write_new(self.folder, int(found.group(1)) + 1, text)
+            name = write_new_score(self.folder, int(found.group(1)) + 1, text)
         return name, warnings
 
-    def mark(self, bar: int, verdict: str, note: str) -> dict[str, Any]:
-        """A good or bad mark on a bar of the newest score, through `redline.beat.marks`."""
-        try:
-            return add_mark(self.root, self.seed, bar, verdict, note)
-        except (MarkError, OSError) as error:
-            raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
+    def mark(self, bar: int, verdict: str, note: str, base: str) -> dict[str, Any]:
+        """A good or bad mark on a bar of the score the page shows, through `redline.beat.marks`.
+
+        Args:
+            bar: The bar, 1-based.
+            verdict: `good` or `bad`.
+            note: Why, in the owner's words.
+            base: The saved score the page shows; it must still be the newest.
+
+        Raises:
+            BadRequest: A base that is not a score name or a bad mark (400), or a base that is
+                not the newest saved score (409).
+        """
+        if not SAVED.fullmatch(base):
+            raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name, score-K.json")
+        # a save between the newest check and the read would leave the mark on an old score
+        with self._save_lock:
+            try:
+                return add_mark(self.root, self.seed, bar, verdict, note, base=base)
+            except StaleMark as error:
+                raise BadRequest(HTTPStatus.CONFLICT, str(error)) from error
+            except (MarkError, OSError) as error:
+                raise BadRequest(HTTPStatus.BAD_REQUEST, str(error)) from error
 
     def start_render(self, score_file: str) -> None:
         """Start the exact render of a saved score in a worker thread.
@@ -394,25 +411,6 @@ class BeatStudio:
                 if isinstance(s, str) and STEM.fullmatch(s)
             }
         return names
-
-
-def _write_new(folder: Path, number: int, text: str) -> str:
-    """Write text as `score-<number>.json` or the next free number; never replaces a file."""
-    tmp = folder / f".score.{os.getpid()}.{threading.get_ident()}.tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(text)
-        while True:
-            name = f"score-{number}.json"
-            try:
-                # a link, unlike a rename, fails when the name is taken
-                os.link(tmp, folder / name)
-                return name
-            except FileExistsError:
-                number += 1
-    finally:
-        tmp.unlink(missing_ok=True)
 
 
 def _score(body: dict) -> dict[str, Any]:
@@ -525,15 +523,18 @@ class Handler(LocalHandler):
         return self.error(HTTPStatus.NOT_FOUND, "no such call")
 
     def _mark(self, body: dict) -> None:
-        only(body, "bar", "verdict", "note")
+        only(body, "bar", "verdict", "note", "base")
         bar, verdict, note = body.get("bar"), body.get("verdict"), body.get("note", "")
+        base = body.get("base")
+        if not isinstance(base, str):
+            raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name")
         if not isinstance(bar, int) or isinstance(bar, bool):
             raise BadRequest(HTTPStatus.BAD_REQUEST, "bar is a whole number from 1")
         if not isinstance(verdict, str) or not isinstance(note, str):
             raise BadRequest(HTTPStatus.BAD_REQUEST, "verdict and note are text")
         if len(note) > MAX_NOTE:
             raise BadRequest(HTTPStatus.BAD_REQUEST, f"a note is at most {MAX_NOTE} characters")
-        return self.json(HTTPStatus.OK, self.server.beat.mark(bar, verdict, note))
+        return self.json(HTTPStatus.OK, self.server.beat.mark(bar, verdict, note, base))
 
 
 class BeatServer(LocalServer):

@@ -397,7 +397,9 @@ def _palette(rng: np.random.Generator, spec: Genre) -> tuple[Sound, ...]:
     count = int(rng.integers(EXTRAS[0], EXTRAS[1] + 1))
     picked = sorted(rng.choice(len(spec.extras), size=count, replace=False).tolist())
     samplers = _samplers()
-    drawn = int(rng.integers(len(samplers))) if samplers else 0
+    # always one draw from a fixed range, so the manifest's libraries never shift later draws
+    draw = int(rng.integers(1 << 30))
+    drawn = draw % len(samplers) if samplers else 0
     out = list(spec.sounds)
     for i in picked:
         sound = spec.extras[i]

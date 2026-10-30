@@ -6,7 +6,9 @@ A seed's folder holds `recipe.json`, `state.json`, `request-N.md` (the request o
 
 import hashlib
 import json
+import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,32 @@ def _write(path: Path, text: str) -> None:
     tmp.write_text(text, encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(path)
+
+
+def write_new_score(folder: Path, number: int, text: str) -> str:
+    """Write text as `score-<number>.json`, or the next free number; never replaces a file.
+
+    The file is created readable by the owner only. Both the beat writer and the studio save
+    through here, so a name taken by one between picking the number and writing is skipped.
+
+    Returns:
+        The name written.
+    """
+    tmp = folder / f".score.{os.getpid()}.{threading.get_ident()}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(text)
+        while True:
+            name = f"score-{number}.json"
+            try:
+                # a link, unlike a rename, fails when the name is taken
+                os.link(tmp, folder / name)
+                return name
+            except FileExistsError:
+                number += 1
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def prompt_text() -> str:
@@ -340,8 +368,9 @@ class Session:
             ),
         )
         if checked.ok:
-            path = _next_score(self.folder)
-            _write(path, json.dumps(json.loads(text), ensure_ascii=False, indent=1) + "\n")
+            first = int(_next_score(self.folder).stem.removeprefix("score-"))
+            body = json.dumps(json.loads(text), ensure_ascii=False, indent=1) + "\n"
+            path = self.folder / write_new_score(self.folder, first, body)
             state.update(status="saved", reasons=[], warnings=warnings, score=path.name)
             self._save_state(state)
             return Saved(path, tuple(warnings))

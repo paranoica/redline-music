@@ -173,7 +173,7 @@ export class BeatEngine {
       this.#playing = false;
       this.#stopping = 0;
       this.#loopEnd = -1;
-      return this.#build(text, 0);
+      return this.#build(text, 0, this.#handle ? this.#text : null);
     });
   }
 
@@ -189,11 +189,13 @@ export class BeatEngine {
         return message.startsWith("rebuild") ? this.#rebuild(text) : fail(lines(message));
       }
       const before = this.#score;
+      // a rebuild that fails falls back to the score playing before this update
+      const previous = this.#text;
       const score = scoreInfo(text);
       this.#text = text;
       this.#score = score;
       this.#length = dsp._beat_length(handle);
-      if (before && before.master !== score.master) return this.#rebuild(text);
+      if (before && before.master !== score.master) return this.#rebuild(text, previous);
       // the player does not read racks from a score; the changed ones go in as rack swaps
       const warnings: string[] = [];
       for (const [k, name] of score.names.entries()) {
@@ -201,7 +203,7 @@ export class BeatEngine {
         if (before?.racks.get(name) === rack) continue;
         if (withText(dsp, rack, (p, n) => dsp._beat_set_rack(handle, k, p, n)) === 0) continue;
         const message = lastError(dsp);
-        if (message.startsWith("rebuild")) return this.#rebuild(text);
+        if (message.startsWith("rebuild")) return this.#rebuild(text, previous);
         warnings.push(`mix.sounds.${name}.rack: ${message}`);
       }
       return done(warnings);
@@ -420,15 +422,14 @@ export class BeatEngine {
   }
 
   // a new player at the spot being heard, the old one freed first
-  #rebuild(text: string): BeatResult {
+  #rebuild(text: string, previous: string = this.#text): BeatResult {
     const errors = this.#check(text);
     if (errors.length) return fail(errors);
-    const result = this.#build(text, this.position);
+    const result = this.#build(text, this.position, this.#handle ? previous : null);
     return result.ok ? done(result.warnings, true) : result;
   }
 
-  #build(text: string, heard: number): BeatResult {
-    const previous = this.#handle ? this.#text : null;
+  #build(text: string, heard: number, previous: string | null): BeatResult {
     if (this.#handle) this.#dsp._beat_free(this.#handle);
     this.#handle = 0;
     const result = this.#make(text, heard);

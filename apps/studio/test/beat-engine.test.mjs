@@ -364,6 +364,33 @@ test("an update with a renamed sound rebuilds the player and goes on from the sa
   e.dispose();
 });
 
+test("a master rack the core cannot build after the check leaves the old score playing at its spot", () => {
+  // 4 throws on the kick (96000 frames) take the player; 2 more on the master pass the
+  // check but put the mix past the core's latency cap, so only the new player fails
+  const old = structuredClone(DRUMS);
+  old.mix = { sounds: { kick: { rack: Array(4).fill({ effect: "throws" }) } } };
+  const next = structuredClone(old);
+  next.mix.master = Array(2).fill({ effect: "throws" });
+  next.patterns.p.rows.kick = "x.x.x.x.x.x.x.x.";
+  const { e } = loaded(old);
+  e.play();
+  run(e, 1000 * BLOCK);
+  const heard = e.position;
+  const result = e.update(json(next));
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((l) => l.includes("racks delay the mix")), result.errors.join("\n"));
+  assert.equal(e.loaded, true);
+  assert.equal(e.playing, true);
+  assert.equal(e.position, heard);
+  // a new player's racks start empty: its first `latency` frames are silent
+  const latency = e.latency;
+  const frames = latency + 20000;
+  const got = run(e, frames);
+  assert.ok(sameBits(got, abiRender(old, frames, heard + latency)));
+  assert.ok(maxAbs(got.subarray(2 * latency)) > 0.01);
+  e.dispose();
+});
+
 test("a broken score comes back as path lines, and the engine plays on", () => {
   const broken = structuredClone(DRUMS);
   broken.patterns.p.rows.kick = "x.......";

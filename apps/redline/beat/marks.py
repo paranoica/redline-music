@@ -22,6 +22,10 @@ class MarkError(Exception):
     """A mark that cannot be made as asked."""
 
 
+class StaleMark(MarkError):
+    """A mark asked on a score that is no longer the seed's newest."""
+
+
 def _steps(row: str) -> str:
     return "".join(c for c in row if c not in "| ")
 
@@ -107,7 +111,13 @@ def _genre(folder: Path) -> str:
 
 
 def add_mark(
-    root: Path, seed: int, bar: int, verdict: str, note: str = "", now: datetime | None = None
+    root: Path,
+    seed: int,
+    bar: int,
+    verdict: str,
+    note: str = "",
+    now: datetime | None = None,
+    base: str | None = None,
 ) -> dict[str, Any]:
     """Append a mark on a bar of the seed's newest score to `<root>/marks.jsonl`.
 
@@ -118,11 +128,13 @@ def add_mark(
         verdict: `good` or `bad`.
         note: Why, in the owner's words.
         now: The mark's time (default: now, UTC).
+        base: The score file the mark is meant for; when given, it must be the newest.
 
     Returns:
         The mark as written.
 
     Raises:
+        StaleMark: `base` is not the seed's newest saved score.
         MarkError: No saved score, an unknown genre, a bar outside the song, a bad verdict.
     """
     if verdict not in VERDICTS:
@@ -132,6 +144,8 @@ def add_mark(
         path = latest_score(folder)
     except RenderError as error:
         raise MarkError(str(error)) from error
+    if base is not None and base != path.name:
+        raise StaleMark(f"{base} is not the newest saved score, {path.name}: reload before marking")
     try:
         body = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
