@@ -131,10 +131,17 @@ def _job(args: argparse.Namespace) -> int:
 
     song = model.load(args.name)
     work = model.resolve_inside("work")
-    jobs = {"separate": _job_separate, "rank": _job_rank, "auto": _job_auto, "result": _job_result}
+    jobs = {
+        "separate": _job_separate,
+        "rank": _job_rank,
+        "auto": _job_auto,
+        "result": _job_result,
+        "flip_stems": _job_flip_stems,
+        "flip_render": lambda song, work, seed: _job_flip_render(song, work, args.flip),
+    }
     try:
         result = jobs[args.kind](song, work, args.seed)
-    except (*SOUND_ERRORS, TakesError, model.SongError) as error:
+    except (*SOUND_ERRORS, TakesError, model.SongError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
     write_private(args.result, json.dumps(result, ensure_ascii=False))
@@ -225,3 +232,32 @@ def _job_result(song: model.Song, work: Path, seed: int) -> dict[str, Any]:
         measured, track_engine(measured), out, song.name, song_settings(song, work)
     )
     return {"kind": "result", "folder": model.relative_to_root(folder)}
+
+
+def _flip_lineage(song: model.Song) -> Any:
+    from redline.flip import pipeline
+
+    if "file" not in song.beat:
+        raise model.SongError("flips need a beat file: the song's beat is an own one")
+    return pipeline.lineage(song.beat["file"], model.repo_root())
+
+
+def _job_flip_stems(song: model.Song, work: Path, seed: int) -> dict[str, Any]:
+    from redline.flip import pipeline
+
+    line = _flip_lineage(song)
+    done = pipeline.analyse(
+        model.resolve_inside(line.source, where="flip source"), work, root=model.repo_root()
+    )
+    return {"kind": "flip_stems", "sha8": done["sha8"]}
+
+
+def _job_flip_render(song: model.Song, work: Path, flip: int | None) -> dict[str, Any]:
+    from redline.flip import pipeline
+
+    if flip is None:
+        raise model.SongError("flip_render needs --flip")
+    line = _flip_lineage(song)
+    folder = pipeline.flip_dir(model.repo_root(), line.sha8)
+    pipeline.render(folder, flip)
+    return {"kind": "flip_render", "n": flip, "sha8": line.sha8}

@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from redline.cli.beat import _beat
+from redline.cli.flip import _flip
 from redline.cli.lyrics import (
     _lyrics_check,
     _lyrics_edit,
@@ -69,8 +70,9 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         done = _beat(args, separator)
         if done is not None:
             return done
-    if args.command == "song":
-        done = _song(args)
+    own = {"song": _song, "flip": _flip}
+    if args.command in own:
+        done = own[args.command](args)
         if done is not None:
             return done
     if args.command == "lyrics" and args.lyrics_command in lyrics:

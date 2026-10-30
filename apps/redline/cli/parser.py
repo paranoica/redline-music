@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     _record(commands)
     _beat(commands)
     _song(commands)
+    _flip(commands)
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
     )
@@ -323,6 +324,32 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
         command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
 
 
+def _flip_number(text: str) -> int:
+    if not text.isascii() or not text.isdigit() or int(text) < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a flip number (1 or more)")
+    return int(text)
+
+
+def _flip(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """Register `redline flip` and its subcommands."""
+    flip = commands.add_parser("flip", help="type beats: stems, grid, 808 notes, flips")
+    flip_commands = flip.add_subparsers(dest="flip_command", metavar="command")
+    analyse = flip_commands.add_parser("analyse", help="separate a beat and find its grid")
+    analyse.add_argument("file", type=Path, help="the beat file")
+    analyse.add_argument("--bpm", type=float, help="use this tempo instead of the tracker's")
+    analyse.add_argument("--half", action="store_true", help="halve the tracker's tempo")
+    analyse.add_argument("--double", action="store_true", help="double the tracker's tempo")
+    render = flip_commands.add_parser("render", help="render one flip of a beat")
+    render.add_argument("file", type=Path, help="the beat file")
+    render.add_argument("--flip", type=_flip_number, required=True, help="the flip's number")
+    clean = flip_commands.add_parser("clean", help="remove old renders but the newest and used")
+    clean.add_argument("file", type=Path, help="the beat file")
+    propose = flip_commands.add_parser("propose", help="print an arrangement for a text (JSON)")
+    propose.add_argument("file", type=Path, help="the beat file")
+    propose.add_argument("--text-seed", type=int, required=True, help="a written text, by seed")
+    propose.add_argument("--version", type=int, help="the text's version (default: latest)")
+
+
 def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     """Register `redline song` and its subcommands."""
     song = commands.add_parser("song", help="songs: one folder of choices per track")
@@ -346,9 +373,12 @@ def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     studio.add_argument("--port", type=int, default=0, help="port to listen on (default: free)")
     studio.add_argument("--no-browser", action="store_true", help="only print the address")
     job = song_commands.add_parser("job", help="one long piece of work of the page (internal)")
-    job.add_argument("kind", choices=("separate", "rank", "auto", "result"))
+    job.add_argument(
+        "kind", choices=("separate", "rank", "auto", "result", "flip_stems", "flip_render")
+    )
     job.add_argument("name", help="the song's name")
     job.add_argument("--seed", type=int, default=0, help="chooses the auto mix's variants")
+    job.add_argument("--flip", type=_flip_number, help="the flip's number (flip_render)")
     job.add_argument("--result", type=Path, required=True, help="where the JSON result goes")
 
 

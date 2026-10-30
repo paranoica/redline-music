@@ -51,6 +51,7 @@ from redline.web.local import MAX_BODY, BadRequest, LocalHandler, LocalServer, o
 PAGE = "song.html"
 NOT_BUILT = "the song page is not built: run `npm --prefix apps/studio run build`"
 KINDS = ("separate", "rank", "auto", "result")
+FLIP_KINDS = ("flip_stems", "flip_render")
 MODES = ("cup", "loopback", "speakers")
 SNAPSHOT_TTL_S = 0.04
 LYRICS = "private/lyrics"
@@ -181,11 +182,15 @@ def _over_beat(take: np.ndarray, beat: Decoded, rate: int) -> np.ndarray:
     return mixed / peak * 0.99 if peak > 0.99 else mixed
 
 
-def job_argv(kind: str, name: str, seed: int, result: Path) -> list[str]:
+def job_argv(kind: str, name: str, seed: int, result: Path, flip: int | None = None) -> list[str]:
     """The command of a job: the same program, its internal `song job`."""
     argv = [sys.executable, "-m", "redline", "song", "job", "--result", str(result)]
     if kind == "auto":
         argv += ["--seed", str(seed)]
+    if flip is not None:
+        if isinstance(flip, bool) or not isinstance(flip, int) or flip < 1:
+            raise ValueError(f"flip is a whole number from 1, not {flip!r}")
+        argv += ["--flip", str(flip)]
     # after "--" a name starting with a dash stays a name
     return [*argv, "--", kind, name]
 
@@ -209,7 +214,7 @@ class SongApp:
         name: str,
         root: Path | None = None,
         make_rec: Callable[[Callable[[Path], None], Path], RecOwner] | None = None,
-        argv: Callable[[str, str, int, Path], list[str]] = job_argv,
+        argv: Callable[..., list[str]] = job_argv,
         build_studio: Callable[[model.MixInputs, Path, str], Studio] = default_studio,
         make_beat: Callable[..., BeatStudio] = BeatStudio,
         assets: AssetsLoader | None = None,
@@ -246,6 +251,9 @@ class SongApp:
         self._server_lock = self._claim_song()
         self.jobs = JobRunner(hold=self.rec.taking, kill_after=kill_after)
         reap_orphans(self._jobs_dir())
+        from redline.flip.server import FlipRoutes
+
+        self.flip = FlipRoutes(self)
 
     # song
 
@@ -758,8 +766,16 @@ class SongApp:
         with contextlib.suppress(Busy, ApiError):
             self._start("rank", 0, follow_up=True)
 
-    def _start(self, kind: str, seed: int, follow_up: bool = False) -> dict[str, Any]:
+    def _start(
+        self, kind: str, seed: int, follow_up: bool = False, flip: int | None = None
+    ) -> dict[str, Any]:
         song = self.song()
+        if kind in FLIP_KINDS:
+            from redline.flip import pipeline
+
+            ctx = self.flip.context()
+            if kind == "flip_render" and flip not in pipeline.versions(ctx.folder):
+                raise ApiError(HTTPStatus.NOT_FOUND, f"no flip {flip}", "no_flip")
         if kind == "rank" and "takes" not in song.voice:
             raise ApiError(HTTPStatus.CONFLICT, "a Suno voice has no takes", "no_takes")
         if kind in ("separate", "auto", "result"):
@@ -770,10 +786,15 @@ class SongApp:
         self._state_dir()
         make_private_dir(self._jobs_dir(), self.root)
         result = self._result_path(kind)
+        argv = (
+            self._argv(kind, self.name, seed, result)
+            if flip is None
+            else self._argv(kind, self.name, seed, result, flip)
+        )
         return self.jobs.start(
             self.name,
             kind,
-            self._argv(kind, self.name, seed, result),
+            argv,
             result,
             heavy=True,
             follow_up=follow_up,
@@ -835,8 +856,9 @@ class SongApp:
         """Start a job; 409 when the song has one of that kind unfinished."""
         only(body, "kind", "seed")
         kind = body.get("kind")
-        if kind not in KINDS:
-            raise ApiError(HTTPStatus.BAD_REQUEST, f"kind is one of {', '.join(KINDS)}")
+        startable = (*KINDS, "flip_stems")
+        if kind not in startable:
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"kind is one of {', '.join(startable)}")
         seed = body.get("seed", 0)
         if _int(seed, "seed") > MAX_SEED:
             raise ApiError(HTTPStatus.BAD_REQUEST, "seed is too large")
@@ -850,7 +872,7 @@ class SongApp:
         """Cancel a job of the song."""
         only(body, "kind")
         kind = body.get("kind")
-        if kind not in KINDS:
+        if kind not in (*KINDS, *FLIP_KINDS):
             raise ApiError(HTTPStatus.BAD_REQUEST, f"kind is one of {', '.join(KINDS)}")
         info = self.jobs.cancel(self.name, kind)
         if info is None:
@@ -979,6 +1001,20 @@ class SongApp:
 
     # dispatch
 
+    def _area_get(self, path: str, query: dict[str, list[str]]) -> Reply:
+        if path.startswith("/api/mix/"):
+            return self.mix("GET", path, query, {})
+        if path.startswith("/api/beat/"):
+            return self.beat("GET", path, query, {})
+        return self.flip.get(path, query)
+
+    def _area_post(self, path: str, body: dict) -> Reply:
+        if path.startswith("/api/mix/"):
+            return self.mix("POST", path, {}, body)
+        if path.startswith("/api/beat/"):
+            return self.beat("POST", path, {}, body)
+        return self.flip.post(path, body)
+
     def get(self, path: str, query: dict[str, list[str]]) -> Reply:
         """Answer a GET under /api/."""
         try:
@@ -994,10 +1030,8 @@ class SongApp:
                 return self.take_audio(query)
             if path == "/api/jobs":
                 return self.get_jobs()
-            if path.startswith("/api/mix/"):
-                return self.mix("GET", path, query, {})
-            if path.startswith("/api/beat/"):
-                return self.beat("GET", path, query, {})
+            if path.startswith(("/api/mix/", "/api/beat/", "/api/flip/")):
+                return self._area_get(path, query)
         except ApiError as error:
             return reply_json(error.status, error.payload)
         return reply_json(HTTPStatus.NOT_FOUND, {"error": "no such call"})
@@ -1017,10 +1051,8 @@ class SongApp:
                 return self.start_job(body)
             if path == "/api/jobs/cancel":
                 return self.cancel_job(body)
-            if path.startswith("/api/mix/"):
-                return self.mix("POST", path, {}, body)
-            if path.startswith("/api/beat/"):
-                return self.beat("POST", path, {}, body)
+            if path.startswith(("/api/mix/", "/api/beat/", "/api/flip/")):
+                return self._area_post(path, body)
         except ApiError as error:
             return reply_json(error.status, error.payload)
         return reply_json(HTTPStatus.NOT_FOUND, {"error": "no such call"})
