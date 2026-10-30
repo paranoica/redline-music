@@ -31,6 +31,8 @@ PICKED = AutoResult(
     {"vocal.crest_db": (10.0, 1.0)},
     (),
     {"vocal.crest_db": 1.5},
+    # a real result carries its scorer, which a record must leave out
+    lambda batch: [0.0] * len(batch),
 )
 
 
@@ -479,3 +481,32 @@ def test_voice_renders_through_the_racks_unless_classic(
 def test_studio_takes_classic_for_its_exact_render(own, tmp_path, auto, served, extra, classic):
     assert main(studio_args(own, tmp_path, *extra), CountingSeparator()) == 0
     assert served["studio"].classic is classic
+
+
+def test_a_failure_while_writing_leaves_no_result_folder_and_no_tmp_one(
+    own, tmp_path, no_auto, monkeypatch
+):
+    from redline.master import run as run_module
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(run_module, "write_final_report", fail)
+    assert main(voice_args(own, tmp_path, "--no-auto"), separator=CountingSeparator()) == 2
+    assert list((tmp_path / "o").iterdir()) == []
+
+
+def test_the_result_folder_appears_whole_in_one_rename(own, tmp_path, no_auto, monkeypatch):
+    from pathlib import Path
+
+    seen = []
+    real = Path.replace
+
+    def spy(self, target):
+        if self.name.startswith(".tmp-"):
+            seen.append(sorted(p.name for p in self.iterdir()))
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", spy)
+    assert main(voice_args(own, tmp_path, "--no-auto"), separator=CountingSeparator()) == 0
+    assert seen and "report.md" in seen[0] and "final.wav" in seen[0]

@@ -194,7 +194,12 @@ def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
         extra = (
             None
             if found is None
-            else {"auto": {**asdict(found), "settings": to_dict(found.settings)}}
+            else {
+                "auto": {
+                    **{k: v for k, v in asdict(found).items() if k != "score"},
+                    "settings": to_dict(found.settings),
+                }
+            }
         )
         folder = write_result(
             inputs, engine, args.out, args.vocal.stem, chosen, extra, args.classic
