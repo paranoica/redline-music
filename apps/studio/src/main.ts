@@ -296,8 +296,15 @@ class Studio {
       const outcome = analysisFailure(error, control.signal.aborted);
       if (outcome === "quiet") return;
       if (outcome === "again") {
-        clearTimeout(this.#analysisTimer);
-        this.#analysisTimer = window.setTimeout(() => void this.#analyse(), retryDelay(this.#analysisRetries++));
+        const wait = retryDelay(this.#analysisRetries++);
+        if (wait !== null) {
+          clearTimeout(this.#analysisTimer);
+          this.#analysisTimer = window.setTimeout(() => void this.#analyse(), wait);
+          return;
+        }
+        ui.analysis.dataset.state = "error";
+        ui.analysis.textContent = "анализ занят другой вкладкой";
+        status("Анализ занят другой вкладкой студии — обнови страницу, когда закроешь её. Звук идёт с прошлыми числами.", "error");
         return;
       }
       ui.analysis.dataset.state = "error";

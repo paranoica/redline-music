@@ -19,9 +19,14 @@ test("any other failure is shown as one", () => {
   assert.equal(analysisFailure("text", false), "failed");
 });
 
-test("asking again backs off, so two pages do not cancel each other forever, and stops growing", () => {
+test("asking again backs off", () => {
   assert.equal(retryDelay(0), 300);
   assert.equal(retryDelay(1), 600);
   assert.equal(retryDelay(2), 1200);
-  assert.equal(retryDelay(20), 10000);
+  assert.equal(retryDelay(5), 9600);
+});
+
+test("after a few tries the page gives up, so two pages do not cancel each other forever", () => {
+  assert.equal(retryDelay(6), null);
+  assert.equal(retryDelay(20), null);
 });
