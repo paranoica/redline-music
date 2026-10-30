@@ -1,9 +1,16 @@
+import hashlib
 import json
 
 import pytest
 from redline.record.latency import RoundTrip
 from redline.record.protocol import Dropout, TakeReport
-from redline.record.takes import discard, next_take, write_sidecar
+from redline.record.takes import (
+    discard,
+    file_sha256,
+    next_take,
+    write_incomplete_sidecar,
+    write_sidecar,
+)
 from redline.takes.rank import find_takes, read_dropouts
 
 RATE = 48000
@@ -78,3 +85,37 @@ def test_discard_removes_the_take_and_its_sidecar_only(tmp_path):
     touch(tmp_path, "take-03.wav")
     discard(tmp_path / "take-03.wav")
     assert not (tmp_path / "take-03.wav").exists()
+
+
+def test_the_sidecar_carries_the_hash_of_the_beat_and_is_complete(tmp_path):
+    take = tmp_path / "take-01.wav"
+    sidecar = write_sidecar(
+        report(take, []), RoundTrip(300, "calibrated"), 64, beat_sha256="ab" * 32
+    )
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert data["complete"] is True
+    assert data["beat_sha256"] == "ab" * 32
+
+
+def test_an_incomplete_sidecar_carries_the_beat_hash_and_says_so(tmp_path):
+    take = tmp_path / "take-01.wav"
+    sidecar = write_incomplete_sidecar(
+        take, "no reply", RoundTrip(300, "calibrated"), 64, "cd" * 32
+    )
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert data["complete"] is False
+    assert data["beat_sha256"] == "cd" * 32
+
+
+def test_a_sidecar_without_a_known_beat_holds_null_not_a_missing_key(tmp_path):
+    sidecar = write_sidecar(report(tmp_path / "take-01.wav", []), RoundTrip(None, "unknown"), 64)
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["beat_sha256"] is None
+
+
+def test_the_file_hash_is_sha256_of_its_bytes_across_block_boundaries(tmp_path):
+    data = bytes(range(256)) * 9000
+    path = tmp_path / "beat.wav"
+    path.write_bytes(data)
+    assert file_sha256(path) == hashlib.sha256(data).hexdigest()
+    path.write_bytes(b"")
+    assert file_sha256(path) == hashlib.sha256(b"").hexdigest()

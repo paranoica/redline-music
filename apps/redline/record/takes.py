@@ -1,5 +1,6 @@
 """The takes folder: take-NN.wav files, each with the take-NN.json log `redline takes` reads."""
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -19,12 +20,22 @@ def next_take(folder: Path) -> Path:
     return folder / f"take-{max(numbers, default=0) + 1:02d}.wav"
 
 
+def file_sha256(path: Path) -> str:
+    """The hex SHA-256 of a file, read in blocks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while block := handle.read(1 << 20):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def write_sidecar(
     report: TakeReport,
     round_trip: RoundTrip,
     quantum: int,
     quantum_now: int | None = None,
     quantum_unchecked: bool = False,
+    beat_sha256: str | None = None,
 ) -> Path:
     """Write the take's log next to it and return its path.
 
@@ -35,7 +46,8 @@ def write_sidecar(
 
     "dropouts" holds the [start, end) frame ranges that were filled with silence, as
     `redline.takes.rank.read_dropouts` reads them; an xrun that lost no frames is counted
-    apart, in "xruns_without_loss".
+    apart, in "xruns_without_loss". beat_sha256 is the hash of the beat the take was
+    recorded over (null when not known).
     """
     lost = [d for d in report.dropouts if d.frames > 0]
     data = {
@@ -48,6 +60,7 @@ def write_sidecar(
         "offset": report.offset,
         "offset_source": round_trip.source,
         "complete": True,
+        "beat_sha256": beat_sha256,
     }
     if quantum_now is not None or quantum_unchecked:
         data |= {"quantum_changed": True, "quantum_now": quantum_now}
@@ -56,7 +69,13 @@ def write_sidecar(
     return sidecar
 
 
-def write_incomplete_sidecar(take: Path, error: str, round_trip: RoundTrip, quantum: int) -> Path:
+def write_incomplete_sidecar(
+    take: Path,
+    error: str,
+    round_trip: RoundTrip,
+    quantum: int,
+    beat_sha256: str | None = None,
+) -> Path:
     """Log a take whose stop failed: no report came, so its dropouts are unknown."""
     data = {
         "complete": False,
@@ -64,6 +83,7 @@ def write_incomplete_sidecar(take: Path, error: str, round_trip: RoundTrip, quan
         "quantum": quantum,
         "offset": round_trip.frames or 0,
         "offset_source": round_trip.source,
+        "beat_sha256": beat_sha256,
     }
     sidecar = take.with_suffix(".json")
     sidecar.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")

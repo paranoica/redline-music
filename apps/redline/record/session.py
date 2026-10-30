@@ -5,8 +5,10 @@ speaks the protocol, so it is tested with a fake one.
 """
 
 import math
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from redline.record.latency import RoundTrip
 from redline.record.protocol import EngineError, Meters, TakeReport
@@ -79,18 +81,55 @@ def level_meter(peak: float) -> str:
     return f"[{'#' * filled}{'-' * (METER_WIDTH - filled)}] {shown}{clip}"
 
 
-def _kept(report: TakeReport, how: str) -> str:
+@dataclass(frozen=True)
+class Outcome:
+    """What a key did, as data: a code and its values; the terminal words it.
+
+    Codes and values:
+        recording: take.
+        quantum_moved: take refused; was, now (frames).
+        kept, kept_late: take, seconds, dropouts.
+        discarded, finished_late_discarded: take.
+        still_finishing: take (not yet collected).
+        nothing_to_discard.
+    """
+
+    code: str
+    values: dict[str, Any] = field(default_factory=dict)
+
+
+def _kept(report: TakeReport, code: str) -> Outcome:
     lost = sum(1 for d in report.dropouts if d.frames > 0)
-    note = f", {lost} dropouts" if lost else ""
-    return f"{report.path.stem} {how}: {report.frames / report.rate:.1f} s{note}"
+    return Outcome(
+        code,
+        {"take": report.path.stem, "seconds": report.frames / report.rate, "dropouts": lost},
+    )
 
 
 class Session:
     """Takes recorded into one song's folder: start, stop, discard, quit."""
 
-    def __init__(self, engine: Engine, folder: Path, round_trip: RoundTrip, quantum: int):
-        """Record into folder, shifting takes by round_trip (0 frames when it is unknown)."""
+    def __init__(
+        self,
+        engine: Engine,
+        folder: Path,
+        round_trip: RoundTrip,
+        quantum: int,
+        beat_sha256: str | None = None,
+        meters: Callable[[], Meters] | None = None,
+        on_logged: Callable[[Path], None] | None = None,
+    ):
+        """Record into folder, shifting takes by round_trip (0 frames when it is unknown).
+
+        beat_sha256 goes into every take's log. meters is where the session reads the
+        engine's meters from (the engine's own by default); a caller that has a sampler
+        reading them passes that, so the peaks it hands out stay whole. on_logged is called
+        with the take's path once its log is written complete.
+        """
         self.engine = engine
+        self.beat_sha256 = beat_sha256
+        self._meters = meters or engine.meters
+        self._on_logged = on_logged
         self.folder = folder
         self.round_trip = round_trip
         self.quantum = quantum
@@ -99,27 +138,23 @@ class Session:
         # a take whose stop timed out: the engine may still finish it, and the next key asks
         self.pending: Path | None = None
 
-    def toggle(self) -> str:
-        """Start the next take, or finish the one running; what happened, in a line.
+    def toggle(self) -> Outcome:
+        """Start the next take, or finish the one running; what happened.
 
         After a stop timed out, the key asks the engine for that take again instead.
         """
         if self.pending is not None:
             return self._collect()
         if self.current is None:
-            now = self.engine.meters().quantum
+            now = self._meters().quantum
             if now is not None and now != self.quantum:
-                return (
-                    f"take refused: the audio graph's quantum moved from {self.quantum} to "
-                    f"{now} frames, so the round trip the takes are shifted by no longer "
-                    "holds. Quit and restart `redline record`"
-                )
+                return Outcome("quantum_moved", {"was": self.quantum, "now": now})
             path = next_take(self.folder).resolve()
             late = self.engine.start(path, self.round_trip.frames or 0)
             self.current = path
             if not isinstance(late, str) and late is not None and late.path in self.recorded:
                 self._log(late)
-            return f"recording {path.stem}"
+            return Outcome("recording", {"take": path.stem})
         return _kept(self._finish(), "kept")
 
     def _finish(self) -> TakeReport:
@@ -130,7 +165,9 @@ class Session:
             report = self.engine.stop()
         except EngineError as error:
             # `redline takes` must not read a missing log as a take without dropouts
-            write_incomplete_sidecar(path, str(error), self.round_trip, self.quantum)
+            write_incomplete_sidecar(
+                path, str(error), self.round_trip, self.quantum, self.beat_sha256
+            )
             if self._holds_a_take():
                 self.pending = path
             raise
@@ -140,23 +177,33 @@ class Session:
     def _holds_a_take(self) -> bool:
         # a writer error ends the take in the engine; only a stop that timed out leaves one
         try:
-            return self.engine.meters().recording
+            return self._meters().recording
         except EngineError:
             # a live engine that missed one reply may still be finishing the take
             return not self.engine.exited()
 
     def _log(self, report: TakeReport) -> None:
         try:
-            now = self.engine.meters().quantum
+            now = self._meters().quantum
         except EngineError:
             write_sidecar(
-                report, self.round_trip, self.quantum, quantum_unchecked=not self.engine.exited()
+                report,
+                self.round_trip,
+                self.quantum,
+                quantum_unchecked=not self.engine.exited(),
+                beat_sha256=self.beat_sha256,
             )
+            self._logged(report)
             raise
         moved = now if now is not None and now != self.quantum else None
-        write_sidecar(report, self.round_trip, self.quantum, moved)
+        write_sidecar(report, self.round_trip, self.quantum, moved, beat_sha256=self.beat_sha256)
+        self._logged(report)
 
-    def _collect(self) -> str:
+    def _logged(self, report: TakeReport) -> None:
+        if self._on_logged is not None:
+            self._on_logged(report.path)
+
+    def _collect(self) -> Outcome:
         assert self.pending is not None
         path = self.pending
         try:
@@ -166,15 +213,17 @@ class Session:
                 # the writer failed, or the engine holds no take: nothing more will come
                 self.pending = None
                 if path in self.recorded:
-                    write_incomplete_sidecar(path, str(error), self.round_trip, self.quantum)
+                    write_incomplete_sidecar(
+                        path, str(error), self.round_trip, self.quantum, self.beat_sha256
+                    )
             raise
         self.pending = None
         if path not in self.recorded:
-            return f"{path.stem} finished late; it was discarded"
+            return Outcome("finished_late_discarded", {"take": path.stem})
         self._log(report)
-        return _kept(report, "finished late, kept")
+        return _kept(report, "kept_late")
 
-    def discard_last(self) -> str:
+    def discard_last(self) -> Outcome:
         """Throw away the take running, else the last one kept in this session."""
         if self.current is not None:
             path, self.current = self.current, None
@@ -186,14 +235,14 @@ class Session:
                 raise
             finally:
                 discard(path)
-            return f"{path.stem} discarded"
+            return Outcome("discarded", {"take": path.stem})
         if self.pending is not None and self.pending not in self.recorded:
-            return f"{self.pending.stem} is still finishing: press space to collect it first"
+            return Outcome("still_finishing", {"take": self.pending.stem})
         if not self.recorded:
-            return "nothing recorded in this session to discard"
+            return Outcome("nothing_to_discard")
         path = self.recorded.pop()
         discard(path)
-        return f"{path.stem} discarded"
+        return Outcome("discarded", {"take": path.stem})
 
     def close(self) -> None:
         """Keep a take still running, then quit the engine."""

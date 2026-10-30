@@ -256,3 +256,29 @@ def test_a_calibration_during_which_the_quantum_moved_is_not_stored(tmp_path, mo
         run.calibrate(FAKE, work, "cup", wait=no_wait)
     assert not (work / "record" / "latency.json").exists()
     assert not (work / "record" / "calibration.wav").exists()
+
+
+def test_the_relaunch_callback_gets_the_graph_rate_before_the_second_start(
+    beat, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("FAKE_REC_RATE", "44100")
+    seen = []
+
+    def make(rate):
+        seen.append(("beat", rate))
+        return run.prepare_beat(beat, rate, tmp_path)
+
+    engine = run.open_engine(FAKE, make, on_relaunch=lambda rate: seen.append(("relaunch", rate)))
+    engine.close()
+    assert seen == [("beat", run.GUESS_RATE), ("relaunch", 44100), ("beat", 44100)]
+
+
+def test_the_relaunch_callback_is_silent_when_the_guess_was_right(beat, tmp_path):
+    seen = []
+    engine = run.open_engine(
+        FAKE,
+        lambda rate: run.prepare_beat(beat, rate, tmp_path),
+        on_relaunch=seen.append,
+    )
+    engine.close()
+    assert seen == []

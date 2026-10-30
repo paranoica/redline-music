@@ -15,6 +15,7 @@ from redline.record.session import (
     monitor_ms,
     quantum_warning,
 )
+from redline.record.terminal import render
 from redline.takes.rank import read_dropouts
 
 FAKE = [sys.executable, str(Path(__file__).with_name("fake_rec.py"))]
@@ -200,9 +201,9 @@ def test_space_records_takes_one_after_another_into_the_song_folder(engine, tmp_
     folder.mkdir(parents=True)
     (folder / "take-01.wav").write_bytes(b"earlier")
     session = Session(engine, folder, RoundTrip(300, "calibrated"), 64)
-    assert "take-02" in session.toggle()
+    assert "take-02" in render(session.toggle())
     assert engine.meters().recording
-    assert "take-02" in session.toggle()
+    assert "take-02" in render(session.toggle())
     assert not engine.meters().recording
     data = json.loads((folder / "take-02.json").read_text(encoding="utf-8"))
     assert data["offset"] == 300 and data["offset_source"] == "calibrated"
@@ -226,9 +227,9 @@ def test_r_discards_this_session_takes_from_the_last_and_never_older_ones(engine
     session = Session(engine, folder, RoundTrip(300, "estimate"), 64)
     for _ in range(4):
         session.toggle()
-    assert "take-03" in session.discard_last()
-    assert "take-02" in session.discard_last()
-    assert "nothing" in session.discard_last()
+    assert "take-03" in render(session.discard_last())
+    assert "take-02" in render(session.discard_last())
+    assert "nothing" in render(session.discard_last())
     assert names(folder) == ["take-01.wav"]
     # the numbers are taken again
     session.toggle()
@@ -239,7 +240,7 @@ def test_r_discards_this_session_takes_from_the_last_and_never_older_ones(engine
 def test_r_while_recording_stops_and_throws_the_take_away(engine, tmp_path):
     session = Session(engine, tmp_path, RoundTrip(None, "unknown"), 64)
     session.toggle()
-    assert "take-01" in session.discard_last()
+    assert "take-01" in render(session.discard_last())
     assert names(tmp_path) == []
     assert not engine.meters().recording
 
@@ -366,7 +367,7 @@ class QuantumEngine:
 def test_a_take_is_refused_when_the_quantum_moved_since_the_start(tmp_path):
     engine = QuantumEngine(256)
     session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
-    message = session.toggle()
+    message = render(session.toggle())
     assert "64" in message and "256" in message and "restart `redline record`" in message
     assert engine.started == [] and session.current is None
     assert list(tmp_path.iterdir()) == []
@@ -376,7 +377,7 @@ def test_a_take_is_refused_when_the_quantum_moved_since_the_start(tmp_path):
 def test_a_take_starts_when_the_quantum_held_or_is_not_reported(tmp_path, quantum):
     engine = QuantumEngine(quantum)
     session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
-    assert session.toggle() == "recording take-01"
+    assert render(session.toggle()) == "recording take-01"
     assert [p.name for p in engine.started] == ["take-01.wav"]
 
 
@@ -447,14 +448,14 @@ def test_after_a_stop_timed_out_the_next_key_collects_the_take_and_logs_it_compl
     session.toggle()
     with pytest.raises(EngineError, match="did not finish"):
         session.toggle()
-    message = session.toggle()
+    message = render(session.toggle())
     assert engine.stops == 2 and len(engine.started) == 1
     assert "take-01" in message and "late" in message
     data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
     assert data["complete"] is True and "error" not in data
     assert data["dropouts"] == [[4800, 5280]]
     assert read_dropouts(take, RATE)[0] == 1
-    assert session.toggle() == "recording take-02"
+    assert render(session.toggle()) == "recording take-02"
 
 
 def test_a_take_the_writer_failed_on_late_stays_incomplete_with_the_writer_error(tmp_path):
@@ -468,7 +469,7 @@ def test_a_take_the_writer_failed_on_late_stays_incomplete_with_the_writer_error
     data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
     assert data["complete"] is False and "no space" in data["error"]
     # nothing more will come: the next key records again
-    assert session.toggle() == "recording take-02"
+    assert render(session.toggle()) == "recording take-02"
 
 
 def test_a_timed_out_take_discarded_meanwhile_leaves_no_log_when_it_comes(tmp_path):
@@ -541,7 +542,7 @@ def test_a_take_the_writer_failed_on_is_not_waited_for(tmp_path):
     with pytest.raises(EngineError, match="no space"):
         session.toggle()
     assert session.pending is None
-    assert session.toggle() == "recording take-02"
+    assert render(session.toggle()) == "recording take-02"
     data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
     assert "no space" in data["error"]
 
@@ -585,7 +586,7 @@ def test_discard_while_a_take_is_still_finishing_keeps_the_takes_before_it(tmp_p
     session.toggle()
     with pytest.raises(EngineError):
         session.discard_last()
-    message = session.discard_last()
+    message = render(session.discard_last())
     assert first.exists()
     assert "finishing" in message
 

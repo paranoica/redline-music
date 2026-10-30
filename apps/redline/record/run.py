@@ -77,6 +77,7 @@ def open_engine(
     command: Sequence[str],
     make_beat: Callable[[int], Path],
     quantum: int = REQUESTED_QUANTUM,
+    on_relaunch: Callable[[int], None] | None = None,
 ) -> EngineProcess:
     """Start the engine with the beat at the graph's rate.
 
@@ -84,6 +85,7 @@ def open_engine(
         command: The binary, as a command.
         make_beat: Writes the beat at a rate and returns its path.
         quantum: The quantum to ask for.
+        on_relaunch: Called with the graph's rate before the engine starts again at it.
 
     Raises:
         EngineError: The engine did not start, or the graph changed rate between two starts.
@@ -92,6 +94,8 @@ def open_engine(
         return EngineProcess.launch(engine_argv(command, make_beat(GUESS_RATE), quantum))
     except WrongRate as wrong:
         rate = wrong.rate
+    if on_relaunch is not None:
+        on_relaunch(rate)
     try:
         return EngineProcess.launch(engine_argv(command, make_beat(rate), quantum))
     except WrongRate as again:
@@ -149,6 +153,7 @@ def monitor_numbers(
     settings: Settings,
     say: Callable[[str], None] = print,
     wait: Wait | None = None,
+    on_stage: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """The numbers the monitor rack is built with, and where they came from.
 
@@ -166,6 +171,8 @@ def monitor_numbers(
         from redline.measure.run import measure_own
         from redline.measure.separate import RoformerSeparator
 
+        if on_stage is not None:
+            on_stage("analysing", {"take": take.name})
         say(f"analysing {take.name} over the beat for the monitor...")
         inputs = measure_own(take, beat, refs, work, separator or RoformerSeparator())
         return live.analysis(track_engine(inputs), settings), f"the analysis of {take.name}"
@@ -175,6 +182,8 @@ def monitor_numbers(
     else:
         if engine is None:
             raise EngineError("no take and no engine for a level check")
+        if on_stage is not None:
+            on_stage("level_check", {"seconds": LEVEL_CHECK_S})
         say(f"level check: sing or speak as in a take for {LEVEL_CHECK_S:g} s...")
         loudness = level_check(engine, work / "record", wait=wait)
         source = "a level check, the rest neutral until a take exists"
