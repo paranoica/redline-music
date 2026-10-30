@@ -702,7 +702,8 @@ export class Engine {
     const seconds = this.#loop.on ? (this.#loop.end - this.#loop.start) / this.#rate : 10;
     this.#post({
       type: "levels",
-      frame: this.#heard(this.#position()),
+      // through a pre-roll and the latency after it, the frame that will be heard first
+      frame: this.#heard(this.#read + this.#hold),
       playing: this.#running,
       vocal: level(L.vocal),
       beat: level(L.beat),

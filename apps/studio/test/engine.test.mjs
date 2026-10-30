@@ -591,3 +591,23 @@ for (const [where, racks] of [["no latency", {}], ["a master with latency", { ma
     }
   });
 }
+
+test("through the pre-roll after a seek the playhead stays on the frame sought, not before it", () => {
+  const frames = 4 * RATE;
+  const stopped = setup({ frames, vocal: indexed(frames), racks: { master: limiter } });
+  stopped.engine.handle({ type: "seek", frame: 96000 });
+  stopped.engine.handle({ type: "play", playing: true });
+  run(stopped.engine, RATE / 4);
+  const shown = stopped.posted.filter((m) => m.type === "levels").map((m) => m.frame);
+  assert.ok(shown.length > 0 && shown.every((f) => f >= 96000), `${shown}`);
+
+  const playing = setup({ frames, vocal: indexed(frames), racks: { master: limiter } });
+  playing.engine.handle({ type: "play", playing: true });
+  run(playing.engine, 9600);
+  playing.posted.length = 0;
+  playing.engine.handle({ type: "seek", frame: 96000 });
+  run(playing.engine, RATE / 4);
+  const after = playing.posted.filter((m) => m.type === "levels").map((m) => m.frame);
+  assert.ok(after.some((f) => f >= 96000), `${after}`);
+  assert.ok(after.every((f) => f < 9600 + RATE / 4 || f >= 96000), `${after}`);
+});
