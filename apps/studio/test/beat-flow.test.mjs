@@ -171,3 +171,21 @@ test("a loop that ends can be started again", () => {
   loop.start(frame);
   assert.equal(r.pending(), 1);
 });
+
+test("a start from inside a running frame keeps a single loop", async () => {
+  const { FrameLoop } = await import("../src/beat/flow.ts");
+  const queued = [];
+  const loop = new FrameLoop((fn) => queued.push(fn));
+  let frames = 0;
+  let inner = 0;
+  loop.start(() => {
+    frames++;
+    if (frames === 1) loop.start(() => ++inner < 100);
+    return frames < 3;
+  });
+  // bounded: a second loop would keep queueing frames
+  for (let i = 0; i < 10 && queued.length; i++) queued.shift()();
+  assert.equal(inner, 0);
+  assert.equal(frames, 3);
+  assert.equal(queued.length, 0);
+});

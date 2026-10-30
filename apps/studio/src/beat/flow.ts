@@ -82,8 +82,9 @@ export class FrameLoop {
   start(frame: () => boolean): void {
     if (this.#id !== null) return;
     const run = (): void => {
-      this.#id = null;
-      if (frame()) this.#id = this.#raf(run);
+      // held while the frame runs, so a start from inside it does not open a second loop
+      this.#id = -1;
+      this.#id = frame() ? this.#raf(run) : null;
     };
     run();
   }
