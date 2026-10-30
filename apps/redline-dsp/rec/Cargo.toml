@@ -1,0 +1,15 @@
+[package]
+name = "redline-rec"
+description = "redline's recording engine: live monitoring through a rack over the beat, takes to WAV"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "redline_rec"
+
+[dependencies]
+redline-dsp-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

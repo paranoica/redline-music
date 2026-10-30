@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "py", "wasm"]
+members = ["core", "py", "wasm", "rec"]
 resolver = "2"
 
 [workspace.package]
