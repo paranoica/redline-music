@@ -1,0 +1,59 @@
+// The check's warnings in Russian. The server writes them in English; the kinds the page knows
+// are retold from their numbers, anything else is shown as it came.
+
+export interface WarningLike {
+  kind: string;
+  where: string;
+  message: string;
+  source: string;
+}
+
+const DRUMS: Record<string, string> = { hat: "хэт", kick: "бочка" };
+
+function times(n: number): string {
+  const d = n % 10;
+  const t = n % 100;
+  if (d >= 2 && d <= 4 && (t < 12 || t > 14)) return "раза";
+  return "раз";
+}
+
+export function warningText(w: WarningLike): string {
+  let m: RegExpExecArray | null;
+  switch (w.kind) {
+    case "density":
+      m = /^([\d.]+) (\w+) hits a bar; (.+) keeps ([\d.]+) to ([\d.]+)$/.exec(w.message);
+      if (m) return `${DRUMS[m[2] as string] ?? m[2]}: ${m[1]} удара за такт, для ${m[3]} — от ${m[4]} до ${m[5]}`;
+      break;
+    case "repeat":
+      m = /^the same bar plays (\d+) times in a row/.exec(w.message);
+      if (m) return `один и тот же такт ${m[1]} ${times(Number(m[1]))} подряд — меняй что-нибудь раз в 4–8 тактов`;
+      break;
+    case "unchanged":
+      m = /^the same sounds \((.*)\) play for (\d+) bars/.exec(w.message);
+      if (m) return `одни и те же звуки (${m[1]}) ${m[2]} тактов подряд — вводи или убирай звук хотя бы раз в 8 тактов`;
+      break;
+    case "clash":
+      m = /^a kick starts within ([\d.]+) ms of an 808 note (\d+) times/.exec(w.message);
+      if (m) return `бочка ближе ${m[1]} мс к началу ноты 808 — ${m[2]} ${times(Number(m[2]))}; сдвинь бочку или ноту`;
+      break;
+  }
+  return w.message;
+}
+
+export function sourceText(source: string): string {
+  if (source === "blog, unverified") return "источник: блог, не проверено";
+  if (source === "own choice") return "источник: своё решение";
+  return `источник: ${source}`;
+}
+
+export function whereText(where: string): string {
+  let m = /^bars (\d+)-(\d+)$/.exec(where);
+  if (m) return `такты ${m[1]}–${m[2]}`;
+  m = /^bars? (\d+)$/.exec(where);
+  if (m) return `такт ${m[1]}`;
+  m = /^bars (.+)$/.exec(where);
+  if (m) return `такты ${m[1]}`;
+  m = /^sections\[\d+\] \((.*)\)$/.exec(where);
+  if (m) return `секция «${m[1]}»`;
+  return where;
+}

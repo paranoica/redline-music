@@ -1,0 +1,1139 @@
+/* The beat editor on the studio's tokens (styles.css loads first): the bar is the unit, so
+   one song strip runs across the top and everything under it edits the selected bar. */
+
+.btn--small {
+  min-height: 28px;
+  padding: 0 var(--s3);
+  font-size: var(--t-small);
+}
+
+/* ---------- deck ---------- */
+
+.bdeck {
+  grid-template-columns: minmax(130px, auto) auto 1fr auto;
+}
+
+.bdeck .toggle,
+.bdeck .btn {
+  white-space: nowrap;
+}
+
+.bdeck__facts {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.bdeck__fact {
+  white-space: nowrap;
+}
+
+.checkstate {
+  min-height: 28px;
+  margin-right: var(--s2);
+  padding: 0 var(--s2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.checkstate[data-state="busy"]::after {
+  content: "…";
+}
+
+.checkstate[data-state="error"] {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--signal-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.checkstate[data-state="error"]:hover {
+  border-color: var(--text);
+}
+
+.checkstate[data-state="done"][title="Показать список"] {
+  cursor: pointer;
+  text-decoration: underline dotted var(--control);
+  text-underline-offset: 3px;
+}
+
+.bmeter {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.bmeter__bars {
+  display: grid;
+  gap: 3px;
+  width: 96px;
+}
+
+.bmeter__well {
+  position: relative;
+  height: 5px;
+  background: var(--well);
+  border: 1px solid var(--line-strong);
+  overflow: hidden;
+}
+
+.bmeter__fill {
+  --level: 0;
+  position: absolute;
+  inset: 0;
+  background: var(--level);
+  transform-origin: left;
+  transform: scaleX(var(--level));
+}
+
+.bmeter__db {
+  width: 5ch;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.bmeter[data-over="true"] .bmeter__db {
+  color: var(--signal);
+}
+
+/* ---------- issues and the render ---------- */
+
+.issues,
+.render-out {
+  margin: var(--s3) var(--s5) 0;
+  padding: var(--s3) var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--t-small);
+}
+
+.issues[hidden],
+.render-out[hidden] {
+  display: none;
+}
+
+.issues {
+  display: grid;
+  gap: var(--s2);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.issues__title {
+  margin: 0;
+  font-size: var(--t-small);
+  font-weight: 600;
+  cursor: default;
+}
+
+summary.issues__title {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.issues__why {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.issues__list {
+  margin: var(--s1) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.issue {
+  display: flex;
+  gap: var(--s3);
+  align-items: baseline;
+}
+
+.issue[data-kind="error"] {
+  box-shadow: inset 2px 0 0 var(--signal);
+  padding-left: var(--s2);
+}
+
+.issue[data-kind="warning"] {
+  color: var(--text-dim);
+  padding-left: var(--s2);
+}
+
+.issue__go {
+  display: flex;
+  gap: var(--s3);
+  align-items: baseline;
+  width: 100%;
+  padding: 2px var(--s2) 2px 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: inherit;
+  border-radius: var(--radius);
+}
+
+.issue__go:hover {
+  background: var(--raised-hover);
+}
+
+.issue__path {
+  flex: none;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.issue__go .issue__path {
+  text-decoration: underline dotted var(--control);
+  text-underline-offset: 3px;
+}
+
+.render-out {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3) var(--s4);
+}
+
+.render-out__line {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.render-out__audio {
+  height: 32px;
+  min-width: 320px;
+  flex: 1 1 320px;
+  max-width: 560px;
+}
+
+.render-out__warn {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- song strip ---------- */
+
+.song {
+  margin: var(--s3) var(--s5) 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.song__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.song__title,
+.grid__title,
+.lane2__title,
+.side__title {
+  margin: 0;
+  font-size: var(--t-head);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.song__where {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.song__dim {
+  color: var(--muted);
+}
+
+.song__marks {
+  display: flex;
+  gap: var(--s2);
+  margin-left: auto;
+}
+
+.markform[hidden] {
+  display: none;
+}
+
+.markform__body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+}
+
+.markform__what {
+  font-weight: 600;
+}
+
+.markform__what[data-verdict="bad"] {
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+.markform__note {
+  width: 32ch;
+  min-height: 30px;
+}
+
+.markform__hint {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.markform__hint[data-dirty="true"] {
+  color: var(--text);
+}
+
+.song__scroll {
+  overflow-x: auto;
+  padding: var(--s2) var(--s4) var(--s3);
+}
+
+/* the whole song fits: about 80 bars at 1024 px before it scrolls */
+.song__track {
+  --bars: 1;
+  position: relative;
+  min-width: calc(var(--bars) * 11px);
+}
+
+.song__sections,
+.song__bars {
+  display: grid;
+  grid-template-columns: repeat(var(--bars), minmax(0, 1fr));
+}
+
+/* the band of bars is one control: its edge holds the contrast, hairlines split the bars */
+.song__bars {
+  position: relative;
+  outline: 1px solid var(--control);
+  outline-offset: 0;
+}
+
+.song__section {
+  min-width: 0;
+  padding: 2px var(--s2);
+  border-left: 1px solid var(--line-strong);
+  border-top: 2px solid var(--line-strong);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.song__name {
+  font-weight: 500;
+}
+
+.bar {
+  position: relative;
+  height: 40px;
+  padding: 0;
+  background: var(--well);
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--muted);
+  transition: background-color var(--quick);
+}
+
+.bar[data-first="true"] {
+  border-left: 1px solid var(--line-strong);
+}
+
+.bar:hover {
+  background: var(--raised-hover);
+}
+
+.bar[aria-pressed="true"] {
+  background: var(--raised);
+  box-shadow: inset 0 2px 0 var(--text);
+}
+
+.bar[data-now="true"] {
+  background: var(--raised-hover);
+}
+
+.bar:focus-visible {
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+/* a number may run over the next narrow bars; it sits above them */
+.bar__n {
+  position: absolute;
+  z-index: 1;
+  left: 2px;
+  bottom: 2px;
+  font-size: 0.6875rem;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.bar__tick {
+  display: none;
+  position: absolute;
+  top: 3px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  line-height: 1;
+  color: var(--text);
+}
+
+.bar__notch {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 8px solid var(--signal);
+  border-left: 8px solid transparent;
+}
+
+.bar[data-mark="good"] .bar__tick,
+.bar[data-mark="bad"] .bar__notch {
+  display: block;
+}
+
+.song__playhead {
+  --at: 0;
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--at) * 100%);
+  width: 2px;
+  margin-left: -1px;
+  background: var(--playhead);
+  pointer-events: none;
+}
+
+.song__playhead[data-on="false"],
+.song__playhead:not([data-on]) {
+  display: none;
+}
+
+/* ---------- workspace ---------- */
+
+.work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--s4);
+  padding: var(--s3) var(--s5) var(--s7);
+  align-items: start;
+}
+
+.work__main {
+  display: grid;
+  gap: var(--s3);
+  min-width: 0;
+}
+
+.grid,
+.lane2 {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.grid__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s4);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+
+.grid__sub {
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.grid__hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.grid__empty {
+  margin: 0;
+  padding: var(--s5) var(--s4);
+  color: var(--muted);
+}
+
+/* one time axis: the grid's rows and the step lane share the head column, the paddings and the
+   steps' gap, so a step sits at the same x in every row and in the lane */
+.grid,
+.lane2 {
+  --head: 196px;
+  --pad-l: var(--s3);
+  --pad-r: var(--s4);
+  --col-gap: var(--s3);
+  --gap: 3px;
+}
+
+.grid__rows {
+  position: relative;
+}
+
+.trk {
+  display: grid;
+  grid-template-columns: var(--head) minmax(0, 1fr);
+  gap: var(--col-gap);
+  align-items: stretch;
+  padding: var(--s2) var(--pad-r) var(--s2) var(--pad-l);
+  border-top: 1px solid var(--line);
+}
+
+.trk > .steps,
+.trk > .trk__bad {
+  align-self: center;
+}
+
+/* the playhead's column over every row: the steps' column, one step wide */
+.grid__play {
+  --col: 0;
+  --body: calc(100% - var(--pad-l) - var(--head) - var(--col-gap) - var(--pad-r));
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--pad-l) + var(--head) + var(--col-gap) + var(--col) * (var(--body) + var(--gap)) / 16);
+  width: calc((var(--body) + var(--gap)) / 16 - var(--gap));
+  background: rgb(244 245 247 / 0.08);
+  box-shadow: inset 0 2px 0 var(--playhead);
+  pointer-events: none;
+}
+
+.grid__play:not([data-on="true"]) {
+  display: none;
+}
+
+.trk:first-child {
+  border-top: 0;
+}
+
+.trk[data-selected="true"] {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--text);
+}
+
+.trk[data-fault="true"] {
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.trk[data-heard="false"] .steps,
+.trk[data-heard="false"] .roll {
+  opacity: 0.4;
+}
+
+.trk__head {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trk[data-kind="notes"] .trk__head {
+  padding-right: 30px;
+}
+
+/* the pitch range of a note row, at the edge of the head next to the roll */
+.trk__range {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 0.6875rem;
+  line-height: 1;
+  color: var(--muted);
+  text-align: right;
+}
+
+.trk__line {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.trk__line--meta {
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.trk__name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+  flex: 1;
+  padding: 2px var(--s1);
+  margin-left: calc(-1 * var(--s1));
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trk__name:hover {
+  background: var(--raised-hover);
+}
+
+.trk__inst {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.trk__buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.trk__ms {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--control);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-family: var(--font-num);
+  font-size: 0.6875rem;
+  transition:
+    background-color var(--quick),
+    color var(--quick);
+}
+
+.trk__ms:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.trk__ms[aria-pressed="true"] {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.trk__pattern {
+  color: var(--text-dim);
+}
+
+.trk__map {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.trk__seg {
+  width: 14px;
+  height: 10px;
+  padding: 0;
+  background: var(--well);
+  border: 1px solid var(--control);
+  border-radius: 0;
+}
+
+.trk__seg:hover {
+  border-color: var(--text);
+}
+
+.trk__seg[aria-pressed="true"] {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.trk__shared {
+  padding: 0 var(--s1);
+  border: 1px solid var(--control);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.trk__unique {
+  padding: 0 var(--s1);
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.trk__unique:hover {
+  color: var(--text);
+}
+
+.trk__state {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.trk__bad {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+/* ---------- steps ---------- */
+
+/* sixteen steps with one gap; a hairline in the gap before each beat, drawn by the container
+   on tiles of four steps (a tile is four cells and four gaps wide) */
+.steps,
+.lane2__bars {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  column-gap: var(--gap);
+  background-image: linear-gradient(to right, transparent calc(100% - 2px), var(--line-strong) calc(100% - 2px) calc(100% - 1px), transparent calc(100% - 1px));
+  background-size: calc((100% + var(--gap)) / 4) 100%;
+  background-repeat: repeat-x;
+}
+
+.step {
+  position: relative;
+  height: 36px;
+  padding: 0;
+  background: var(--well);
+  border: 1px solid var(--control);
+  border-radius: var(--radius);
+  transition: border-color var(--quick);
+}
+
+.step:hover {
+  border-color: var(--text);
+}
+
+.step__fill {
+  --v: 1;
+  position: absolute;
+  inset: 3px;
+  transform-origin: bottom;
+  transform: scaleY(var(--v));
+}
+
+.step[data-hit="hit"] .step__fill,
+.step[data-hit="roll"] .step__fill {
+  background: var(--control);
+}
+
+.step[data-hit="accent"] .step__fill {
+  background: var(--text);
+}
+
+.step[data-hit="ghost"] .step__fill {
+  inset: 5px;
+  border: 2px solid var(--text-dim);
+}
+
+.step__roll {
+  position: absolute;
+  inset: 8px 6px;
+  display: flex;
+  justify-content: space-evenly;
+  align-items: stretch;
+}
+
+.step__roll i {
+  width: 2px;
+  background: var(--well);
+}
+
+/* chance under 1: a corner cut off */
+.step[data-chance="true"] {
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+}
+
+.step[data-cursor="true"] {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 3px var(--text-dim);
+}
+
+.step[data-fault="true"] {
+  border-color: var(--signal);
+  border-width: 2px;
+}
+
+/* ---------- piano roll ---------- */
+
+.roll {
+  display: block;
+  border-radius: var(--radius);
+}
+
+.roll:focus-visible {
+  outline-offset: 3px;
+}
+
+/* one step is a drum cell and its gap wide, so notes and steps share their x */
+.roll__area {
+  --row-px: 8px;
+  --step: calc((100% + var(--gap)) / 16);
+  position: relative;
+  min-height: 64px;
+  background-color: var(--well);
+  border: 1px solid var(--control);
+  background-image:
+    linear-gradient(to right, transparent calc(100% - 2px), var(--line-strong) calc(100% - 2px) calc(100% - 1px), transparent calc(100% - 1px)),
+    linear-gradient(to right, transparent calc(100% - 2px), rgb(37 41 50 / 0.9) calc(100% - 2px) calc(100% - 1px), transparent calc(100% - 1px)),
+    repeating-linear-gradient(to bottom, transparent 0 calc(var(--row-px) - 1px), rgb(37 41 50 / 0.6) calc(var(--row-px) - 1px) var(--row-px));
+  background-size:
+    calc((100% + var(--gap)) / 4) 100%,
+    calc((100% + var(--gap)) / 16) 100%,
+    auto;
+  background-repeat: repeat-x, repeat-x, repeat;
+  cursor: crosshair;
+  overflow: hidden;
+}
+
+.note {
+  --s: 0;
+  --l: 1;
+  position: absolute;
+  left: calc(var(--s) * (100% + var(--gap)) / 16);
+  width: calc(var(--l) * (100% + var(--gap)) / 16 - var(--gap));
+  min-width: 4px;
+  background: var(--control);
+  box-shadow: inset 0 0 0 1px var(--well);
+  cursor: grab;
+  touch-action: none;
+}
+
+.note::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.note[data-passing="true"] {
+  background-image: repeating-linear-gradient(45deg, transparent 0 3px, rgb(8 9 11 / 0.45) 3px 5px);
+}
+
+.note[data-selected="true"] {
+  background-color: var(--text);
+}
+
+/* a note cut at the bar's edge: a bright edge where it goes on */
+.note[data-cut-start="true"] {
+  box-shadow: inset 3px 0 0 var(--text);
+}
+
+.note[data-cut-end="true"] {
+  box-shadow: inset -3px 0 0 var(--text);
+}
+
+.note[data-cut-start="true"][data-cut-end="true"] {
+  box-shadow:
+    inset 3px 0 0 var(--text),
+    inset -3px 0 0 var(--text);
+}
+
+.note[data-selected="true"][data-cut-start="true"],
+.note[data-selected="true"][data-cut-end="true"] {
+  box-shadow: inset 0 0 0 1px var(--well);
+  outline: 1px dashed var(--text);
+  outline-offset: 1px;
+}
+
+.note[data-fault="true"] {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+.note[hidden] {
+  display: none;
+}
+
+.note[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.roll__glides {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% + var(--gap));
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.roll__glide {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ---------- step lane ---------- */
+
+.lane2 {
+  display: grid;
+  grid-template-columns: var(--head) minmax(0, 1fr);
+  gap: var(--col-gap);
+  padding: var(--s3) var(--pad-r) var(--s3) var(--pad-l);
+}
+
+.lane2__head {
+  display: grid;
+  align-content: start;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.lane2__head .seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: row;
+}
+
+/* in two rows the sliding marker would cross them; the chosen item is lit instead */
+.lane2__head .seg__marker {
+  display: none;
+}
+
+.lane2__head .seg__item[aria-checked="true"] {
+  background: var(--raised);
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+
+.lane2__value {
+  font-size: var(--t-small);
+  color: var(--text);
+}
+
+.lane2__note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.lane2__bars {
+  height: 110px;
+  cursor: ns-resize;
+  touch-action: none;
+  border-radius: var(--radius);
+}
+
+.lane2__bars[aria-disabled="true"] {
+  cursor: default;
+}
+
+.lane2__step {
+  --from: 0;
+  --to: 0;
+  position: relative;
+  background: var(--well);
+  border: 1px solid var(--line);
+}
+
+.lane2__bar {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: calc(var(--from) * 100%);
+  top: calc((1 - var(--to)) * 100%);
+  min-height: 2px;
+  background: var(--level);
+}
+
+.lane2__step[data-rest="true"] .lane2__bar {
+  background: var(--line-strong);
+}
+
+.lane2__step[data-cursor="true"] {
+  border-color: var(--text-dim);
+}
+
+.lane2[data-empty="true"] .lane2__bars {
+  opacity: 0.4;
+}
+
+/* ---------- side panel ---------- */
+
+.side {
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.side__body {
+  padding: var(--s3) var(--s4) var(--s4);
+}
+
+.side__empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.side__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+}
+
+.side__inst {
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.side__sub {
+  margin: var(--s4) 0 var(--s1);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+  font-size: var(--t-small);
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.side__libs {
+  display: grid;
+  gap: var(--s1);
+  font-size: var(--t-small);
+}
+
+.side__lib,
+.side__note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--t-small);
+}
+
+.side__warn {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--t-small);
+  box-shadow: inset 2px 0 0 var(--signal);
+  padding-left: var(--s2);
+}
+
+.side__cmd {
+  display: block;
+  padding: var(--s1) var(--s2);
+  background: var(--well);
+  border: 1px solid var(--line-strong);
+  font-size: 0.75rem;
+  user-select: all;
+}
+
+.side__rebuild {
+  margin-left: var(--s2);
+}
+
+.side .rack {
+  margin-top: var(--s4);
+  padding: var(--s3) 0 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+
+.side .rack .panel__n:empty {
+  display: none;
+}
+
+.side .fx__params {
+  grid-template-columns: minmax(0, 1fr);
+  padding-left: 0;
+}
+
+.side .fx__note {
+  margin-left: 0;
+}
+
+.side .adder {
+  width: 300px;
+  max-width: calc(100vw - 48px);
+}
+
+body.beat[data-state="loading"] .work,
+body.beat[data-state="loading"] .song,
+body.beat[data-state="failed"] .work,
+body.beat[data-state="failed"] .song {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* ---------- up to 1439: the actions take a second row of the deck ---------- */
+
+@media (max-width: 1439px) {
+  .bdeck {
+    grid-template-columns: auto auto 1fr;
+    row-gap: var(--s2);
+  }
+
+  .bdeck .deck__actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .side {
+    top: 132px;
+    max-height: calc(100vh - 144px);
+  }
+}
+
+/* ---------- 1024-1279 ---------- */
+
+@media (max-width: 1279px) {
+  .work {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: var(--s3);
+  }
+
+  .grid,
+  .lane2 {
+    --head: 184px;
+  }
+
+  .grid__hint {
+    display: none;
+  }
+}

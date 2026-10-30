@@ -1,5 +1,5 @@
 // Builds the pages into dist/: index.html, app.js, worklet.js, beat-worklet.js, styles.css,
-// redline_dsp.wasm.
+// redline_dsp.wasm, and the beat editor's beat.html, beat.js and beat.css.
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import * as esbuild from "esbuild";
 
@@ -12,6 +12,7 @@ await mkdir(dist, { recursive: true });
 
 async function copyStatic() {
   await copyFile(new URL("index.html", src), new URL("index.html", dist));
+  await copyFile(new URL("beat.html", src), new URL("beat.html", dist));
   await copyFile(new URL("engine/redline_dsp.wasm", src), new URL("redline_dsp.wasm", dist));
 }
 
@@ -21,13 +22,16 @@ const builds = [
   // the emscripten glue has a node branch that imports node: modules; it never runs in a worklet
   { ...common, entryPoints: ["src/worklet/processor.ts"], outfile: "dist/worklet.js", platform: "browser", external: ["node:*"] },
   { ...common, entryPoints: ["src/worklet/beat-processor.ts"], outfile: "dist/beat-worklet.js", platform: "browser", external: ["node:*"] },
+  // the page makes event tables on its own copy of the wasm, through the same glue
+  { ...common, entryPoints: ["src/beat/main.ts"], outfile: "dist/beat.js", platform: "browser", external: ["node:*"] },
   { ...common, entryPoints: ["src/styles/main.css"], outfile: "dist/styles.css", format: undefined },
+  { ...common, entryPoints: ["src/styles/beat.css"], outfile: "dist/beat.css", format: undefined },
 ];
 
 await copyStatic();
 if (watch) {
   for (const options of builds) await (await esbuild.context(options)).watch();
-  console.log("watching src/ (index.html and the wasm are copied once; restart after changing them)");
+  console.log("watching src/ (the html pages and the wasm are copied once; restart after changing them)");
 } else {
   await Promise.all(builds.map((options) => esbuild.build(options)));
 }

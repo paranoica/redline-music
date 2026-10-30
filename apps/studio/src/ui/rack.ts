@@ -12,6 +12,15 @@ const INTEGER_UNITS = new Set(["bits", "samples", "voices", "degrees", "midi", "
 const INTEGER_NAMES = new Set(["stages", "steps", "repeats", "seed", "degree", "octave", "voices"]);
 export const MAX_USER_EFFECTS = 32;
 
+// the beat page shows the same editor for a sound's rack: shorter, and at most 4 effects
+export interface RackOptions {
+  max?: number;
+  n?: string;
+  title?: string;
+  lede?: string;
+  empty?: string;
+}
+
 interface Card {
   root: HTMLElement;
   sw: Switch;
@@ -38,8 +47,12 @@ export class RackEditor {
   #cards: Card[] = [];
   #shape = "";
   #dragFrom: number | null = null;
+  readonly #max: number;
+  readonly #empty: string;
 
-  constructor(effects: readonly EffectSpec[], on: Handlers<UserEffect[]>) {
+  constructor(effects: readonly EffectSpec[], on: Handlers<UserEffect[]>, options: RackOptions = {}) {
+    this.#max = options.max ?? MAX_USER_EFFECTS;
+    this.#empty = options.empty ?? "Пусто. Добавь эффект — он встанет после встроенной цепочки.";
     this.#specs = new Map(effects.map((e) => [e.effect, e]));
     this.#addable = addable(effects);
     this.#on = on;
@@ -53,11 +66,11 @@ export class RackEditor {
       h(
         "header",
         { class: "panel__head" },
-        h("h2", { class: "panel__title", id: "rack-title" }, h("span", { class: "panel__n num" }, "05"), "Рэк"),
+        h("h2", { class: "panel__title", id: "rack-title" }, h("span", { class: "panel__n num" }, options.n ?? "05"), options.title ?? "Рэк"),
         this.#count,
         effects.length ? this.#add : h("span", { class: "panel__note" }, "Рэк недоступен: модуль redline_dsp не собран"),
       ),
-      h("p", { class: "panel__lede" }, "Эффекты по порядку, после встроенных и до бита. Тяни за ручку, чтобы переставить."),
+      h("p", { class: "panel__lede" }, options.lede ?? "Эффекты по порядку, после встроенных и до бита. Тяни за ручку, чтобы переставить."),
       this.#list,
     );
   }
@@ -77,8 +90,8 @@ export class RackEditor {
       const spec = this.#specs.get(e.effect);
       for (const p of spec?.params ?? []) card.params.get(p.name)?.set(e.params[p.name] ?? p.default);
     });
-    this.#count.textContent = `${this.#rack.length} из ${MAX_USER_EFFECTS}`;
-    this.#add.disabled = this.#rack.length >= MAX_USER_EFFECTS;
+    this.#count.textContent = `${this.#rack.length} из ${this.#max}`;
+    this.#add.disabled = this.#rack.length >= this.#max;
   }
 
   #emit(rack: UserEffect[], commit: boolean): void {
@@ -109,7 +122,7 @@ export class RackEditor {
     this.#cards = this.#rack.map((e, i) => this.#card(e, i));
     this.#list.replaceChildren(...this.#cards.map((c) => c.root));
     if (!this.#rack.length) {
-      this.#list.append(h("li", { class: "rack__empty" }, "Пусто. Добавь эффект — он встанет после встроенной цепочки."));
+      this.#list.append(h("li", { class: "rack__empty" }, this.#empty));
     }
   }
 
