@@ -225,3 +225,9 @@ def test_make_private_dir_makes_parents_at_0700_and_refuses_outside(tmp_path):
         assert mode(folder) == 0o700
     with pytest.raises(ValueError):
         make_private_dir(tmp_path.parent / "other", tmp_path)
+
+
+@pytest.mark.parametrize("stored", ["input/a\nb.wav", "input/a\rb.wav", "input/a\x1bb.wav"])
+def test_a_path_with_a_control_character_is_refused(stored):
+    with pytest.raises(model.SongError):
+        model.parse(doc(beat={"file": stored}))

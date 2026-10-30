@@ -1,9 +1,11 @@
 import http.client
 import io
 import json
+import shlex
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,7 +15,7 @@ from redline.engine.render import Engine
 from redline.record.session import Outcome
 from redline.song import model
 from redline.song.rec import NotReady
-from redline.song.server import SongApp, close_all, make_server
+from redline.song.server import SongApp, close_all, job_argv, make_server
 from redline.studio.server import Studio
 from redline_signals import engine_context, engine_stems
 
@@ -591,3 +593,21 @@ def test_a_text_chosen_by_its_seed_alone_takes_the_latest_version(made, root):
     empty = {"rev": 2, "set": {"text": {"seed": 6}}}
     assert api(made, "POST", "/api/song", empty)[0] == 422
     assert model.load(NAME).text == {"seed": 5, "version": 2}
+
+
+def test_the_text_command_quotes_a_beat_path_a_shell_would_read(made, root):
+    odd = "input/b $(touch x).wav"
+    sf.write(root / odd, tone(2.0), 8000)
+    status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"file": odd}}})
+    assert status == 200
+    command = data["stations"]["text"]["command"]
+    assert shlex.split(command)[-1] == odd
+    assert "'input/b $(touch x).wav'" in command
+
+
+def test_a_job_command_keeps_a_dash_name_a_name():
+    from redline.cli.parser import build_parser
+
+    argv = job_argv("auto", "-h", 7, Path("/r/out.json"))
+    args = build_parser().parse_args(argv[argv.index("song") :])
+    assert (args.name, args.kind, args.seed, args.result) == ("-h", "auto", 7, Path("/r/out.json"))

@@ -9,6 +9,7 @@ import contextlib
 import functools
 import json
 import math
+import shlex
 import sys
 import threading
 import time
@@ -153,8 +154,11 @@ def default_assets(lyrics: Path, build: Path) -> tuple[Any, Any, Any]:
 
 def job_argv(kind: str, name: str, seed: int, result: Path) -> list[str]:
     """The command of a job: the same program, its internal `song job`."""
-    argv = [sys.executable, "-m", "redline", "song", "job", kind, name, "--result", str(result)]
-    return [*argv, "--seed", str(seed)] if kind == "auto" else argv
+    argv = [sys.executable, "-m", "redline", "song", "job", "--result", str(result)]
+    if kind == "auto":
+        argv += ["--seed", str(seed)]
+    # after "--" a name starting with a dash stays a name
+    return [*argv, "--", kind, name]
 
 
 def _int(value: Any, what: str, low: int = 0) -> int:
@@ -289,7 +293,7 @@ class SongApp:
         if song.text is None:
             return {
                 "seed": None,
-                "command": f"uv run redline lyrics write --seed <N> --beat {beat}",
+                "command": f"uv run redline lyrics write --seed <N> --beat {shlex.quote(beat)}",
             }
         from redline.lyrics.write.generate import versions
 
@@ -301,7 +305,9 @@ class SongApp:
             "version": song.text["version"],
             "versions": found,
             "pending": self._pending(folder),
-            "command": f"uv run redline lyrics write --seed {seed} --beat {beat}",
+            "command": shlex.join(
+                ["uv", "run", "redline", "lyrics", "write", "--seed", str(seed), "--beat", beat]
+            ),
         }
 
     def _pending(self, folder: Path | None) -> str | None:

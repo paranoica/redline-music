@@ -215,7 +215,7 @@ class Studio:
         if settings not in self.exact:
             raise BadRequest(HTTPStatus.CONFLICT, "render these settings exactly before saving")
         path = self.folder / self.track_key / "settings.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _private_folder(path.parent)
         _replace(path, json.dumps(to_dict(settings), indent=1))
         return path
 
@@ -243,14 +243,22 @@ class Studio:
             # a rack loads only from a file that says its version
             changed = {"version": VERSION, **changed}
         folder = self.folder / "presets"
-        folder.mkdir(parents=True, exist_ok=True)
+        _private_folder(folder)
         _replace(folder / f"{name}.json", json.dumps(changed, ensure_ascii=False))
+
+
+def _private_folder(folder: Path) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o700)
 
 
 def _replace(path: Path, text: str) -> None:
     # two saves at once, or a crash mid-write, must not leave half a file behind
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(text)
+    tmp.chmod(0o600)
     tmp.replace(path)
 
 

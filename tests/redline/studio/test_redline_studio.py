@@ -435,3 +435,15 @@ def test_a_silent_vocal_is_named_before_the_studio_opens():
     with pytest.raises(ValueError, match="vocal stem is silent"):
         live.check_vocal(Engine(np.zeros_like(vocal), beat, context(vocal)))
     live.check_vocal(Engine(vocal, beat, context(vocal)))
+
+
+def test_saved_settings_and_presets_are_the_owners_only(server, studio):
+    call(server, "POST", "/api/render", {"settings": {}, "seq": 1})
+    assert call(server, "POST", "/api/save", {"settings": {}})[0] == 200
+    call(server, "POST", "/api/preset", {"name": "p", "settings": {"drive_db": 35}})
+    saved = studio.folder / "track-key" / "settings.json"
+    preset = studio.folder / "presets" / "p.json"
+    assert saved.stat().st_mode & 0o777 == 0o600
+    assert preset.stat().st_mode & 0o777 == 0o600
+    assert saved.parent.stat().st_mode & 0o777 == 0o700
+    assert preset.parent.stat().st_mode & 0o777 == 0o700

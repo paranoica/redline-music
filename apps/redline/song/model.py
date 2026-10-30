@@ -49,7 +49,7 @@ def check_name(name: object) -> str:
 def _check_relative(value: object, where: str) -> str:
     if not isinstance(value, str) or not value:
         raise SongError(f"{where}: must be a path string")
-    if "\0" in value or "\\" in value:
+    if "\\" in value or any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
         raise SongError(f"{where}: {value!r} is not a path")
     path = Path(value)
     if path.is_absolute():
