@@ -1,4 +1,4 @@
-"""`redline beat`: the beat studio's commands, starting with its sample library."""
+"""`redline beat`: the beat studio's commands: scores by seed and the sample library."""
 
 import argparse
 import sys
@@ -9,6 +9,8 @@ from redline.beat import library
 
 def _beat(args: argparse.Namespace) -> int | None:
     """Run a `redline beat` subcommand; None when none was given."""
+    if args.beat_command == "write":
+        return _beat_write(args)
     handlers = {"list": _sounds_list, "fetch": _sounds_fetch}
     if args.beat_command != "sounds" or args.sounds_command not in handlers:
         return None
@@ -50,4 +52,30 @@ def _sounds_fetch(args: argparse.Namespace) -> int:
         f"{args.name}: {len(result.downloaded)} downloaded, {len(result.present)} already there,"
         f" in {root / args.name}"
     )
+    return 0
+
+
+def _beat_write(args: argparse.Namespace) -> int:
+    from redline.beat import handoff
+    from redline.beat.recipe import RecipeError
+
+    try:
+        result = handoff.write_beat(
+            args.root, args.seed, args.genre, args.bpm, args.key, args.force
+        )
+    except (handoff.BeatError, RecipeError, OSError, ValueError) as error:
+        print(f"redline: {error}", file=sys.stderr)
+        return 2
+    if isinstance(result, handoff.Pending):
+        print(f"waiting for the beatmaker: {result.request}")
+        print(f"the draft goes to: {result.draft}")
+        return 0
+    if isinstance(result, handoff.Failed):
+        print(f"seed {args.seed} {result.status}:")
+        for reason in result.reasons:
+            print(f"  {reason}")
+        return 1
+    print(f"saved: {result.path}")
+    for warning in result.warnings:
+        print(f"  warning: {warning}")
     return 0

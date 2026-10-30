@@ -255,8 +255,21 @@ def _record(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> 
 
 def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     """Register `redline beat` and its subcommands."""
-    beat = commands.add_parser("beat", help="the beat studio: sample library")
+    beat = commands.add_parser("beat", help="the beat studio: scores by seed, sample library")
     beat_commands = beat.add_subparsers(dest="beat_command", metavar="command")
+    write = beat_commands.add_parser(
+        "write",
+        help="write a beat score by seed through the beatmaker agent: run it again after the "
+        "agent answers",
+    )
+    write.add_argument("--seed", type=int, required=True, help="the beat's seed, 0 or more")
+    write.add_argument("--genre", help="the genre (default: drawn by seed)")
+    write.add_argument("--bpm", type=float, help="the tempo (default: drawn in the genre's range)")
+    write.add_argument("--key", help="the key, like 'F# minor' (default: drawn by seed)")
+    write.add_argument("--root", type=Path, default=Path("private/beats"), help="the beats folder")
+    write.add_argument(
+        "--force", action="store_true", help="start the seed over; saved scores stay"
+    )
     sounds = beat_commands.add_parser("sounds", help="the sample instruments: list, fetch")
     sounds_commands = sounds.add_subparsers(dest="sounds_command", metavar="command")
     listed = sounds_commands.add_parser(
