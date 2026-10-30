@@ -25,8 +25,19 @@ there when the Rust core changes, then build the page again.
 ## Layout
 
 - `src/core/` — pure modules: settings to racks (a port of `live.racks`), rack diffs, loudness
-  (BS.1770), undo history, latency alignment, WAV reading, formatting, control arithmetic.
+  (BS.1770), undo history, latency alignment, WAV reading, formatting, control arithmetic,
+  automation lanes (time and value mapping, point edits).
 - `src/engine/` — the engine the worklet runs (`core.ts`, testable in node), the page's side of
   its messages (`client.ts`), the AudioContext setup (`host.ts`).
 - `src/worklet/processor.ts` — the AudioWorkletProcessor around the engine.
-- `src/ui/` — the waveform, faders, rack editor, chain panels and meters; `src/main.ts` wires them.
+- `src/ui/` — the waveform, automation lanes, faders, rack editor, chain panels and meters;
+  `src/main.ts` wires them.
+
+## Automation lanes
+
+A rack effect's automation shows under the waveform, one lane per param, on the same time
+scale. A press on empty ground adds a point, a drag moves it, a double click removes it; a
+lane left without points is dropped and the param goes back to its own value. With a lane
+focused: Left and Right select a point, Up and Down change its value (Shift for ten steps),
+Alt with Left and Right move it by 0.1 s (Shift for 1 s), Enter adds a point at the playhead,
+Delete removes the selected one. Every edit is one step of undo.
