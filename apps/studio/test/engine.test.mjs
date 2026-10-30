@@ -225,3 +225,78 @@ test("a rebuilt rack of another latency takes over through silence and lines up 
   assert.equal(posted.filter((m) => m.type === "levels").at(-1).latency, 240);
   assert.ok(Math.abs(left(out, RATE / 2 - 10) - 0.75) < 1e-3, `${left(out, RATE / 2 - 10)}`);
 });
+
+test("a lane taken away gives its param back to the slot's own value at once", () => {
+  const { engine } = setup({ vocal: dc(RATE, 0.5) });
+  const lanes = [{ slot: 0, param: "db", points: [[0, -20]] }];
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: rack({ effect: "gain", params: { db: 0 } }), lanes });
+  engine.handle({ type: "play", playing: true });
+  let out = run(engine, 9600);
+  assert.ok(Math.abs(left(out, 9000) - 0.05) < 2e-3, `${left(out, 9000)}`);
+  engine.handle({ type: "lanes", version: 2, lanes: [] });
+  out = run(engine, 9600);
+  assert.ok(Math.abs(left(out, 9000) - 0.5) < 2e-3, `${left(out, 9000)}`);
+});
+
+test("a lane taken away goes back to the value last set in place; while it is there it rules", () => {
+  const { engine } = setup({ vocal: dc(RATE, 0.5) });
+  const lanes = [{ slot: 0, param: "db", points: [[0, -20]] }];
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: rack({ effect: "gain", params: { db: 0 } }), lanes });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 2048);
+  engine.handle({ type: "set", track: "vocal", version: 2, slot: 0, param: "db", value: -6 });
+  let out = run(engine, 9600);
+  assert.ok(Math.abs(left(out, 9000) - 0.05) < 2e-3, `the set overrode the lane: ${left(out, 9000)}`);
+  engine.handle({ type: "lanes", version: 2, lanes: [] });
+  out = run(engine, 9600);
+  assert.ok(Math.abs(left(out, 9000) - 0.5 * 10 ** (-6 / 20)) < 2e-3, `${left(out, 9000)}`);
+});
+
+test("a lane on a param the rack's JSON leaves out goes back to the effect's default", () => {
+  const { engine } = setup({ vocal: dc(RATE, 0.5) });
+  const lanes = [{ slot: 0, param: "db", points: [[0, -20]] }];
+  engine.handle({ type: "rack", track: "vocal", version: 2, json: rack({ effect: "gain" }), lanes });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 4096);
+  engine.handle({ type: "lanes", version: 2, lanes: [] });
+  const out = run(engine, 9600);
+  assert.ok(Math.abs(left(out, 9000) - 0.5) < 2e-3, `${left(out, 9000)}`);
+});
+
+test("a lane that stays keeps its param; only the one taken away is given back", () => {
+  const { engine } = setup({ vocal: dc(RATE, 0.5) });
+  const both = [
+    { slot: 0, param: "db", points: [[0, -20]] },
+    { slot: 1, param: "db", points: [[0, -6]] },
+  ];
+  const json = rack({ effect: "gain", params: { db: 0 } }, { effect: "gain", params: { db: 0 } });
+  engine.handle({ type: "rack", track: "vocal", version: 2, json, lanes: both });
+  engine.handle({ type: "play", playing: true });
+  run(engine, 4096);
+  engine.handle({ type: "lanes", version: 2, lanes: [both[1]] });
+  const out = run(engine, 9600);
+  assert.ok(Math.abs(left(out, 9000) - 0.5 * 10 ** (-6 / 20)) < 2e-3, `${left(out, 9000)}`);
+});
+
+test("moving lanes play without allocating on the wasm heap", () => {
+  let mallocs = 0;
+  const counted = new Proxy(dsp, {
+    get(target, key) {
+      if (key === "_malloc") return (n) => (mallocs++, target._malloc(n));
+      return target[key];
+    },
+  });
+  const engine = new Engine(counted, RATE, () => {});
+  engine.handle({ type: "stems", frames: RATE, vocal: dc(RATE, 0.5), beat: dc(RATE, 0), original: dc(RATE, 0) });
+  const lanes = [{ slot: 0, param: "db", points: [[0, -20], [1, 0]] }];
+  for (const track of ["vocal", "beat", "master"]) {
+    const json = track === "vocal" ? rack({ effect: "gain", params: { db: 0 } }) : rack();
+    engine.handle({ type: "rack", track, version: 1, json, lanes: track === "vocal" ? lanes : [] });
+  }
+  engine.handle({ type: "play", playing: true });
+  run(engine, 9600);
+  mallocs = 0;
+  const out = run(engine, 4096);
+  assert.ok(left(out, 4000) > left(out, 100) + 0.005, "the lane moved the gain");
+  assert.equal(mallocs, 0);
+});

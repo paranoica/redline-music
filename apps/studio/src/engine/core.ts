@@ -5,10 +5,11 @@
 // is driven from two calls: `handle` for a message from the page, `render` for a block.
 
 import { valueAt } from "../core/automation.ts";
+import { catalogueOf, paramNumber, type Catalogue } from "../core/diff.ts";
 import { DelayLine, align } from "../core/latency.ts";
 import { LoudnessMeter } from "../core/loudness.ts";
-import type { Lane, Track } from "../types.ts";
-import { lastError, withText, type Dsp } from "./dsp.ts";
+import type { EffectSpec, Lane, ParamValue, Track } from "../types.ts";
+import { lastError, utf8, withText, type Dsp } from "./dsp.ts";
 import type { FromEngine, Source, ToEngine } from "./protocol.ts";
 
 const BLOCK = 128;
@@ -24,12 +25,27 @@ const AB_RAMP_S = 0.03;
 const DELAY_CAPACITY = 1 << 17;
 const LEVELS_PER_S = 30;
 
+// a lane with its param's name kept in the heap, so the audio thread does not encode it
+interface LiveLane {
+  lane: Lane;
+  name: number;
+  len: number;
+  value: number;
+}
+
+interface Slot {
+  effect: string;
+  on: boolean;
+  params: Record<string, ParamValue>;
+}
+
 interface Inst {
   handle: number;
   version: number;
   latency: number;
-  lanes: Lane[];
-  laneValues: number[];
+  lanes: LiveLane[];
+  // the slots' own values, for a param a lane lets go of
+  slots: Slot[];
   // the master effect's gain and trim, for the gain reduction it shows
   master: { gain: number; trim: number } | null;
 }
@@ -71,6 +87,7 @@ export class Engine {
   readonly #dsp: Dsp;
   readonly #rate: number;
   readonly #post: (m: FromEngine) => void;
+  readonly #catalogue: Catalogue;
   readonly #racks: Record<Track, Rack> = { vocal: new Rack("vocal"), beat: new Rack("beat"), master: new Rack("master") };
   // heap buffers of WARM_CHUNK stereo frames
   readonly #buf: Record<"vocal" | "beat" | "side" | "mix" | "alt" | "altSide" | "warm" | "warmSide", number>;
@@ -100,6 +117,7 @@ export class Engine {
     this.#dsp = dsp;
     this.#rate = rate;
     this.#post = post;
+    this.#catalogue = catalogueOf(JSON.parse(dsp.UTF8ToString(dsp._effects_json())) as EffectSpec[]);
     const names = ["vocal", "beat", "side", "mix", "alt", "altSide", "warm", "warmSide"] as const;
     const buf = {} as Record<(typeof names)[number], number>;
     for (const name of names) {
@@ -127,10 +145,7 @@ export class Engine {
         return this.#set(m.track, m.version, m.slot, m.param, m.value);
       case "lanes": {
         const inst = this.#racks.vocal.version(m.version);
-        if (inst) {
-          inst.lanes = m.lanes;
-          inst.laneValues = m.lanes.map(() => Number.NaN);
-        }
+        if (inst) this.#setLanes(inst, m.lanes);
         return;
       }
       case "play":
@@ -172,13 +187,14 @@ export class Engine {
     const handle = withText(dsp, json, (p, n) => dsp._rack_new(this.#rate, p, n));
     if (!handle) return this.#error(lastError(dsp), track, version);
     const latency = dsp._rack_latency(handle);
+    const slots = rackSlots(json);
     const inst: Inst = {
       handle,
       version,
       latency,
-      lanes: track === "vocal" ? lanes : [],
-      laneValues: (track === "vocal" ? lanes : []).map(() => Number.NaN),
-      master: track === "master" ? masterParams(json) : null,
+      lanes: track === "vocal" ? this.#encode(lanes) : [],
+      slots,
+      master: track === "master" ? masterParams(slots) : null,
     };
     const rack = this.#racks[track];
     if (rack.pending) this.#free(rack.pending.inst);
@@ -202,6 +218,42 @@ export class Engine {
 
   #free(inst: Inst): void {
     this.#dsp._rack_free(inst.handle);
+    this.#release(inst.lanes);
+    inst.lanes = [];
+  }
+
+  #encode(lanes: Lane[]): LiveLane[] {
+    const dsp = this.#dsp;
+    return lanes.map((lane) => {
+      const bytes = utf8(lane.param);
+      const name = dsp._malloc(Math.max(1, bytes.length));
+      if (!name) throw new Error("the wasm heap is full");
+      dsp.HEAPU8.set(bytes, name);
+      return { lane, name, len: bytes.length, value: Number.NaN };
+    });
+  }
+
+  #release(lanes: LiveLane[]): void {
+    for (const l of lanes) this.#dsp._free(l.name);
+  }
+
+  // a param no lane drives any more goes back to its slot's own value
+  #setLanes(inst: Inst, lanes: Lane[]): void {
+    const old = inst.lanes;
+    inst.lanes = this.#encode(lanes);
+    for (const l of old) {
+      const { slot, param } = l.lane;
+      if (lanes.some((n) => n.slot === slot && n.param === param)) continue;
+      const value = this.#own(inst, slot, param);
+      if (!Number.isNaN(value)) this.#dsp._rack_set(inst.handle, slot, l.name, l.len, value);
+    }
+    this.#release(old);
+  }
+
+  #own(inst: Inst, slot: number, param: string): number {
+    const s = inst.slots[slot];
+    const spec = s && this.#catalogue.get(s.effect)?.params.find((p) => p.name === param);
+    return s && spec ? paramNumber(spec, s.params[param]) : Number.NaN;
   }
 
   #realign(): void {
@@ -222,6 +274,10 @@ export class Engine {
   #set(track: Track, version: number, slot: number, param: string, value: number): void {
     const inst = this.#racks[track].version(version);
     if (!inst) return;
+    const s = inst.slots[slot];
+    if (s) s.params[param] = value;
+    // a lane rules its param; the value set here is the one it goes back to
+    if (inst.lanes.some((l) => l.lane.slot === slot && l.lane.param === param)) return;
     const dsp = this.#dsp;
     const done = withText(dsp, param, (p, n) => dsp._rack_set(inst.handle, slot, p, n, value));
     if (done !== 0) return this.#error(lastError(dsp), track, version);
@@ -279,6 +335,8 @@ export class Engine {
       const message = lastError(dsp);
       // a rack that panicked is freed by the core; the track goes on without it
       if (rack.current === inst) rack.current = null;
+      this.#release(inst.lanes);
+      inst.lanes = [];
       this.#error(message, rack.track, inst.version);
       this.#heap().fill(0, io >> 2, (io >> 2) + 2 * n);
     }
@@ -286,12 +344,12 @@ export class Engine {
 
   #lanes(inst: Inst, seconds: number): void {
     const dsp = this.#dsp;
-    inst.lanes.forEach((lane, j) => {
-      const v = valueAt(lane.points, seconds);
-      if (v === inst.laneValues[j]) return;
-      inst.laneValues[j] = v;
-      withText(dsp, lane.param, (p, len) => dsp._rack_set(inst.handle, lane.slot, p, len, v));
-    });
+    for (const l of inst.lanes) {
+      const v = valueAt(l.lane.points, seconds);
+      if (v === l.value) continue;
+      l.value = v;
+      dsp._rack_set(inst.handle, l.lane.slot, l.name, l.len, v);
+    }
   }
 
   // a new rack catches up with the live position before it takes over
@@ -530,16 +588,17 @@ function db(x: number): number {
   return 20 * Math.log10(x);
 }
 
-// gain and trim of the master effect in a rack's JSON: what it raises the mix by before its clip
-function masterParams(json: string): { gain: number; trim: number } | null {
-  try {
-    const rack = JSON.parse(json) as { effects?: { effect?: string; on?: boolean; params?: Record<string, unknown> }[] };
-    const master = rack.effects?.find((e) => e.effect === "master" && e.on !== false);
-    if (!master) return null;
-    const gain = typeof master.params?.gain === "number" ? master.params.gain : 0;
-    const trim = typeof master.params?.trim === "number" ? master.params.trim : 0;
-    return { gain, trim };
-  } catch {
-    return null;
-  }
+// the core has taken this JSON already, so it parses
+function rackSlots(json: string): Slot[] {
+  const rack = JSON.parse(json) as { effects?: { effect: string; on?: boolean; params?: Record<string, ParamValue> }[] };
+  return (rack.effects ?? []).map((e) => ({ effect: e.effect, on: e.on !== false, params: { ...e.params } }));
+}
+
+// gain and trim of the master effect: what it raises the mix by before its clip
+function masterParams(slots: Slot[]): { gain: number; trim: number } | null {
+  const master = slots.find((e) => e.effect === "master" && e.on);
+  if (!master) return null;
+  const gain = typeof master.params.gain === "number" ? master.params.gain : 0;
+  const trim = typeof master.params.trim === "number" ? master.params.trim : 0;
+  return { gain, trim };
 }
