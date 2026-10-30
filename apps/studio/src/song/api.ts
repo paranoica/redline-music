@@ -138,7 +138,9 @@ export interface Ranking {
   skipped: SkippedTake[];
 }
 
-export type JobKind = "separate" | "rank" | "auto" | "result" | "beat_render";
+export type JobKind = "separate" | "rank" | "auto" | "result" | "beat_render" | "flip_stems" | "flip_render";
+// the kinds the page starts through /jobs/start
+export type StartKind = Exclude<JobKind, "beat_render" | "flip_render">;
 export type JobState = "queued" | "running" | "cancelling" | "done" | "failed" | "cancelled";
 
 export interface Job {
@@ -210,6 +212,7 @@ export function createSongApi({ base, token }: SongApiOptions) {
     // the paths the mounted surfaces build theirs from
     mixBase: apiPath(root, "/mix"),
     beatBase: apiPath(root, "/beat"),
+    flipBase: apiPath(root, "/flip"),
     close: (): void => lifetime.abort(),
     song: () => json<SongReply>(call("GET", "/song")),
     setSong: (rev: number, set: SongChange) => json<SongReply>(call("POST", "/song", { rev, set })),
@@ -226,7 +229,7 @@ export function createSongApi({ base, token }: SongApiOptions) {
     takeAudio: async (name: string, withBeat = false): Promise<Blob> =>
       (await call("GET", `/takes/audio?name=${encodeURIComponent(name)}${withBeat ? "&with=beat" : ""}`)).blob(),
     jobs: async (): Promise<Job[]> => ((await json<{ jobs: Job[] }>(call("GET", "/jobs"))).jobs),
-    startJob: (kind: Exclude<JobKind, "beat_render">, seed?: number) =>
+    startJob: (kind: StartKind, seed?: number) =>
       json<unknown>(call("POST", "/jobs/start", seed === undefined ? { kind } : { kind, seed })),
     cancelJob: (kind: JobKind) => json<unknown>(call("POST", "/jobs/cancel", { kind })),
     // null before the first auto run

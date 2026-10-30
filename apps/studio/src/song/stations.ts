@@ -2,6 +2,8 @@
 
 import { mount as mountMix } from "../main.ts";
 import { mount as mountBeat } from "../beat/main.ts";
+import { mount as mountFlip } from "../flip/main.ts";
+import { beatSurface } from "../flip/model.ts";
 import { ApiError } from "./api.ts";
 import type { RecSnapshot, VariantsReply } from "./api.ts";
 import { Poller } from "./poll.ts";
@@ -44,8 +46,8 @@ function surfaceSlot(
       return;
     }
     if (host.place(kind, slot)) return;
-    const mount = kind === "beat" ? mountBeat : mountMix;
-    const base = kind === "beat" ? ctx.api.beatBase : ctx.api.mixBase;
+    const mount = kind === "beat" ? mountBeat : kind === "flip" ? mountFlip : mountMix;
+    const base = kind === "beat" ? ctx.api.beatBase : kind === "flip" ? ctx.api.flipBase : ctx.api.mixBase;
     void host.show(kind, mount, slot, base, ctx.token).catch(() => {
       slot.replaceChildren(h("p", { class: "lede" }, "Поверхность не загрузилась."));
     });
@@ -69,16 +71,17 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
     slot?.dispose();
     slot = null;
     const bpm = b.bpm === null ? "" : ` · ${Math.round(b.bpm)} BPM`;
-    if (b.kind === "file") {
-      void host.dispose();
+    if (beatSurface(b) === "flip") {
+      slot = surfaceSlot(ctx, host, "flip", "Редактор флипа", "Бит уже выбран, дальше — текст.");
       el.replaceChildren(
         h(
           "section",
           { class: "card", "aria-label": "Бит" },
           h("header", { class: "card__head" }, h("h2", { class: "card__title" }, "Бит"), h("p", { class: "card__meta num" }, `файл${bpm}`)),
-          h("div", { class: "card__body" }, h("p", { class: "result__where" }, b.file ?? ""), h("p", { class: "lede" }, "Готовый бит из файла. Темп взят из сетки бита; тональность не определяется.")),
+          h("div", { class: "card__body" }, h("p", { class: "result__where" }, b.file ?? ""), slot.el),
         ),
       );
+      slot.mountNow();
       return;
     }
     const seed = h("input", { class: "field", value: String(b.seed ?? ""), inputmode: "numeric", "aria-label": "seed бита" });
@@ -90,7 +93,7 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
       }
       if (n === b.seed) return;
       if (host.dirty()) {
-        const where = host.kind === "mix" ? "сведении" : "бите";
+        const where = host.kind === "mix" ? "сведении" : host.kind === "flip" ? "флипе" : "бите";
         if (!confirm(`Несохранённые правки в ${where} пропадут. Сменить seed?`)) return;
       }
       void ctx.change({ beat: { own: n } }).then((ok) => {
@@ -116,12 +119,16 @@ export function createBeatStation(ctx: Ctx, host: SurfaceHost): KeyedView {
   }
 
   draw();
+  // a flip made the song's beat: the song is read again
+  const used = (): void => void ctx.reload().catch(() => {});
+  el.addEventListener("flip-used", used);
   return {
     el,
     update() {
       if (JSON.stringify(ctx.state().song.stations.beat) !== seen) draw();
     },
     dispose() {
+      el.removeEventListener("flip-used", used);
       slot?.dispose();
       host.park();
     },

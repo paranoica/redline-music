@@ -1,7 +1,7 @@
 // What the stations share: the page's context, the missing-input card, job words, and the
 // host that keeps one audio surface mounted at a time.
 
-import type { ApiError, Job, JobKind, SongApi, SongChange, SongReply } from "./api.ts";
+import type { ApiError, Job, JobKind, SongApi, StartKind, SongChange, SongReply } from "./api.ts";
 import type { StationId } from "./rail.ts";
 import type { Scope } from "../core/lifecycle.ts";
 import type { Mount, Mounted } from "../core/mount.ts";
@@ -22,7 +22,7 @@ export interface Ctx {
   reload(): Promise<void>;
   notice(text: string | null): void;
   go(id: StationId): void;
-  start(kind: Exclude<JobKind, "beat_render">, seed?: number): Promise<void>;
+  start(kind: StartKind, seed?: number): Promise<void>;
   cancel(kind: JobKind): Promise<void>;
 }
 
@@ -41,6 +41,8 @@ export const JOB_NAMES: Record<JobKind, string> = {
   auto: "авто-сведение",
   result: "сборка итога",
   beat_render: "рендер бита",
+  flip_stems: "разбор на стемы",
+  flip_render: "сборка флипа",
 };
 
 export const JOB_STATE: Record<Job["state"], string> = {
@@ -150,7 +152,7 @@ export function needCard(o: NeedOptions): HTMLElement {
   );
 }
 
-export function jobBar(ctx: Ctx, kind: Exclude<JobKind, "beat_render">, label: string, again?: string): HTMLElement {
+export function jobBar(ctx: Ctx, kind: StartKind, label: string, again?: string): HTMLElement {
   const job = jobOf(ctx.state().jobs, kind);
   const live = jobActive(job);
   const start = h("button", { class: "btn btn--ghost", type: "button", disabled: live }, live ? label : (again ?? label));

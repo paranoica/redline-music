@@ -5,7 +5,7 @@ import { Scope } from "../core/lifecycle.ts";
 import type { Mount } from "../core/mount.ts";
 import { h } from "../ui/dom.ts";
 import { acceptSong, ApiError, createSongApi, staleSong } from "./api.ts";
-import type { Job, JobKind, Ranking, RecSnapshot, SongChange, SongReply } from "./api.ts";
+import type { Job, JobKind, Ranking, RecSnapshot, SongChange, SongReply, StartKind } from "./api.ts";
 import { Poller } from "./poll.ts";
 import { createRail, defaultStation, railItems, STATION_NAMES } from "./rail.ts";
 import type { StationId } from "./rail.ts";
@@ -15,6 +15,7 @@ import { finishedKinds, JOB_NAMES, JOB_STATE, jobActive, needCard, refusalText, 
 import type { Ctx, PageState } from "./steps.ts";
 import { createLyric, createTextStation } from "./text.ts";
 import { createTakesStation } from "./takes.ts";
+import { beatSurface } from "../flip/model.ts";
 
 const typing = (target: EventTarget | null): boolean => {
   const el = target as HTMLElement | null;
@@ -195,7 +196,7 @@ export const mount: Mount = async (root, options) => {
         return false;
       }
     },
-    async start(kind: Exclude<JobKind, "beat_render">, seed?: number) {
+    async start(kind: StartKind, seed?: number) {
       try {
         await api.startJob(kind, seed);
         say(null);
@@ -260,9 +261,9 @@ export const mount: Mount = async (root, options) => {
   async function open(id: StationId, first = false): Promise<void> {
     if (!song) return;
     const mine = ++opening;
-    const kind = id === "beat" || id === "mix" ? id : null;
+    const kind = id === "beat" ? beatSurface(song.stations.beat) : id === "mix" ? id : null;
     const lost = kind ? surfaces.unsavedFor(kind) : null;
-    if (lost && !confirm(`Несохранённые правки в ${lost === "beat" ? "бите" : "сведении"} пропадут. Перейти?`)) return;
+    if (lost && !confirm(`Несохранённые правки в ${lost === "beat" ? "бите" : lost === "flip" ? "флипе" : "сведении"} пропадут. Перейти?`)) return;
     if (!first && current === "text" && id !== "text" && view?.dirty?.() && !confirm("Несохранённая правка текста пропадёт. Перейти?")) return;
     if (!first) {
       await reload().catch(() => {});

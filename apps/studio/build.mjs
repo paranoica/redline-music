@@ -1,5 +1,5 @@
 // Builds the pages into dist/: index.html, app.js, worklet.js, beat-worklet.js, styles.css,
-// redline_dsp.wasm, the beat editor's beat.html, beat.js and beat.css, and the song page's song.html, song.js and song.css.
+// redline_dsp.wasm, the beat editor's beat.html, beat.js and beat.css, and the song page's song.html, song.js, song.css and flip.css.
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import * as esbuild from "esbuild";
 
@@ -30,6 +30,7 @@ const builds = [
   { ...common, entryPoints: ["src/styles/song.css"], outfile: "dist/song.css", format: undefined },
   { ...common, entryPoints: ["src/styles/main.css"], outfile: "dist/styles.css", format: undefined },
   { ...common, entryPoints: ["src/styles/beat.css"], outfile: "dist/beat.css", format: undefined },
+  { ...common, entryPoints: ["src/styles/flip.css"], outfile: "dist/flip.css", format: undefined },
 ];
 
 await copyStatic();
