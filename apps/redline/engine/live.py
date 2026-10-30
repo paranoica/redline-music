@@ -64,6 +64,24 @@ TUNE_MAX_GLIDE_MS = 200.0
 TUNE_SCALE = "chromatic"
 EQ_KINDS = {"low_shelf": "lowshelf", "peak": "peak", "high_shelf": "highshelf"}
 SHELF_Q = 1 / math.sqrt(2)
+# a monitor cannot wait for the compressor to look ahead
+MONITOR_LOOKAHEAD = 0
+
+# What the monitor runs on before a take exists to analyse: each stage doing the least it
+# can. No gate, no makeup, the clip and the crush scaled to full scale, a flat EQ, no
+# tuning offset, throws only after near silence; the vocal rack has no master.
+NEUTRAL_NUMBERS: dict[str, Any] = {
+    "gate_db": GATE_RANGE_DB[0],
+    "makeup_db": 0.0,
+    "peak_db": 0.0,
+    "eq_fit_db": [0.0] * len(EQ_BANDS),
+    "tuning_cents": 0.0,
+    "bitcrush_peak_db": 0.0,
+    "throw_threshold_db": THROW_THRESHOLD_RANGE_DB[0],
+    "master_target_lufs": None,
+    "master_gain_db": None,
+    "master_trim_db": None,
+}
 
 _CHAIN = set(CHAIN_KEYS)
 _COMPRESSOR = {"chain_on", "comp_threshold_db", "comp_ratio", "comp_attack_ms", "comp_release_ms"}
@@ -266,6 +284,45 @@ def _voiced_floor_db(samples: np.ndarray, rate: int) -> float | None:
     return float(np.percentile(heard, LOUD_PERCENTILE)) - VOICED_BELOW_LOUD_DB
 
 
+def level_numbers(
+    loudness_lufs: float, rate: int, settings: Settings | None = None
+) -> dict[str, Any]:
+    """Monitoring numbers from a level check alone, before any take exists.
+
+    The pre-gain brings the measured level to the chain's, the post-gain gives it back as the
+    analysis does (the compressor's loss not counted); every other number is the neutral one
+    in NEUTRAL_NUMBERS.
+
+    Args:
+        loudness_lufs: The mic's loudness over the level check.
+        rate: The rate the racks run at.
+        settings: The settings to note; the defaults when left out.
+
+    Raises:
+        ValueError: The level check heard nothing.
+    """
+    if not math.isfinite(loudness_lufs):
+        raise ValueError("the level check heard nothing: is the mic connected and unmuted?")
+    pre = PRE_GAIN_LUFS - loudness_lufs
+    numbers = json.loads(json.dumps(NEUTRAL_NUMBERS))
+    numbers |= {"rate": rate, "pre_gain_db": pre, "post_gain_db": -pre}
+    numbers["settings"] = to_dict(Settings() if settings is None else settings)
+    return numbers
+
+
+def monitor_rack(settings: Settings, numbers: dict[str, Any]) -> str:
+    """The vocal rack for live monitoring: no automation, the compressor not looking ahead.
+
+    Raises:
+        ValueError: As `racks` does for the vocal rack.
+    """
+    vocal = _vocal(settings, numbers)
+    for effect in vocal:
+        if effect["effect"] == "chain_compressor":
+            effect["params"]["lookahead"] = MONITOR_LOOKAHEAD
+    return json.dumps({"effects": vocal})
+
+
 def stale(numbers: dict[str, Any], settings: Settings) -> list[str]:
     """The numbers of an analysis that no longer hold for these settings, in STALE_AFTER order.
 
@@ -440,6 +497,17 @@ def _built_in(settings: Settings, numbers: dict[str, Any]) -> list[dict[str, Any
     ]
 
 
+def _vocal(settings: Settings, numbers: dict[str, Any]) -> list[dict[str, Any]]:
+    vocal = _built_in(settings, numbers)
+    vocal += [{"effect": e.effect, "on": e.on, "params": dict(e.params)} for e in settings.rack]
+    if len(vocal) > MAX_RACK_EFFECTS:
+        raise ValueError(
+            f"the vocal rack needs {len(vocal)} effects with the user's rack; a rack takes "
+            f"{MAX_RACK_EFFECTS}"
+        )
+    return vocal
+
+
 def racks(settings: Settings, numbers: dict[str, Any]) -> dict[str, str]:
     """The vocal, beat and master racks of these settings, as `redline_dsp` takes them.
 
@@ -456,13 +524,7 @@ def racks(settings: Settings, numbers: dict[str, Any]) -> dict[str, str]:
         ValueError: The analysis lacks a number these settings need (a stage was off when
             it ran), or the vocal rack would hold more effects than a rack takes.
     """
-    vocal = _built_in(settings, numbers)
-    vocal += [{"effect": e.effect, "on": e.on, "params": dict(e.params)} for e in settings.rack]
-    if len(vocal) > MAX_RACK_EFFECTS:
-        raise ValueError(
-            f"the vocal rack needs {len(vocal)} effects with the user's rack; a rack takes "
-            f"{MAX_RACK_EFFECTS}"
-        )
+    vocal = _vocal(settings, numbers)
     beat = _gains(settings.beat_db)
     if settings.bass_drive_db > 0:
         beat.append(_effect("bass_drive", freq=settings.bass_freq_hz, drive=settings.bass_drive_db))
