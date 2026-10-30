@@ -594,3 +594,39 @@ fn a_section_name_is_plain_text() {
         assert_eq!(s.sections[0].name, good);
     }
 }
+
+#[test]
+fn names_that_are_javascript_object_keys_are_refused() {
+    // the page keeps sounds and patterns in plain objects, where these two are not keys
+    for bad in ["__proto__", "constructor"] {
+        let mut v = full();
+        let kick = v["sounds"]["kick"].clone();
+        v["sounds"]
+            .as_object_mut()
+            .unwrap()
+            .insert(bad.into(), kick);
+        let Err(errors) = Score::from_json(&v.to_string()) else {
+            panic!("{bad} was taken");
+        };
+        assert!(
+            shown(&errors)
+                .iter()
+                .any(|e| e.starts_with(&format!("sounds.{bad}"))),
+            "{bad}: {:?}",
+            shown(&errors)
+        );
+        let mut v = full();
+        let p = v["patterns"]["drums"].clone();
+        v["patterns"].as_object_mut().unwrap().insert(bad.into(), p);
+        let Err(errors) = Score::from_json(&v.to_string()) else {
+            panic!("{bad} was taken");
+        };
+        assert!(
+            shown(&errors)
+                .iter()
+                .any(|e| e.starts_with(&format!("patterns.{bad}"))),
+            "{bad}: {:?}",
+            shown(&errors)
+        );
+    }
+}

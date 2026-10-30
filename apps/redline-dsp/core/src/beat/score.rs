@@ -237,8 +237,12 @@ fn index(path: &str, i: usize) -> String {
     format!("{path}[{i}]")
 }
 
+// the editor keeps sounds and patterns in plain JavaScript objects, where these are not keys
+const OBJECT_KEYS: [&str; 2] = ["__proto__", "constructor"];
+
 fn good_name(s: &str) -> bool {
     (1..=24).contains(&s.len())
+        && !OBJECT_KEYS.contains(&s)
         && s.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
@@ -534,7 +538,10 @@ impl Parser {
         for (name, v) in sorted(map) {
             let path = join("sounds", name);
             if !good_name(name) {
-                self.err(&path, "a name takes 1 to 24 of a-z, 0-9 and _");
+                self.err(
+                    &path,
+                    "a name takes 1 to 24 of a-z, 0-9 and _, and is not __proto__ or constructor",
+                );
                 continue;
             }
             out.push(self.sound(name, v, &path));
@@ -638,7 +645,10 @@ impl Parser {
         for (name, v) in sorted(map) {
             let path = join("patterns", name);
             if !good_name(name) {
-                self.err(&path, "a name takes 1 to 24 of a-z, 0-9 and _");
+                self.err(
+                    &path,
+                    "a name takes 1 to 24 of a-z, 0-9 and _, and is not __proto__ or constructor",
+                );
                 continue;
             }
             let mut draft = PatternDraft {
