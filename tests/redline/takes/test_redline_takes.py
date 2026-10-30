@@ -235,3 +235,19 @@ def test_a_clean_short_take_ranks_below_a_slightly_worse_full_one(tmp_path, beat
     assert [t.name for t in ranking.takes] == ["take-02", "take-01", "take-03"]
     text = report_markdown(ranking, "song", None)
     assert "ниже всех полных дублей" in text
+
+
+def test_a_take_logged_with_a_quantum_change_scores_the_worst_dropouts(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(1))
+    clean_sidecar(folder, "take-01.json")
+    clean_sidecar(folder, "take-02.json", quantum_changed=True, quantum=64, quantum_now=256)
+    ranking = rank_folder(beat, folder)
+    takes = by_name(ranking)
+    assert takes["take-02"].metrics.dropouts is None
+    assert takes["take-02"].metrics.quantum_changed and not takes["take-01"].metrics.quantum_changed
+    assert takes["take-02"].points["dropouts"] == DROPOUT_MAX_POINTS
+    text = report_markdown(ranking, "song", None)
+    assert "- take-02: во время дубля сменился квант" in text
+    assert "- take-02: выпадения неизвестны" not in text

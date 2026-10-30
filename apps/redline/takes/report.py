@@ -212,7 +212,13 @@ def _notes(ranking: Ranking) -> list[str]:
                 f"- {take.name}: бит слышен в микрофоне (корреляция {take.metrics.bleed:.2f}, "
                 f"порог {BLEED_FLAG:g}) — нужны наушники."
             )
-        if take.metrics.dropouts is None:
+        if take.metrics.quantum_changed:
+            lines.append(
+                f"- {take.name}: во время дубля сменился квант аудиографа — сдвиг дубля к биту "
+                "мог уйти, выпадения не отслежены надёжно. Засчитано как худшее по выпадениям: "
+                f"{DROPOUT_MAX_POINTS:g} баллов."
+            )
+        elif take.metrics.dropouts is None:
             lines.append(
                 f"- {take.name}: выпадения неизвестны — нет журнала дубля, он не читается или "
                 f"запись не завершилась. Засчитано как худшее: {DROPOUT_MAX_POINTS:g} баллов."

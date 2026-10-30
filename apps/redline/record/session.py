@@ -133,7 +133,9 @@ class Session:
         return report
 
     def _log(self, report: TakeReport) -> None:
-        write_sidecar(report, self.round_trip, self.quantum)
+        now = self.engine.meters().quantum
+        moved = now if now is not None and now != self.quantum else None
+        write_sidecar(report, self.round_trip, self.quantum, moved)
 
     def _collect(self) -> str:
         assert self.pending is not None

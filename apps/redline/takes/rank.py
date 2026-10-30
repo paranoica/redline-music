@@ -12,7 +12,8 @@ full-length one whatever its points. Each part has a tolerance below which it co
 - noise: 1 point per FLOOR_STEP_DB that the floor in the gaps sits above FLOOR_TOLERANCE_DB
   under the voice;
 - dropouts: DROPOUT_POINTS per dropout the recorder logged, at most DROPOUT_MAX_POINTS; a take
-  whose dropouts are unknown (no sidecar, or a recording that did not finish) gets the most;
+  whose dropouts are unknown (no sidecar, a recording that did not finish, or one during
+  which the graph's quantum changed) gets the most;
 - bleed: BLEED_POINTS per unit of take-to-beat correlation above BLEED_TOLERANCE;
 - deep (with --deep only): DEEP_POINTS per unit of the own-vocal auto search's distance to the
   references.
@@ -123,6 +124,7 @@ class TakeMetrics:
     deep_distance: float | None = None
     notes: tuple[str, ...] = ()
     short: bool = False
+    quantum_changed: bool = False
 
 
 @dataclass(frozen=True)
@@ -375,6 +377,9 @@ def read_dropouts(take: Path, rate: int) -> tuple[int | None, float | None, str 
         data = json.loads(sidecar.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("not an object")
+        if data.get("quantum_changed") is True:
+            now = data.get("quantum_now")
+            return None, None, f"the graph's quantum changed to {now} during it; dropouts unknown"
         if data.get("complete") is False:
             error = data.get("error") or "no reason logged"
             return None, None, f"the recording did not finish ({error}); dropouts unknown"
@@ -394,6 +399,15 @@ def read_dropouts(take: Path, rate: int) -> tuple[int | None, float | None, str 
     except (OSError, ValueError, KeyError, TypeError) as error:
         return None, None, f"{sidecar.name} unreadable ({error}); dropouts unknown"
     return len(spans), 1000 * frames / rate, None
+
+
+def quantum_changed(take: Path) -> bool:
+    """Whether the take's sidecar says the graph's quantum changed while it was recorded."""
+    try:
+        data = json.loads(take.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("quantum_changed") is True
 
 
 def _rate_of(decoded: Sequence[Decoded]) -> int:
@@ -461,6 +475,7 @@ def _measure(
         lufs=lufs if math.isfinite(lufs) else None,
         level_spread_lu=short_term_spread(samples, rate),
         short=take.seconds < SHORTER_SHARE * beat_seconds,
+        quantum_changed=quantum_changed(take.path),
     )
 
 

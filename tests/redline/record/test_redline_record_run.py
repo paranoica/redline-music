@@ -246,3 +246,13 @@ def test_unreadable_meters_from_an_engine_that_ended_end_the_loop_with_the_reaso
     )
     with pytest.raises(EngineError, match="meters are unreadable"):
         terminal.loop(session, engine, Keys([None, "q"]), [].append)
+
+
+def test_a_calibration_during_which_the_quantum_moved_is_not_stored(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_REC_TONE", "sweep:333")
+    monkeypatch.setenv("FAKE_REC_METERS_QUANTUM", "256")
+    work = tmp_path / "work"
+    with pytest.raises(EngineError, match="quantum moved from 64 to 256"):
+        run.calibrate(FAKE, work, "cup", wait=no_wait)
+    assert not (work / "record" / "latency.json").exists()
+    assert not (work / "record" / "calibration.wav").exists()

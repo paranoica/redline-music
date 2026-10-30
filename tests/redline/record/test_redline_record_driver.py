@@ -489,3 +489,31 @@ def test_the_start_reply_carries_a_late_take_or_the_writer_error():
     taken = late_take({"reply": "start", "path": "t.wav", "late": {"take": report}})
     assert taken is not None and not isinstance(taken, str) and taken.frames == 10
     assert late_take({"reply": "start", "late": {"error": "no space"}}) == "no space"
+
+
+class TakingEngine(QuantumEngine):
+    """Records and stops cleanly; the test moves its quantum in between."""
+
+    def start(self, path, offset):
+        path.write_bytes(b"")
+        self.started.append(path)
+        return None
+
+    def stop(self):
+        return late_report(self.started[-1])
+
+
+@pytest.mark.parametrize("after", [256, 64, None])
+def test_a_take_during_which_the_quantum_moved_is_logged_so(tmp_path, after):
+    engine = TakingEngine(64)
+    session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    engine.quantum = after
+    session.toggle()
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    if after == 256:
+        assert data["quantum_changed"] is True and data["quantum_now"] == 256
+        assert read_dropouts(tmp_path / "take-01.wav", RATE)[:2] == (None, None)
+    else:
+        assert "quantum_changed" not in data
+        assert read_dropouts(tmp_path / "take-01.wav", RATE)[0] == 1

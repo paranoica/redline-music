@@ -192,7 +192,7 @@ def calibrate(
     """Play a sweep through the singer's path, find the round trip and store it under its key.
 
     Raises:
-        EngineError: The engine did not start or record.
+        EngineError: The engine did not start or record, or the quantum moved during the sweep.
         CalibrationError: The sweep did not come back clearly enough.
     """
     folder = work / "record"
@@ -213,6 +213,14 @@ def calibrate(
         seconds = len(sweep.samples) / sweep.rate + CALIBRATION_TAIL_S
         path = _record_for(engine, folder / "calibration.wav", seconds, wait)
         key = latency_key(engine.startup)
+        now = engine.meters().quantum
+        if now is not None and now != key.quantum:
+            path.unlink(missing_ok=True)
+            raise EngineError(
+                f"the audio graph's quantum moved from {key.quantum} to {now} frames during "
+                "the sweep, so the round trip measured holds for neither: nothing stored. "
+                "Keep the quantum fixed and calibrate again"
+            )
     finally:
         engine.close()
     try:
