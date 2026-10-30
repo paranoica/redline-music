@@ -744,3 +744,18 @@ def test_the_spread_of_a_few_seconds_is_never_searched_on(track):
     only_spread = [ref("a", {"vocal.short_term_spread_lu": -5.0})]
     found = auto_settings(Engine(vocal, beat, ctx), only_spread, BASE, count=2, seconds=2.0)
     assert found.targets == {} and found.settings == BASE
+
+
+def test_the_result_scores_any_settings_on_its_own_windows_and_targets(track, result):
+    vocal, beat, ctx = track
+    (own,) = result.score([result.settings])
+    assert own == pytest.approx(result.distance_after)
+    other = replace(result.settings, drive_db=0.0 if result.settings.drive_db else 40.0)
+    (far,) = result.score([other])
+    values = auto_settings(Engine(vocal, beat, ctx), LOUDER_REFS, other, 2, 2.0, 0).values
+    assert far == pytest.approx(distance(values, result.targets))
+
+
+def test_the_score_is_left_out_of_equality_and_repr(result):
+    assert "score" not in repr(result)
+    assert replace(result, score=None) == result

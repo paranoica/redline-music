@@ -9,7 +9,7 @@ Closer to the references is all the numbers say; whether it sounds better is for
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import numpy.typing as npt
@@ -63,6 +63,10 @@ class AutoResult:
     targets: dict[str, tuple[float, float]]
     at_edge: tuple[str, ...]
     bias: dict[str, float]
+    # distance of each settings in a batch on the same windows and targets; not part of equality
+    score: Callable[[Sequence[Settings]], list[float]] | None = field(
+        default=None, compare=False, repr=False
+    )
 
 
 def reference_targets(refs: Sequence[FileResult]) -> dict[str, tuple[float, float]]:
@@ -365,7 +369,8 @@ def auto_settings(
     Returns:
         The chosen settings, the distances of the base and of the choice, the choice's
         metrics, the targets, the keys at an end of their search (the first or last grid
-        value, the ends of its range for vocal_db), and the bias per metric.
+        value, the ends of its range for vocal_db), the bias per metric, and a score of any
+        settings by the same windows and targets (it renders anew what the search did not).
     """
     base = Settings() if base is None else base
     rate = engine.context.rate
@@ -395,4 +400,19 @@ def auto_settings(
         windows.cancel()
         raise
     windows.pool.shutdown()
-    return AutoResult(best, before, best_distance, measured[best], targets, _at_edge(best), bias)
+
+    def score(batch: Sequence[Settings]) -> list[float]:
+        nonlocal windows
+        if any(s not in measured for s in batch):
+            windows = _Windows(engine, count, seconds)
+            try:
+                scores(batch)
+            except BaseException:
+                windows.cancel()
+                raise
+            windows.pool.shutdown()
+        return scores(batch)
+
+    return AutoResult(
+        best, before, best_distance, measured[best], targets, _at_edge(best), bias, score
+    )
