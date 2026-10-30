@@ -1,0 +1,16 @@
+[package]
+name = "redline-dsp-wasm"
+description = "redline's rack of effects behind a C ABI, built for the browser through emscripten"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "redline_dsp_wasm"
+# emscripten's linker turns the static library into the module (build.sh); the rlib is for
+# the native tests
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+redline-dsp-core.workspace = true
