@@ -33,6 +33,10 @@ def ignored(path: str) -> bool:
         ".env",
         ".env.local",
         "weights.ckpt",
+        # the commands write relative to where they are run, not to the repository root
+        "apps/redline/input/takes/song/take-01.json",
+        "apps/redline/work/record/latency.json",
+        "tests/output/final.json",
     ],
 )
 def test_private_material_is_ignored(path):

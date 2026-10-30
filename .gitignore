@@ -15,9 +15,10 @@ bench/results/
 # Private data: never in this repository
 /private
 /docs/private
-/input
-/work
-/output
+# at any depth: the commands write where they are run
+input
+work
+output
 /lyrics
 /profiles
 *.[lL][rR][cC]
