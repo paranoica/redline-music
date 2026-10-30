@@ -350,6 +350,11 @@ class Studio {
     }
   }
 
+  load(settings: Record<string, unknown>, label: string): void {
+    this.#change({ ...structuredClone(this.#defaults), ...(structuredClone(settings) as Partial<Settings>) }, true);
+    this.#status(`Звучит ${label}.`, "done");
+  }
+
   #applyPreset(name: string): void {
     const preset = this.#presetList[name];
     if (!preset) return;
@@ -685,6 +690,7 @@ export const mount: Mount = async (root, options) => {
   const keys = new KeySurface(root.ownerDocument, (e) => studio?.key(e));
   keys.setActive(options.active ?? true);
   let host: Host | null = null;
+  let pending: { settings: Record<string, unknown>; label: string } | null = null;
 
   const boot = async (): Promise<void> => {
     status("Загружаю трек и считаю анализ. На длинном треке это до минуты.", "busy");
@@ -717,6 +723,8 @@ export const mount: Mount = async (root, options) => {
     studio = new Studio({ root, ui, api, scope }, session, host.client, host.ctx, original);
     host.client.loadStems(vocal.frames, vocal.data, beat.data, original.data.slice());
     studio.start();
+    if (pending) studio.load(pending.settings, pending.label);
+    pending = null;
     root.dataset.state = "ready";
   };
 
@@ -728,6 +736,11 @@ export const mount: Mount = async (root, options) => {
 
   return {
     setActive: (on) => keys.setActive(on && !scope.closed),
+    load: (settings, label) => {
+      if (scope.closed) return;
+      if (studio) studio.load(settings, label);
+      else pending = { settings, label };
+    },
     dispose: async () => {
       if (scope.closed) return;
       keys.setActive(false);

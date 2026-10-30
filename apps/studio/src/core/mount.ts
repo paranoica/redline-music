@@ -11,6 +11,8 @@ export interface MountOptions {
 export interface Mounted {
   dispose(): Promise<void> | void;
   setActive?(on: boolean): void;
+  // settings from outside the app (a mix variant), applied as a preset is
+  load?(settings: Record<string, unknown>, label: string): void;
 }
 
 export type Mount = (root: HTMLElement, options: MountOptions) => Promise<Mounted>;
