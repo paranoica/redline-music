@@ -37,7 +37,7 @@ RENDER_FILE = re.compile(r"flip-(\d+)\.(wav|report\.md)")
 CEILING_DB = -1.0
 # a quiet flip is brought up toward the source at most this much
 MAX_GAIN_DB = 24.0
-MASTER_PASSES = 3
+MASTER_PASSES = 6
 
 
 def play_bar_starts(bar_starts_frames: Sequence[int], arrangement: Sequence[Block]) -> list[int]:
@@ -310,13 +310,15 @@ def master_flip(mix: Samples, rate: int, target_lufs: float) -> tuple[Samples, d
     """The mix at the source's loudness, its peaks held at the ceiling by the core's limiter.
 
     Returns:
-        The mastered mix, and what was done: `gain_db` toward the target and `lowered_db` the
-        last-resort scaling when the limiter's output still went over (0 when it did not).
+        The mastered mix, and what was done: `gain_db` toward the target, `lowered_db` the
+        last-resort scaling when the limiter's output still went over (0 when it did not), and
+        `lufs` the loudness reached (a source mastered over full scale is not reached under the
+        ceiling).
     """
     have = integrated_lufs(mix, rate)
     if not (math.isfinite(have) and math.isfinite(target_lufs)):
         held, lowered_db = fit_ceiling(mix)
-        return held, {"gain_db": 0.0, "lowered_db": lowered_db}
+        return held, {"gain_db": 0.0, "lowered_db": lowered_db, "lufs": integrated_lufs(held, rate)}
     gain_db = min(MAX_GAIN_DB, target_lufs - have)
     out = mix
     # the limiter takes back some loudness where it works, so the gain is corrected on its output
@@ -327,7 +329,7 @@ def master_flip(mix: Samples, rate: int, target_lufs: float) -> tuple[Samples, d
             break
         gain_db = min(MAX_GAIN_DB, gain_db + missing)
     held, lowered_db = fit_ceiling(out)
-    return held, {"gain_db": gain_db, "lowered_db": lowered_db}
+    return held, {"gain_db": gain_db, "lowered_db": lowered_db, "lufs": integrated_lufs(held, rate)}
 
 
 def _limited(mix: Samples, rate: int, gain_db: float) -> Samples:

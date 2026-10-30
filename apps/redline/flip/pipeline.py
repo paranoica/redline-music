@@ -393,8 +393,8 @@ def _report(
     lines = [f"{flip.play_bars} bars in play order at {flip.bpm:.2f} BPM, swing {flip.swing:g}."]
     if done is not None and math.isfinite(target_lufs):
         lines.append(
-            f"Brought to the source's loudness ({target_lufs:.1f} LUFS, {done['gain_db']:+.1f} dB);"
-            f" a limiter holds the peaks at {mixer.CEILING_DB:g} dBFS."
+            f"Loudness {done['lufs']:.1f} LUFS toward the source's {target_lufs:.1f} "
+            f"({done['gain_db']:+.1f} dB); a limiter holds the peaks at {mixer.CEILING_DB:g} dBFS."
         )
     if done is not None and done["lowered_db"]:
         lines.append(f"Still over after the limiter: lowered by {-done['lowered_db']:.1f} dB more.")

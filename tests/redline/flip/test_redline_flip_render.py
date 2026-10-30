@@ -356,6 +356,7 @@ def test_a_flip_is_mastered_to_the_source_loudness_under_the_ceiling():
     target = integrated_lufs(mix, 48000) + 9.0
     out, info = render.master_flip(mix, 48000, target)
     assert abs(integrated_lufs(out, 48000) - target) < 1.0
+    assert info["lufs"] == pytest.approx(integrated_lufs(out, 48000))
     assert float(np.abs(out).max()) <= 10 ** (render.CEILING_DB / 20) + 1e-4
     # at least the loudness gap: the limiter takes some back
     assert info["gain_db"] >= 9.0

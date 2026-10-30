@@ -423,4 +423,4 @@ def test_a_hot_render_comes_to_the_source_loudness_under_the_ceiling(analysed):
     n = write_version(folder, gains={"drums": 12, "other": 12, "bass": 12})
     out, _ = sf.read(pipeline.render(folder, n), dtype="float32")
     assert float(np.abs(out).max()) <= 10 ** (-1.0 / 20) + 1e-4
-    assert "source's loudness" in (folder / f"flip-{n}.report.md").read_text(encoding="utf-8")
+    assert "toward the source's" in (folder / f"flip-{n}.report.md").read_text(encoding="utf-8")
