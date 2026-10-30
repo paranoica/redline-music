@@ -255,6 +255,29 @@ pub unsafe extern "C" fn rack_set(
     }
 }
 
+/// Clears what a rack has heard (delay lines, tails, followers) for `rate` Hz and keeps its
+/// params: 0, or -1. It may allocate; call it where a gap in the sound does not matter.
+#[no_mangle]
+pub extern "C" fn rack_reset(handle: u32, rate: f32) -> i32 {
+    let done = with_rack(handle, |s| {
+        let rack = s.rack.as_mut().expect("with_rack hands over a live rack");
+        catch_unwind(AssertUnwindSafe(|| rack.reset(rate)))
+            .map_err(|payload| panic_message(payload.as_ref()))?
+            .map_err(|e| e.to_string())
+    });
+    match done {
+        Some(Ok(())) => 0,
+        Some(Err(message)) => {
+            fail(message);
+            -1
+        }
+        None => {
+            no_rack(handle);
+            -1
+        }
+    }
+}
+
 /// Every effect with its params, as `effects_json` in the core: NUL-terminated JSON that
 /// lives as long as the module.
 #[no_mangle]

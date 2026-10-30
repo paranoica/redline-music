@@ -226,7 +226,8 @@ pub struct ChainCompressor {
     squash: f64,
     expand: f64,
     delay: Vec<[f32; 2]>,
-    now: usize,
+    // u64: a usize is 32 bits on wasm32 and would wrap within a day of play
+    now: u64,
 }
 
 impl ChainCompressor {
@@ -325,15 +326,18 @@ impl ChainCompressor {
     }
 
     /// The gain in dB of frame `n`, between the centres of the blocks around it.
-    fn gain_db(&self, n: usize) -> f64 {
+    fn gain_db(&self, n: u64) -> f64 {
         let b = self.block as f64;
         let pos = n as f64 - (b - 1.0) / 2.0;
         if pos <= 0.0 {
             return self.smoothed[0];
         }
-        let i = (pos / b).floor() as usize;
+        let i = (pos / b).floor() as u64;
         let t = (pos - i as f64 * b) / b;
-        let (a, z) = (self.smoothed[i & 7], self.smoothed[(i + 1) & 7]);
+        let (a, z) = (
+            self.smoothed[(i & 7) as usize],
+            self.smoothed[((i + 1) & 7) as usize],
+        );
         a + t * (z - a)
     }
 }
@@ -386,10 +390,10 @@ impl Effect for ChainCompressor {
         }
         finite(block);
         let mask = self.delay.len() - 1;
-        let lag = LOOKAHEAD_BLOCKS * self.block;
+        let lag = (LOOKAHEAD_BLOCKS * self.block) as u64;
         for f in block {
             self.peak = self.peak.max(f[0].abs()).max(f[1].abs());
-            self.delay[self.now & mask] = *f;
+            self.delay[self.now as usize & mask] = *f;
             self.filled += 1;
             if self.filled == self.block {
                 self.end_block();
@@ -398,7 +402,7 @@ impl Effect for ChainCompressor {
             *f = if self.now >= lag {
                 let n = self.now - lag;
                 let g = (10f64.powf(self.gain_db(n) / 20.0)) as f32 * makeup;
-                let x = self.delay[n & mask];
+                let x = self.delay[n as usize & mask];
                 [x[0] * g, x[1] * g]
             } else {
                 [0.0; 2]
@@ -763,5 +767,50 @@ impl Effect for Master {
     }
     fn latency(&self) -> usize {
         self.late
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bursts(frames: usize) -> Vec<[f32; 2]> {
+        (0..frames)
+            .map(|n| {
+                let v = if (n / 700) % 2 == 0 { 0.9 } else { 0.01 };
+                let s = v * (n as f32 * 0.05).sin();
+                [s, s]
+            })
+            .collect()
+    }
+
+    // 2^32 frames is under a day at 48 kHz; on wasm32 a usize counter wrapped there
+    #[test]
+    fn the_compressor_goes_on_past_two_to_the_32_frames() {
+        let mut from_zero = ChainCompressor::new();
+        from_zero.reset(48000.0);
+        let mut near_wrap = ChainCompressor::new();
+        near_wrap.reset(48000.0);
+        // a whole number of the 8-block ring, so both read the same smoothed slots
+        let ring = 8 * near_wrap.block as u64;
+        let start = ((1u64 << 32) - 3000) / ring * ring;
+        near_wrap.now = start.try_into().expect("the counter holds 2^32");
+        let input = bursts(20_000);
+        let mut a = input.clone();
+        let mut b = input;
+        for (x, y) in a.chunks_mut(128).zip(b.chunks_mut(128)) {
+            from_zero.process(x);
+            near_wrap.process(y);
+        }
+        // the first half block out reads the slot before the start, which only the counter at
+        // 0 clamps to its first one
+        let skip = (LOOKAHEAD_BLOCKS + 1) * near_wrap.block;
+        let worst = a[skip..]
+            .iter()
+            .zip(&b[skip..])
+            .map(|(x, y)| (x[0] - y[0]).abs().max((x[1] - y[1]).abs()))
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-6, "differs by {worst} past the wrap");
+        assert!(a.iter().any(|f| f[0].abs() > 1e-3), "the input came through");
     }
 }

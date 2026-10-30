@@ -10,6 +10,7 @@ export interface Dsp {
   _rack_latency(handle: number): number;
   _rack_process(handle: number, input: number, side: number, output: number, frames: number): number;
   _rack_set(handle: number, slot: number, name: number, len: number, value: number): number;
+  _rack_reset(handle: number, rate: number): number;
   _rack_error(): number;
   _effects_json(): number;
   UTF8ToString(ptr: number): string;

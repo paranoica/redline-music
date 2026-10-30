@@ -31,7 +31,7 @@ em++ "$workspace/target/wasm32-unknown-emscripten/release/libredline_dsp_wasm.a"
     -sENVIRONMENT=web,worker,node \
     -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=256MB -sSTACK_SIZE=1MB \
     -sFILESYSTEM=0 \
-    -sEXPORTED_FUNCTIONS=_rack_new,_rack_free,_rack_latency,_rack_process,_rack_set,_effects_json,_rack_error,_malloc,_free \
+    -sEXPORTED_FUNCTIONS=_rack_new,_rack_free,_rack_latency,_rack_process,_rack_set,_rack_reset,_effects_json,_rack_error,_malloc,_free \
     -sEXPORTED_RUNTIME_METHODS=HEAPF32,HEAPU8,UTF8ToString
 
 ls -l "$out/redline_dsp.js" "$out/redline_dsp.wasm"

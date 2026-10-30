@@ -1,6 +1,7 @@
 use redline_dsp_core::effect::{self, Rack};
 use redline_dsp_wasm::{
-    effects_json, rack_error, rack_free, rack_latency, rack_new, rack_process, rack_set,
+    effects_json, rack_error, rack_free, rack_latency, rack_new, rack_process, rack_reset,
+    rack_set,
 };
 use std::ffi::CStr;
 use std::ptr;
@@ -216,6 +217,36 @@ fn refuses_a_handle_it_did_not_give_or_has_freed() {
     assert_eq!(run(old, &mut out), -1);
     assert_eq!(run(new, &mut out), 0);
     rack_free(new);
+}
+
+#[test]
+fn a_reset_forgets_what_the_rack_heard_and_keeps_its_params() {
+    let limiter = r#"{"effects": [{"effect": "gain"}, {"effect": "limiter", "params": {"ceiling": 0, "lookahead": 5}}]}"#;
+    let h = new_rack(RATE, limiter);
+    assert_ne!(h, 0, "{}", error());
+    assert_eq!(rack_latency(h), 240);
+    process(h, &sines(1024), None, 128);
+    assert_eq!(rack_reset(h, RATE), 0, "{}", error());
+    let quiet = process(h, &vec![0.0; 2 * 512], None, 128);
+    assert!(quiet.iter().all(|&v| v == 0.0), "the old input came out after the reset");
+
+    assert_eq!(set(h, 0, "db", -20.0), 0, "{}", error());
+    assert_eq!(rack_reset(h, RATE), 0, "{}", error());
+    let out = process(h, &sines(2048), None, 128);
+    let peak = out[2 * 1024..].iter().step_by(2).fold(0.0f32, |m, v| m.max(v.abs()));
+    assert!((peak - 0.05).abs() < 2e-3, "the set -20 dB is gone: {peak}");
+    rack_free(h);
+}
+
+#[test]
+fn a_reset_refuses_a_wrong_handle_or_rate() {
+    assert_eq!(rack_reset(12345, RATE), -1);
+    assert!(error().contains("no rack"), "{}", error());
+    let h = new_rack(RATE, GAIN);
+    assert_eq!(rack_reset(h, 1.0), -1);
+    assert!(error().contains("rate"), "{}", error());
+    assert_eq!(process(h, &sines(128), None, 128).len(), 256);
+    rack_free(h);
 }
 
 #[test]
