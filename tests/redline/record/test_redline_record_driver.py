@@ -375,3 +375,22 @@ def test_a_take_starts_when_the_quantum_held_or_is_not_reported(tmp_path, quantu
     session = Session(engine, tmp_path, RoundTrip(300, "calibrated"), 64)
     assert session.toggle() == "recording take-01"
     assert [p.name for p in engine.started] == ["take-01.wav"]
+
+
+class FailingStop(QuantumEngine):
+    """An engine whose stop fails after the take has started."""
+
+    def stop(self):
+        raise EngineError("the take did not finish within 10 s: is the audio running?")
+
+
+def test_a_failed_stop_leaves_a_sidecar_marked_incomplete_with_the_error(tmp_path):
+    session = Session(FailingStop(64), tmp_path, RoundTrip(300, "calibrated"), 64)
+    session.toggle()
+    with pytest.raises(EngineError, match="did not finish"):
+        session.toggle()
+    data = json.loads((tmp_path / "take-01.json").read_text(encoding="utf-8"))
+    assert data["complete"] is False
+    assert "did not finish" in data["error"]
+    assert read_dropouts(tmp_path / "take-01.wav", RATE)[:2] == (None, None)
+    assert session.current is None

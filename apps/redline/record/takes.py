@@ -36,8 +36,23 @@ def write_sidecar(report: TakeReport, round_trip: RoundTrip, quantum: int) -> Pa
         "quantum": quantum,
         "offset": report.offset,
         "offset_source": round_trip.source,
+        "complete": True,
     }
     sidecar = report.path.with_suffix(".json")
+    sidecar.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    return sidecar
+
+
+def write_incomplete_sidecar(take: Path, error: str, round_trip: RoundTrip, quantum: int) -> Path:
+    """Log a take whose stop failed: no report came, so its dropouts are unknown."""
+    data = {
+        "complete": False,
+        "error": error,
+        "quantum": quantum,
+        "offset": round_trip.frames or 0,
+        "offset_source": round_trip.source,
+    }
+    sidecar = take.with_suffix(".json")
     sidecar.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
     return sidecar
 

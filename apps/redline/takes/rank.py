@@ -10,7 +10,8 @@ timing, then to the name. Each part has a tolerance below which it costs nothing
   CLIP_MAX_POINTS;
 - noise: 1 point per FLOOR_STEP_DB that the floor in the gaps sits above FLOOR_TOLERANCE_DB
   under the voice;
-- dropouts: DROPOUT_POINTS per dropout the recorder logged, at most DROPOUT_MAX_POINTS;
+- dropouts: DROPOUT_POINTS per dropout the recorder logged, at most DROPOUT_MAX_POINTS; a take
+  whose dropouts are unknown (no sidecar, or a recording that did not finish) gets the most;
 - bleed: BLEED_POINTS per unit of take-to-beat correlation above BLEED_TOLERANCE;
 - deep (with --deep only): DEEP_POINTS per unit of the own-vocal auto search's distance to the
   references.
@@ -358,17 +359,25 @@ def bleed(take: Samples, take_rate: int, beat: Samples, beat_rate: int) -> float
 
 
 def read_dropouts(take: Path, rate: int) -> tuple[int | None, float | None, str | None]:
-    """Count and length in ms of the dropouts in the take's sidecar; none when it is missing.
+    """Count and length in ms of the dropouts in the take's sidecar.
+
+    A sidecar without "complete" is from before the mark and reads as complete.
 
     Returns:
-        The count, the total ms and None; or None, None and a note when the sidecar
-        cannot be read.
+        The count, the total ms and None; or None, None and a note when the sidecar is
+        missing, unreadable, or marked as a recording that did not finish.
     """
     sidecar = take.with_suffix(".json")
     if not sidecar.exists():
-        return 0, 0.0, None
+        return None, None, f"no {sidecar.name}; dropouts unknown"
     try:
-        spans = json.loads(sidecar.read_text(encoding="utf-8"))["dropouts"]
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+        if data.get("complete") is False:
+            error = data.get("error") or "no reason logged"
+            return None, None, f"the recording did not finish ({error}); dropouts unknown"
+        spans = data["dropouts"]
         if not isinstance(spans, list):
             raise ValueError("dropouts is not a list")
         frames = 0
@@ -464,7 +473,11 @@ def points(metrics: TakeMetrics) -> dict[str, float]:
         ),
         "clipping": min(CLIP_MAX_POINTS, CLIP_POINTS * metrics.clip_runs),
         "noise": 0.0 if below is None else max(0.0, below - FLOOR_TOLERANCE_DB) / FLOOR_STEP_DB,
-        "dropouts": min(DROPOUT_MAX_POINTS, DROPOUT_POINTS * (metrics.dropouts or 0)),
+        "dropouts": (
+            DROPOUT_MAX_POINTS
+            if metrics.dropouts is None
+            else min(DROPOUT_MAX_POINTS, DROPOUT_POINTS * metrics.dropouts)
+        ),
         "bleed": max(0.0, metrics.bleed - BLEED_TOLERANCE) * BLEED_POINTS,
         "deep": 0.0 if metrics.deep_distance is None else DEEP_POINTS * metrics.deep_distance,
     }

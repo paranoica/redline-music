@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Protocol
 
 from redline.record.latency import RoundTrip
-from redline.record.protocol import Meters, TakeReport
-from redline.record.takes import discard, next_take, write_sidecar
+from redline.record.protocol import EngineError, Meters, TakeReport
+from redline.record.takes import discard, next_take, write_incomplete_sidecar, write_sidecar
 
 # above this quantum the round trip alone eats most of 10 ms
 QUANTUM_LIMIT = 128
@@ -109,7 +109,13 @@ class Session:
     def _finish(self) -> TakeReport:
         assert self.current is not None
         path, self.current = self.current, None
-        report = self.engine.stop()
+        try:
+            report = self.engine.stop()
+        except EngineError as error:
+            # `redline takes` must not read a missing log as a take without dropouts
+            write_incomplete_sidecar(path, str(error), self.round_trip, self.quantum)
+            self.recorded.append(path)
+            raise
         write_sidecar(report, self.round_trip, self.quantum)
         self.recorded.append(path)
         return report

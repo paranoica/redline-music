@@ -212,6 +212,11 @@ def _notes(ranking: Ranking) -> list[str]:
                 f"- {take.name}: бит слышен в микрофоне (корреляция {take.metrics.bleed:.2f}, "
                 f"порог {BLEED_FLAG:g}) — нужны наушники."
             )
+        if take.metrics.dropouts is None:
+            lines.append(
+                f"- {take.name}: выпадения неизвестны — нет журнала дубля, он не читается или "
+                f"запись не завершилась. Засчитано как худшее: {DROPOUT_MAX_POINTS:g} баллов."
+            )
         if take.metrics.short:
             beat = f", бит {ranking.beat_seconds:.1f} с" if ranking.beat_seconds else ""
             lines.append(

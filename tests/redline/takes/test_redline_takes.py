@@ -2,7 +2,8 @@ import json
 
 import numpy as np
 import pytest
-from redline.takes.rank import BLEED_FLAG, rank_folder
+from redline.takes.rank import BLEED_FLAG, DROPOUT_MAX_POINTS, rank_folder
+from redline.takes.report import report_markdown
 from takes_signals import RATE, SECONDS, click_beat, put, vocal
 
 
@@ -112,6 +113,8 @@ def test_sidecar_dropouts_lower_the_rank(tmp_path, beat):
     put(folder, "take-02.wav", dropped)
     (folder / "take-02.json").write_text(json.dumps({"dropouts": spans}), encoding="utf-8")
     put(folder, "take-03.wav", vocal(3))
+    for name in ("take-01.json", "take-03.json"):
+        (folder / name).write_text(json.dumps({"dropouts": []}), encoding="utf-8")
     ranking = rank_folder(beat, folder)
     takes = by_name(ranking)
     assert ranking.takes[-1].name == "take-02"
@@ -182,3 +185,37 @@ def test_a_silent_take_is_skipped_however_long(tmp_path, beat, seconds):
     ranking = rank_folder(beat, folder)
     assert sorted(t.name for t in ranking.takes) == ["take-01", "take-02"]
     assert [(s.name, s.code) for s in ranking.skips] == [("take-03", "silent")]
+
+
+def clean_sidecar(folder, name, **fields):
+    data = {"dropouts": [], "complete": True, **fields}
+    (folder / name).write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize("sidecar", [None, {"complete": False, "error": "stop timed out"}])
+def test_a_take_with_unknown_dropouts_scores_the_worst_dropouts(tmp_path, beat, sidecar):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(1))
+    clean_sidecar(folder, "take-01.json")
+    if sidecar is not None:
+        (folder / "take-02.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    ranking = rank_folder(beat, folder)
+    takes = by_name(ranking)
+    unknown = takes["take-02"]
+    assert unknown.metrics.dropouts is None
+    assert unknown.points["dropouts"] == DROPOUT_MAX_POINTS
+    assert takes["take-01"].points["dropouts"] == 0
+    assert [t.name for t in ranking.takes] == ["take-01", "take-02"]
+    text = report_markdown(ranking, "song", None)
+    assert "- take-02: выпадения неизвестны" in text
+    assert "- take-01: выпадения неизвестны" not in text
+
+
+def test_an_old_sidecar_without_the_complete_mark_still_reads(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    (folder / "take-01.json").write_text(json.dumps({"dropouts": [[0, 480]]}), encoding="utf-8")
+    take = rank_folder(beat, folder).takes[0]
+    assert take.metrics.dropouts == 1
+    assert take.metrics.dropout_ms == pytest.approx(10.0)
