@@ -108,3 +108,19 @@ def test_a_round_trip_of_a_whole_second_is_still_applied(tmp_path):
     path = tmp_path / "latency.json"
     save_calibration(path, KEY, Delay(48000, 41.0), "loopback")
     assert round_trip(path, KEY, estimate=200).frames == 48000
+
+
+def test_a_speakers_calibration_is_applied_with_a_note_to_recalibrate_with_the_cup(tmp_path):
+    path = tmp_path / "latency.json"
+    save_calibration(path, KEY, Delay(900, 33.0), "speakers")
+    trip = round_trip(path, KEY, 300)
+    assert (trip.frames, trip.source) == (900, "calibrated")
+    assert trip.note is not None
+    assert "speakers" in trip.note and "air" in trip.note and "cup" in trip.note
+
+
+@pytest.mark.parametrize("mode", ["cup", "loopback"])
+def test_a_cup_or_loopback_calibration_carries_no_note(tmp_path, mode):
+    path = tmp_path / "latency.json"
+    save_calibration(path, KEY, Delay(900, 33.0), mode)
+    assert round_trip(path, KEY, 300).note is None

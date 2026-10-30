@@ -16,6 +16,10 @@ from typing import Any
 from redline.record.sweep import Delay
 
 MODES = ("cup", "loopback", "speakers")
+SPEAKERS_NOTE = (
+    "calibrated through the speakers: an acoustic path, so the round trip includes the air "
+    "delay to the mic. Recalibrate with the headphone cup at the mic for the takes' offset"
+)
 
 
 @dataclass(frozen=True)
@@ -126,7 +130,8 @@ def round_trip(path: Path, key: LatencyKey, estimate: int | None) -> RoundTrip:
         if mine and _entry_key(mine[0]) != key:
             raise ValueError(f"the entry for {key.name()} does not match its own fields")
         if mine:
-            return RoundTrip(_frames(mine[0]), "calibrated")
+            note = SPEAKERS_NOTE if mine[0].get("mode") == "speakers" else None
+            return RoundTrip(_frames(mine[0]), "calibrated", note)
         stored = "; ".join(str(e.get("key")) for e in others) or "nothing"
     except (OSError, ValueError, KeyError, TypeError, OverflowError) as error:
         return _fallback(estimate, f"{path.name} unreadable ({error}): {again}")
