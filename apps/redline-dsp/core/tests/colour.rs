@@ -466,3 +466,49 @@ fn exciter_adds_harmonics_above_its_frequency_only() {
     let y = run(effect("exciter", &[("amount", 0.0)]).as_mut(), &high, 64);
     assert!(y == high);
 }
+
+/// Full-scale signals at any rate: a jump to a held level, a sine and noise, each after
+/// half a second of silence.
+fn loud_signals(rate: f32) -> Vec<(&'static str, Vec<[f32; 2]>)> {
+    let n = (2.0 * rate) as usize;
+    let half = n / 2;
+    let held = (0..n).map(|i| if i < half { [0.0; 2] } else { [1.0; 2] });
+    let tone = (0..n).map(|i| {
+        let v = (i as f32 * 2.0 * std::f32::consts::PI * 200.0 / rate).sin();
+        if i < half {
+            [0.0; 2]
+        } else {
+            [v, v]
+        }
+    });
+    let hiss = (0..n).map(|i| {
+        let v = ((((i as f64) * 12.9898).sin() * 43758.5453).fract() as f32 - 0.5) * 2.0;
+        if i < half {
+            [0.0; 2]
+        } else {
+            [v, -v]
+        }
+    });
+    vec![
+        ("held", held.collect()),
+        ("sine", tone.collect()),
+        ("noise", hiss.collect()),
+    ]
+}
+
+#[test]
+fn talkbox_output_stays_bounded_for_full_scale_input_at_any_rate() {
+    for rate in [8000.0, 48000.0, 192000.0] {
+        for carrier in ["saw", "pulse"] {
+            for (what, x) in loud_signals(rate) {
+                let mut e = make("talkbox").unwrap();
+                e.set("carrier", if carrier == "saw" { 0.0 } else { 1.0 })
+                    .unwrap();
+                e.reset(rate);
+                let y = run(e.as_mut(), &x, 512);
+                let top = y.iter().flatten().fold(0.0f32, |m, v| m.max(v.abs()));
+                assert!(top <= 2.0, "{rate} Hz, {carrier}, {what}: peak {top}");
+            }
+        }
+    }
+}

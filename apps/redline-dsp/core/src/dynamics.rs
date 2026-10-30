@@ -18,7 +18,8 @@
 //! - duck: the main signal goes `depth` dB down while the side's RMS level is over the
 //!   threshold (the full depth 3 dB over it, none 3 dB under).
 //! - transient: a fast and a slow envelope tell an attack from what follows; the attack is
-//!   raised or lowered by `attack` dB, and the decay by `sustain` dB.
+//!   raised or lowered by `attack` dB, and the decay by `sustain` dB. An onset just after a
+//!   decay counts as an attack only, so the two never add up on one sample.
 
 use crate::design::{self, Sos};
 use crate::effect::{check, finite, Effect, ParamError, ParamSpec, Smoothed, MAX_BLOCK};
@@ -510,7 +511,7 @@ impl Limiter {
     const SPECS: &'static [ParamSpec] = &[
         ParamSpec::range("ceiling", -24.0, 0.0, -1.0, "dB"),
         ParamSpec::range("release", 1.0, 1000.0, 50.0, "ms"),
-        ParamSpec::range("lookahead", 0.1, LOOKAHEAD_MAX_MS, 5.0, "ms"),
+        ParamSpec::range("lookahead", 0.1, LOOKAHEAD_MAX_MS, 5.0, "ms").fixed(),
     ];
 
     pub fn new() -> Self {
@@ -983,8 +984,11 @@ impl Effect for Transient {
             if attack == 0.0 && sustain == 0.0 {
                 continue;
             }
-            let gain_db = attack * (rise / TRANSIENT_SPAN).clamp(0.0, 1.0)
-                + sustain * (fall / TRANSIENT_SPAN).clamp(0.0, 1.0);
+            // an onset right after a decay reads as both; it is an attack, so the sustain gives
+            // way to it and the two never stack
+            let onset = (rise / TRANSIENT_SPAN).clamp(0.0, 1.0);
+            let decay = (fall / TRANSIENT_SPAN).clamp(0.0, 1.0) * (1.0 - onset);
+            let gain_db = attack * onset + sustain * decay;
             let g = amplitude(gain_db);
             f[0] *= g;
             f[1] *= g;

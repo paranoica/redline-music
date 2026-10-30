@@ -176,3 +176,212 @@ fn a_rate_below_eight_kilohertz_is_an_error_naming_it() {
     let mut y = vec![[0.1f32, 0.2]; 4000];
     rack.process(&mut y);
 }
+
+fn render_with(json: &str, x: &[[f32; 2]], side: &[[f32; 2]], block: usize) -> Vec<[f32; 2]> {
+    let mut rack = Rack::from_json(json).unwrap();
+    rack.reset(48000.0).unwrap();
+    let mut y = x.to_vec();
+    for (k, chunk) in y.chunks_mut(block).enumerate() {
+        let from = (k * block).min(side.len());
+        rack.process_with(chunk, &side[from..(from + block).min(side.len())]);
+    }
+    y
+}
+
+/// A burst of full-scale noise 2 ms long at `at`, silence around it.
+fn burst(n: usize, at: usize) -> Vec<[f32; 2]> {
+    let mut x = vec![[0.0f32; 2]; n];
+    for (i, f) in x[at..at + 96].iter_mut().enumerate() {
+        let v = if i % 2 == 0 { 1.0 } else { -1.0 };
+        *f = [v, v];
+    }
+    x
+}
+
+const DUCK: &str = r#"{"effect": "duck", "params": {"depth": 24, "attack": 0.1, "release": 20, "threshold": -40}}"#;
+
+/// The duck's gain at each frame: the output over the input, where the input is not quiet.
+fn duck_gain(with: &[[f32; 2]], without: &[[f32; 2]]) -> Vec<Option<f32>> {
+    with.iter()
+        .zip(without)
+        .map(|(a, b)| (b[0].abs() > 0.05).then(|| a[0] / b[0]))
+        .collect()
+}
+
+#[test]
+fn the_side_reaches_an_effect_as_late_as_the_sound_does() {
+    let n = 48000;
+    let side = burst(n, 24000);
+    let x = vec![[0.25f32, 0.25]; n];
+    let alone = render_with(&format!(r#"{{"effects": [{DUCK}]}}"#), &x, &side, 128);
+    // a limiter under its ceiling is a delay of its lookahead: the duck behind it must dip
+    // that much later, on the frame the vocal it ducks came in
+    let limiter = r#"{"effect": "limiter", "params": {"lookahead": 5}}"#;
+    for block in [128, 1, 5000] {
+        let late = render_with(
+            &format!(r#"{{"effects": [{limiter}, {DUCK}]}}"#),
+            &x,
+            &side,
+            block,
+        );
+        let lag = 240;
+        assert!(alone[24100][0] < 0.1, "the duck dips at all");
+        for i in 0..n - lag {
+            assert!(
+                (late[i + lag][0] - alone[i][0]).abs() < 1e-6,
+                "block {block}, frame {i}: {} against {}",
+                late[i + lag][0],
+                alone[i][0]
+            );
+        }
+    }
+}
+
+#[test]
+fn the_side_is_delayed_behind_timestretch_and_reverse_too() {
+    let n = 96000;
+    let side = burst(n, 48000);
+    let x: Vec<[f32; 2]> = (0..n)
+        .map(|i| {
+            let v = 0.5 * (i as f32 * 2.0 * std::f32::consts::PI * 220.0 / 48000.0).sin();
+            [v, v]
+        })
+        .collect();
+    let ones = vec![[1.0f32, 1.0]; n];
+    let want: Vec<f32> = render_with(&format!(r#"{{"effects": [{DUCK}]}}"#), &ones, &side, 128)
+        .iter()
+        .map(|f| f[0])
+        .collect();
+    for first in [
+        r#"{"effect": "timestretch", "params": {"speed": 1.5}}"#,
+        r#"{"effect": "reverse", "params": {"window": 100, "fade": 0}}"#,
+    ] {
+        let mut rack = Rack::from_json(&format!(r#"{{"effects": [{first}]}}"#)).unwrap();
+        rack.reset(48000.0).unwrap();
+        let lag = rack.latency();
+        let with = render_with(
+            &format!(r#"{{"effects": [{first}, {DUCK}]}}"#),
+            &x,
+            &side,
+            128,
+        );
+        let without = render_with(&format!(r#"{{"effects": [{first}]}}"#), &x, &side, 128);
+        let gains = duck_gain(&with[lag..], &without[lag..]);
+        let mut checked = 0;
+        for (i, g) in gains.iter().enumerate() {
+            if let Some(g) = g {
+                assert!(
+                    (g - want[i]).abs() < 1e-3,
+                    "{first}: frame {i}: {g} against {}",
+                    want[i]
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > n / 2, "{first}: {checked}");
+    }
+}
+
+const FIXED: [(&str, &str); 8] = [
+    ("reverse", "window"),
+    ("limiter", "lookahead"),
+    ("granular", "seed"),
+    ("drift", "seed"),
+    ("tape_delay", "seed"),
+    ("radio", "seed"),
+    ("lofi", "seed"),
+    ("whisper", "seed"),
+];
+
+#[test]
+fn the_catalogue_marks_the_params_fixed_while_playing_and_only_those() {
+    let list: serde_json::Value = serde_json::from_str(&effects_json()).unwrap();
+    let mut fixed = Vec::new();
+    for e in list.as_array().unwrap() {
+        for p in e["params"].as_array().unwrap() {
+            match p.get("fixed_while_playing") {
+                Some(serde_json::Value::Bool(true)) => fixed.push((
+                    e["effect"].as_str().unwrap().to_string(),
+                    p["name"].as_str().unwrap().to_string(),
+                )),
+                None => {}
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+    fixed.sort();
+    let mut want: Vec<(String, String)> = FIXED
+        .iter()
+        .map(|(e, p)| (e.to_string(), p.to_string()))
+        .collect();
+    want.sort();
+    assert_eq!(fixed, want);
+}
+
+#[test]
+fn a_param_fixed_while_playing_cannot_be_automated_and_the_error_names_it() {
+    for (effect, param) in FIXED {
+        let rack =
+            Rack::from_json(&format!(r#"{{"effects": [{{"effect": "{effect}"}}]}}"#)).unwrap();
+        let err = rack.automatable(0, param).unwrap_err().to_string();
+        assert!(err.contains(&format!("{effect}.{param}")), "{err}");
+    }
+    let rack =
+        Rack::from_json(r#"{"effects": [{"effect": "gain"}, {"effect": "reverse"}]}"#).unwrap();
+    assert!(rack.automatable(0, "db").is_ok());
+    assert!(rack.automatable(1, "fade").is_ok());
+    assert!(rack
+        .automatable(1, "nope")
+        .unwrap_err()
+        .to_string()
+        .contains("nope"));
+    assert!(rack
+        .automatable(2, "db")
+        .unwrap_err()
+        .to_string()
+        .contains('2'));
+}
+
+#[test]
+fn a_rack_takes_at_most_thirty_two_effects() {
+    let slots = |n: usize| {
+        let one = r#"{"effect": "gain"}"#;
+        format!(r#"{{"effects": [{}]}}"#, vec![one; n].join(","))
+    };
+    assert_eq!(Rack::from_json(&slots(32)).unwrap().len(), 32);
+    let err = error(&slots(33));
+    assert!(err.contains("32") && err.contains("33"), "{err}");
+}
+
+#[test]
+fn a_rate_above_192_kilohertz_is_an_error_naming_it() {
+    let mut rack = Rack::from_json(r#"{"effects": [{"effect": "shimmer"}]}"#).unwrap();
+    for rate in [192001.0, 384000.0] {
+        let err = rack.reset(rate).unwrap_err().to_string();
+        assert!(
+            err.contains(&rate.to_string()) && err.contains("192000"),
+            "{err}"
+        );
+    }
+    assert!(rack.reset(192000.0).is_ok());
+}
+
+#[test]
+fn the_rack_grid_is_the_common_multiple_of_its_offline_windows() {
+    let grid = |json: &str| {
+        let mut rack = Rack::from_json(json).unwrap();
+        rack.reset(48000.0).unwrap();
+        rack.grid()
+    };
+    assert_eq!(
+        grid(r#"{"effects": [{"effect": "gain"}, {"effect": "delay"}]}"#),
+        1
+    );
+    let reverse = r#"{"effect": "reverse", "params": {"window": 250}}"#;
+    assert_eq!(grid(&format!(r#"{{"effects": [{reverse}]}}"#)), 12000);
+    // reverse_reverb's windows are 4.5 s
+    let both = format!(r#"{{"effects": [{reverse}, {{"effect": "reverse_reverb"}}]}}"#);
+    assert_eq!(grid(&both), 216000);
+    let off = r#"{"effects": [{"effect": "reverse", "on": false}]}"#;
+    assert_eq!(grid(off), 1);
+}

@@ -725,3 +725,115 @@ fn trance_gate_turns_the_off_steps_down_by_its_depth() {
         .iter()
         .all(|f| f[0].abs() < 1e-5 && f[1].abs() < 1e-5));
 }
+
+#[test]
+fn reverse_keeps_its_window_and_latency_until_the_next_reset() {
+    let mut e = effect("reverse", &[("window", 100.0), ("fade", 0.0)]);
+    let w = frames(0.1);
+    e.set("window", 500.0).unwrap();
+    assert_eq!(e.latency(), w);
+    let x = ramp(1.0);
+    let y = run(e.as_mut(), &x, 256);
+    for k in 1..x.len() / w {
+        for i in 0..w {
+            assert_eq!(y[k * w + i], x[k * w - 1 - i], "window {k}, frame {i}");
+        }
+    }
+    e.reset(RATE);
+    assert_eq!(e.latency(), frames(0.5));
+}
+
+/// The effect run in blocks of `block` frames, with params set at given frames: a block is
+/// cut short where one is due, so every size sets it on the same frame.
+fn run_events(
+    e: &mut dyn Effect,
+    x: &[[f32; 2]],
+    block: usize,
+    events: &[(usize, &str, f32)],
+) -> Vec<[f32; 2]> {
+    let mut y = x.to_vec();
+    let mut at = 0;
+    while at < y.len() {
+        for (frame, name, value) in events {
+            if *frame == at {
+                e.set(name, *value).unwrap();
+            }
+        }
+        let next = events
+            .iter()
+            .map(|(f, _, _)| *f)
+            .filter(|&f| f > at)
+            .min()
+            .unwrap_or(usize::MAX);
+        let end = (at + block).min(next).min(y.len());
+        e.process(&mut y[at..end]);
+        at = end;
+    }
+    y
+}
+
+/// An effect's name, its params, and params set at given frames.
+type Case = (
+    &'static str,
+    Vec<(&'static str, f32)>,
+    Vec<(usize, &'static str, f32)>,
+);
+
+#[test]
+fn time_effects_do_not_depend_on_the_block_size() {
+    let x = noise(1.5);
+    let cases: Vec<Case> = vec![
+        ("varispeed", vec![("speed", 1.5), ("window", 200.0)], vec![]),
+        ("varispeed", vec![("speed", 0.7), ("window", 200.0)], vec![]),
+        (
+            "timestretch",
+            vec![("speed", 1.5), ("window", 200.0)],
+            vec![],
+        ),
+        (
+            "timestretch",
+            vec![("speed", 0.6), ("window", 300.0)],
+            vec![],
+        ),
+        ("timestretch", vec![], vec![]),
+        (
+            "tape_stop",
+            vec![("time", 0.2), ("duration", 0.4), ("resume", 0.3)],
+            vec![],
+        ),
+        ("tape_start", vec![("time", 0.2), ("duration", 0.4)], vec![]),
+        ("reverse", vec![("window", 100.0)], vec![]),
+        (
+            "freeze",
+            vec![],
+            vec![(frames(0.3), "hold", 1.0), (frames(0.9), "hold", 0.0)],
+        ),
+        (
+            "granular",
+            vec![("stretch", 1.6), ("scatter", 50.0), ("jitter", 3.0)],
+            vec![],
+        ),
+        ("granular", vec![("stretch", 0.4)], vec![]),
+        (
+            "stutter",
+            vec![("repeats", 3.0), ("step", 2.0), ("fall", 3.0)],
+            vec![(frames(0.4), "trigger", 1.0), (frames(0.5), "trigger", 0.0)],
+        ),
+        (
+            "chop",
+            vec![("bpm", 150.0), ("s1", 0.0), ("s3", 6.0)],
+            vec![],
+        ),
+        ("trance_gate", vec![("bpm", 140.0), ("depth", 40.0)], vec![]),
+    ];
+    for (name, params, events) in &cases {
+        let want = run_events(effect(name, params).as_mut(), &x, 512, events);
+        for block in [1, 64, 128, 5000] {
+            let got = run_events(effect(name, params).as_mut(), &x, block, events);
+            assert!(
+                got == want,
+                "{name} {params:?}: blocks of {block} differ from blocks of 512"
+            );
+        }
+    }
+}

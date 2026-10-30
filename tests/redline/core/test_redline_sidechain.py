@@ -64,3 +64,17 @@ def test_a_ring_modulator_rack_gives_the_sum_and_difference():
     for f in (700.0, 1300.0):
         assert _amplitude(steady, f) == pytest.approx(0.25, rel=0.03)
     assert _amplitude(steady, 1000.0) < 1e-3
+
+
+def test_a_ducker_behind_a_limiter_hears_the_side_as_late_as_the_vocal():
+    # under its ceiling the limiter only delays; the rack takes its latency back out, so the
+    # ducker behind it must give what it gives alone, dip for dip
+    main = tone(300.0, 1.0, amp=0.2)
+    side = np.zeros_like(main)
+    side[RATE // 2 : RATE // 2 + 200] = 0.9
+    duck = {"effect": "duck", "params": {"depth": 24, "attack": 0.1, "release": 20}}
+    limiter = {"effect": "limiter", "params": {"lookahead": 10}}
+    alone = native.rack_process(main, RATE, _rack(duck), side=side)
+    behind = native.rack_process(main, RATE, _rack(limiter, duck), side=side)
+    assert np.abs(alone - main).max() > 0.05
+    np.testing.assert_allclose(behind, alone, atol=1e-6)

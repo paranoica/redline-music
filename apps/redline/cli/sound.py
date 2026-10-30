@@ -162,6 +162,7 @@ def _run(args: argparse.Namespace, separator: "Separator | None") -> int:
 def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
     from dataclasses import asdict
 
+    from redline.engine.settings import to_dict
     from redline.engine.track import track_engine
     from redline.master.run import write_result
     from redline.measure.run import measure_own
@@ -188,7 +189,12 @@ def _voice(args: argparse.Namespace, separator: "Separator | None") -> int:
         if chosen is None and not args.no_auto:
             found = auto_settings(engine, inputs.refs, separator=separator or RoformerSeparator())
             chosen = found.settings
-        extra = None if found is None else {"auto": asdict(found)}
+        # the chosen settings as their file holds them, so they load back
+        extra = (
+            None
+            if found is None
+            else {"auto": {**asdict(found), "settings": to_dict(found.settings)}}
+        )
         folder = write_result(inputs, engine, args.out, args.vocal.stem, chosen, extra)
     except SOUND_ERRORS as error:
         print(f"redline: {error}", file=sys.stderr)

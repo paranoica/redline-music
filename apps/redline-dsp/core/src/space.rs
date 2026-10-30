@@ -661,6 +661,9 @@ impl Effect for ReverseReverb {
     fn offline_only(&self) -> bool {
         true
     }
+    fn grid(&self) -> usize {
+        self.window.max(1)
+    }
 }
 
 // --- delays ---
@@ -806,7 +809,7 @@ impl TapeDelay {
         ParamSpec::range("drive", 0.0, 24.0, 6.0, "dB"),
         ParamSpec::range("tone", 500.0, 20000.0, 5000.0, "Hz"),
         mix_spec(0.3),
-        ParamSpec::range("seed", 0.0, 65535.0, 0.0, ""),
+        ParamSpec::range("seed", 0.0, 65535.0, 0.0, "").fixed(),
     ];
 
     pub fn new() -> Self {

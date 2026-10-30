@@ -17,6 +17,9 @@ EQ_BANDS_HZ = (200, 400, 1000, 2500, 5000, 8000)
 PRESET_NAME = re.compile(r"[\w \-]{1,40}")
 # version 2 added the effects rack; a file without a version is version 1
 VERSION = 2
+# the limits Rust holds the rack and its lanes to
+MAX_RACK_EFFECTS = 32
+MAX_LANE_POINTS = 4096
 
 
 @dataclass(frozen=True)
@@ -592,9 +595,19 @@ def _lane(effect: str, specs: dict[str, dict[str, Any]], raw: Any) -> Automation
     what = f"{effect}.{name}"
     if specs[name].get("choices"):
         raise ValueError(f"{what} is a choice and cannot be automated")
+    if specs[name].get("fixed_while_playing"):
+        raise ValueError(f"{what} is fixed while playing and cannot be automated; set it instead")
     points = raw.get("points")
     if not isinstance(points, list) or not points:
         raise ValueError(f"{what}: a lane needs points, [[seconds, value], ...]")
+    if len(points) > MAX_LANE_POINTS:
+        raise ValueError(
+            f"{what}: a lane takes at most {MAX_LANE_POINTS} points, not {len(points)}"
+        )
+    return AutomationLane(name, _points(what, specs[name], points))
+
+
+def _points(what: str, spec: dict[str, Any], points: list[Any]) -> tuple[tuple[float, float], ...]:
     out: list[tuple[float, float]] = []
     for point in points:
         if not isinstance(point, list) or len(point) != 2:
@@ -608,8 +621,8 @@ def _lane(effect: str, specs: dict[str, dict[str, Any]], raw: Any) -> Automation
             raise ValueError(f"{what}: points take seconds from 0, not {seconds!r}")
         if out and seconds < out[-1][0]:
             raise ValueError(f"{what}: points go in order of time")
-        out.append((float(seconds), float(_param(what, specs[name], point[1]))))
-    return AutomationLane(name, tuple(out))
+        out.append((float(seconds), float(_param(what, spec, point[1]))))
+    return tuple(out)
 
 
 def _slot(raw: Any, catalogue: dict[str, dict[str, dict[str, Any]]]) -> RackEffect:
@@ -657,6 +670,8 @@ def _rack(raw: Any) -> tuple[RackEffect, ...]:
         raise ValueError("the rack is a list of effects")
     if not raw:
         return ()
+    if len(raw) > MAX_RACK_EFFECTS:
+        raise ValueError(f"the rack takes at most {MAX_RACK_EFFECTS} effects, not {len(raw)}")
     effects = native.rack_effects()
     if effects is None:
         raise ValueError(

@@ -1,6 +1,7 @@
 mod measure;
 
 use measure::*;
+use redline_dsp_core::effect::make;
 
 /// Gain reduction of a compressor's static curve, in dB: none under the threshold, (L - T) times
 /// (1 - 1/R) over it, and the quadratic knee of Giannoulis, Massberg and Reiss in between.
@@ -378,4 +379,40 @@ fn transient_shaper_sustain_raises_the_tail() {
     let onset = window_db(&x, &y, 0.1, 0.103);
     assert!(tail > 3.0, "tail {tail}");
     assert!(tail > onset + 2.0, "tail {tail}, onset {onset}");
+}
+
+/// Hits of a 220 Hz tone every quarter second, each dying away over 30 ms.
+fn hits(rate: f32) -> Vec<[f32; 2]> {
+    (0..(2.0 * rate) as usize)
+        .map(|i| {
+            let u = (i as f32 / rate) % 0.25;
+            let v = (2.0 * std::f32::consts::PI * 220.0 * u).sin() * (-u / 0.03).exp();
+            [v, v]
+        })
+        .collect()
+}
+
+fn transient_peak(rate: f32, x: &[[f32; 2]]) -> f32 {
+    let mut e = make("transient").unwrap();
+    e.set("attack", 24.0).unwrap();
+    e.set("sustain", 24.0).unwrap();
+    e.reset(rate);
+    let y = run(e.as_mut(), x, 512);
+    y.iter().flatten().fold(0.0f32, |m, v| m.max(v.abs()))
+}
+
+#[test]
+fn transient_peaks_agree_across_rates_and_an_onset_is_not_also_a_decay() {
+    let at_48k = transient_peak(48000.0, &hits(48000.0));
+    let at_384k = transient_peak(384000.0, &hits(384000.0));
+    assert!(
+        db(at_384k / at_48k).abs() < 3.0,
+        "{at_48k} against {at_384k}"
+    );
+    // the attack and the sustain never raise the same sample together: a full-scale input
+    // comes out at most 24 dB up
+    for rate in [8000.0, 48000.0, 384000.0] {
+        let top = transient_peak(rate, &hits(rate));
+        assert!(top <= 10f32.powf(24.0 / 20.0) * 1.001, "{rate} Hz: {top}");
+    }
 }

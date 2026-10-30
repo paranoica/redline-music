@@ -7,6 +7,8 @@ use std::fmt;
 pub use crate::effects::{make, EFFECTS};
 
 /// A param's range and default. A param with choices takes the index of one; JSON may name it.
+/// A param fixed while playing changes the effect's latency or is only read at reset (a
+/// seed), so it cannot move along a lane: the rack would fall out of step with it.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct ParamSpec {
     pub name: &'static str,
@@ -16,6 +18,8 @@ pub struct ParamSpec {
     pub unit: &'static str,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub choices: &'static [&'static str],
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fixed_while_playing: bool,
 }
 
 impl ParamSpec {
@@ -33,6 +37,15 @@ impl ParamSpec {
             default,
             unit,
             choices: &[],
+            fixed_while_playing: false,
+        }
+    }
+
+    /// The same param, taking a new value only at the next reset.
+    pub const fn fixed(self) -> Self {
+        ParamSpec {
+            fixed_while_playing: true,
+            ..self
         }
     }
 
@@ -44,6 +57,7 @@ impl ParamSpec {
             default: 0.0,
             unit: "choice",
             choices,
+            fixed_while_playing: false,
         }
     }
 }
@@ -127,6 +141,11 @@ pub trait Effect: Send {
     }
     fn offline_only(&self) -> bool {
         false
+    }
+    /// Frames between the windows an effect lays from its first frame after reset; 1 for one
+    /// without. A render of a piece matches the whole only from a multiple of this.
+    fn grid(&self) -> usize {
+        1
     }
 }
 
@@ -219,8 +238,17 @@ impl<'de> Deserialize<'de> for Params {
     }
 }
 
+/// The most effects a rack holds.
+pub const MAX_EFFECTS: usize = 32;
+
+/// The most points an automation lane holds.
+pub const MAX_LANE_POINTS: usize = 4096;
+
 /// The lowest rate the rack runs at; the pitch effects' stretcher needs blocks of some length.
 pub const MIN_RATE: f32 = 8000.0;
+
+/// The highest rate the rack runs at: the Faust reverbs are designed up to it.
+pub const MAX_RATE: f32 = 192000.0;
 
 /// The longest block a side signal is handed over with; [`Rack::process_with`] splits longer
 /// blocks.
@@ -311,6 +339,12 @@ impl Smoothed {
 pub struct Rack {
     effects: Vec<Box<dyn Effect>>,
     on: Vec<bool>,
+    // the side signal reaches each slot as late as the sound does: `delays[k]` frames back
+    // in a ring of its recent past, copied out through `side_out`
+    delays: Vec<usize>,
+    side_ring: Vec<[f32; 2]>,
+    side_pos: usize,
+    side_out: Vec<[f32; 2]>,
 }
 
 impl Rack {
@@ -319,9 +353,19 @@ impl Rack {
     pub fn from_json(text: &str) -> Result<Rack, RackError> {
         let spec: RackSpec =
             serde_json::from_str(text).map_err(|e| RackError(format!("rack: {e}")))?;
+        if spec.effects.len() > MAX_EFFECTS {
+            return Err(RackError(format!(
+                "a rack takes at most {MAX_EFFECTS} effects, not {}",
+                spec.effects.len()
+            )));
+        }
         let mut rack = Rack {
             effects: Vec::with_capacity(spec.effects.len()),
             on: Vec::with_capacity(spec.effects.len()),
+            delays: vec![0; spec.effects.len()],
+            side_ring: Vec::new(),
+            side_pos: 0,
+            side_out: Vec::new(),
         };
         for slot in spec.effects {
             let mut effect = make(&slot.effect)
@@ -336,43 +380,71 @@ impl Rack {
         Ok(rack)
     }
 
-    /// Sizes every effect for `rate`; a rate under [`MIN_RATE`] (or not a number) is refused
-    /// and the effects are left as they were.
+    /// Sizes every effect for `rate`; a rate outside [`MIN_RATE`]..=[`MAX_RATE`] (or not a
+    /// number) is refused and the effects are left as they were.
     pub fn reset(&mut self, rate: f32) -> Result<(), RackError> {
-        // written so NaN fails it too
-        if !(rate >= MIN_RATE && rate.is_finite()) {
+        if !(MIN_RATE..=MAX_RATE).contains(&rate) {
             return Err(RackError(format!(
-                "the rate {rate} Hz is under the rack's lowest, {MIN_RATE} Hz"
+                "the rate {rate} Hz is outside the rack's {MIN_RATE}..{MAX_RATE} Hz"
             )));
         }
         for e in &mut self.effects {
             e.reset(rate);
         }
+        let delays: Vec<usize> = (0..self.effects.len())
+            .map(|k| self.latency_before(k))
+            .collect();
+        let longest = delays.iter().copied().max().unwrap_or(0);
+        self.delays = delays;
+        self.side_ring.clear();
+        if longest > 0 {
+            self.side_ring
+                .resize((longest + MAX_BLOCK).next_power_of_two(), [0.0; 2]);
+        }
+        self.side_pos = 0;
+        self.side_out.clear();
+        self.side_out.resize(MAX_BLOCK, [0.0; 2]);
         Ok(())
     }
 
+    /// As [`Rack::process_with`] with a silent side.
     pub fn process(&mut self, block: &mut [[f32; 2]]) {
-        finite(block);
-        for (e, &on) in self.effects.iter_mut().zip(&self.on) {
-            if on {
-                e.process(block);
-            }
-        }
+        self.process_with(block, &[]);
     }
 
     /// As `process`, with a side signal for the effects that listen to one (a sidechain
     /// compressor, a ducker, a vocoder's carrier). Frames of `side` past its end are silent.
+    /// Each effect hears the side as late as the sound reaches it, the latency of the
+    /// effects before it, so a ducker behind a limiter dips on the frame it ducks.
     pub fn process_with(&mut self, block: &mut [[f32; 2]], side: &[[f32; 2]]) {
         finite(block);
         for (k, chunk) in block.chunks_mut(MAX_BLOCK).enumerate() {
             let start = (k * MAX_BLOCK).min(side.len());
             let part = &side[start..(start + chunk.len()).min(side.len())];
-            for (e, &on) in self.effects.iter_mut().zip(&self.on) {
-                if on {
-                    e.sidechain(part);
-                    e.process(chunk);
+            let n = chunk.len();
+            let mask = self.side_ring.len().wrapping_sub(1);
+            if !self.side_ring.is_empty() {
+                for i in 0..n {
+                    let f = part.get(i).copied().unwrap_or([0.0; 2]);
+                    self.side_ring[(self.side_pos + i) & mask] = f;
                 }
             }
+            for ((e, &on), &delay) in self.effects.iter_mut().zip(&self.on).zip(&self.delays) {
+                if !on {
+                    continue;
+                }
+                if delay == 0 || self.side_ring.is_empty() {
+                    e.sidechain(part);
+                } else {
+                    let from = self.side_pos.wrapping_sub(delay);
+                    for (i, f) in self.side_out[..n].iter_mut().enumerate() {
+                        *f = self.side_ring[from.wrapping_add(i) & mask];
+                    }
+                    e.sidechain(&self.side_out[..n]);
+                }
+                e.process(chunk);
+            }
+            self.side_pos = self.side_pos.wrapping_add(n);
         }
     }
 
@@ -401,6 +473,25 @@ impl Rack {
             .sum()
     }
 
+    /// The grid of the rack's windows, as [`Effect::grid`]: the least common multiple of its
+    /// effects' grids, `usize::MAX` if that overflows.
+    pub fn grid(&self) -> usize {
+        fn gcd(a: usize, b: usize) -> usize {
+            if b == 0 {
+                a
+            } else {
+                gcd(b, a % b)
+            }
+        }
+        self.effects
+            .iter()
+            .zip(&self.on)
+            .filter(|(_, &on)| on)
+            .map(|(e, _)| e.grid().max(1))
+            .try_fold(1usize, |acc, g| (acc / gcd(acc, g)).checked_mul(g))
+            .unwrap_or(usize::MAX)
+    }
+
     /// Sets a param of the effect in `slot`, as automation does between blocks.
     pub fn set(&mut self, slot: usize, name: &str, value: f32) -> Result<(), RackError> {
         let effect = self
@@ -408,6 +499,26 @@ impl Rack {
             .get_mut(slot)
             .ok_or_else(|| RackError(format!("the rack has no effect at {slot}")))?;
         Ok(effect.set(name, value)?)
+    }
+
+    /// Ok when the param of the effect in `slot` may move along a lane.
+    pub fn automatable(&self, slot: usize, name: &str) -> Result<(), RackError> {
+        let effect = self
+            .effects
+            .get(slot)
+            .ok_or_else(|| RackError(format!("the rack has no effect at {slot}")))?;
+        let spec = effect
+            .params()
+            .iter()
+            .find(|p| p.name == name)
+            .ok_or_else(|| RackError(format!("{} has no param {name}", effect.name())))?;
+        if spec.fixed_while_playing {
+            return Err(RackError(format!(
+                "{}.{name} is fixed while playing and cannot be automated; set it instead",
+                effect.name()
+            )));
+        }
+        Ok(())
     }
 
     pub fn len(&self) -> usize {

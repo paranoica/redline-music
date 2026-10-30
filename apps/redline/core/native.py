@@ -178,6 +178,21 @@ def rack_process_automated(
     return redline_dsp.rack_process_automated(x, float(rate), rack_json, lanes, s)
 
 
+def rack_alignment(rack_json: str, rate: int) -> tuple[int, int] | None:
+    """The grid a piece of a rack render must start on, and the rack's latency in frames.
+
+    Offline-only effects lay their windows from the first frame, so a piece matches the whole
+    only from a multiple of the grid; its output at a frame depends on input up to the
+    latency past it. None without Rust.
+
+    Raises:
+        ValueError: the rack is wrong, as `rack_process` says, or the rate is out of range.
+    """
+    if redline_dsp is None:
+        return None
+    return redline_dsp.rack_alignment(float(rate), rack_json)
+
+
 def rack_effects() -> list[dict[str, Any]] | None:
     """The rack's effects with their params' ranges, defaults and units; None without Rust."""
     if redline_dsp is None:

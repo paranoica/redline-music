@@ -1,6 +1,6 @@
 //! process() and set() must not allocate or free once reset() has sized everything.
 
-use redline_dsp_core::effect::{make, Effect, Rack, EFFECTS};
+use redline_dsp_core::effect::{make, Effect, Rack, EFFECTS, MAX_EFFECTS};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -256,26 +256,39 @@ fn no_effect_allocates_coming_out_of_silence() {
     }
 }
 
+/// Every effect, in as few full racks as hold them.
+fn racks_of_every_effect() -> Vec<Rack> {
+    EFFECTS
+        .chunks(MAX_EFFECTS)
+        .map(|names| {
+            let effects: Vec<String> = names
+                .iter()
+                .map(|e| format!(r#"{{"effect": "{e}"}}"#))
+                .collect();
+            let json = format!(r#"{{"effects": [{}]}}"#, effects.join(","));
+            let mut rack = Rack::from_json(&json).unwrap();
+            rack.reset(44100.0).unwrap();
+            rack
+        })
+        .collect()
+}
+
 #[test]
 fn a_rack_of_every_effect_does_not_allocate_in_process() {
-    let effects: Vec<String> = EFFECTS
-        .iter()
-        .map(|e| format!(r#"{{"effect": "{e}"}}"#))
-        .collect();
-    let mut rack = Rack::from_json(&format!(r#"{{"effects": [{}]}}"#, effects.join(","))).unwrap();
-    rack.reset(44100.0).unwrap();
-    let mut block = vec![[0.1f32, 0.4]; 512];
-    for size in [1, 64, 512] {
-        assert_eq!(
-            allocations(|| rack.process(&mut block[..size])),
-            0,
-            "block {size}"
-        );
-    }
-    let tone = tone(512);
-    for _ in 0..30 {
-        block.copy_from_slice(&tone);
-        assert_eq!(allocations(|| rack.process(&mut block)), 0, "on a tone");
+    for mut rack in racks_of_every_effect() {
+        let mut block = vec![[0.1f32, 0.4]; 512];
+        for size in [1, 64, 512] {
+            assert_eq!(
+                allocations(|| rack.process(&mut block[..size])),
+                0,
+                "block {size}"
+            );
+        }
+        let tone = tone(512);
+        for _ in 0..30 {
+            block.copy_from_slice(&tone);
+            assert_eq!(allocations(|| rack.process(&mut block)), 0, "on a tone");
+        }
     }
 }
 
@@ -296,18 +309,14 @@ fn no_effect_allocates_taking_a_side_signal() {
             assert_eq!(n, 0, "{name}, with a side");
         }
     }
-    let effects: Vec<String> = EFFECTS
-        .iter()
-        .map(|e| format!(r#"{{"effect": "{e}"}}"#))
-        .collect();
-    let mut rack = Rack::from_json(&format!(r#"{{"effects": [{}]}}"#, effects.join(","))).unwrap();
-    rack.reset(44100.0).unwrap();
-    // longer than the longest block a side comes with: the rack splits it
-    let mut long = vec![[0.1f32, 0.4]; 9000];
-    let long_side = vec![[0.3f32, -0.2]; 9000];
-    assert_eq!(
-        allocations(|| rack.process_with(&mut long, &long_side)),
-        0,
-        "a rack with a side"
-    );
+    for mut rack in racks_of_every_effect() {
+        // longer than the longest block a side comes with: the rack splits it
+        let mut long = vec![[0.1f32, 0.4]; 9000];
+        let long_side = vec![[0.3f32, -0.2]; 9000];
+        assert_eq!(
+            allocations(|| rack.process_with(&mut long, &long_side)),
+            0,
+            "a rack with a side"
+        );
+    }
 }

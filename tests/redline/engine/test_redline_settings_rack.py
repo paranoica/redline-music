@@ -236,3 +236,39 @@ def test_the_readme_s_rack_example_loads(readme):
 def test_the_rack_is_its_own_stage_and_not_a_studio_slider():
     assert settings_module.SPECS["rack"].stage == "rack"
     assert "rack" not in {row["key"] for row in schema()["settings"]}
+
+
+@pytest.mark.parametrize(
+    ("effect", "param", "value"),
+    [("reverse", "window", 100), ("limiter", "lookahead", 2), ("granular", "seed", 7)],
+)
+def test_a_lane_on_a_param_fixed_while_playing_is_refused_naming_it(effect, param, value):
+    lane = {"param": param, "points": [[0, value]]}
+    with pytest.raises(ValueError, match=rf"{effect}\.{param} is fixed while playing"):
+        from_dict(v2({"effect": effect, "automation": [lane]}))
+    # set once, it is fine
+    rack = from_dict(v2({"effect": effect, "params": {param: value}})).rack
+    assert rack[0].params == ((param, float(value)),)
+
+
+def test_the_catalogue_tells_which_params_are_fixed_while_playing():
+    catalogue = {e["effect"]: {p["name"]: p for p in e["params"]} for e in native.rack_effects()}
+    assert catalogue["reverse"]["window"]["fixed_while_playing"] is True
+    assert "fixed_while_playing" not in catalogue["reverse"]["fade"]
+    assert "fixed_while_playing" not in catalogue["gain"]["db"]
+
+
+def test_a_rack_takes_at_most_32_effects():
+    assert len(from_dict(v2(*[{"effect": "gain"}] * 32)).rack) == 32
+    with pytest.raises(ValueError, match="at most 32 effects, not 33"):
+        from_dict(v2(*[{"effect": "gain"}] * 33))
+
+
+def test_a_lane_takes_at_most_4096_points():
+    def lane(n):
+        points = [[i / 100, 0] for i in range(n)]
+        return {"effect": "gain", "automation": [{"param": "db", "points": points}]}
+
+    assert len(from_dict(v2(lane(4096))).rack[0].automation[0].points) == 4096
+    with pytest.raises(ValueError, match=r"gain\.db: a lane takes at most 4096 points, not 4097"):
+        from_dict(v2(lane(4097)))

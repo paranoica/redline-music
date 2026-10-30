@@ -238,7 +238,18 @@ class Engine:
             # rack reverbs and delays can ring longer than the built-in ones
             tails.append(MAX_PREVIEW_PAD_S)
         pad = int(min(max(tails), MAX_PREVIEW_PAD_S) * self.context.rate)
-        low, high = max(0, start - pad), min(len(self.vocal), end + pad)
+        low, high = max(0, start - pad), end + pad
+        if any(effect.on for effect in settings.rack):
+            alignment = native.rack_alignment(rack_json(settings.rack), self.context.rate)
+            if alignment is not None:
+                # offline-only effects (reverse) lay their windows from the track's first
+                # frame: the piece starts on one of them and runs as far as the rack looks
+                # ahead, so its loop is that span of the whole render
+                grid, latency = alignment
+                low -= (self._start + low) % grid
+                low = max(0, low)
+                high = max(high, end + latency)
+        high = min(len(self.vocal), high)
         piece = Engine(self.vocal[low:high], self.beat[low:high], self.context, 0)
         piece._start = self._start + low
         last = self.last

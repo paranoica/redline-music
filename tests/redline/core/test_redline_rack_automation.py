@@ -118,3 +118,25 @@ def test_points_before_the_start_are_read_as_a_lane_shifted_in_time():
 def test_without_rust_automation_is_left_alone(monkeypatch):
     monkeypatch.setattr(native, "redline_dsp", None)
     assert native.rack_process_automated(noise(0.1), RATE, _rack(), []) is None
+
+
+@pytest.mark.parametrize(("effect", "param"), [("reverse", "window"), ("limiter", "lookahead")])
+def test_a_lane_on_a_param_fixed_while_playing_is_refused_by_rust_too(effect, param):
+    with pytest.raises(ValueError, match=rf"{effect}\.{param} is fixed while playing"):
+        native.rack_process_automated(
+            noise(0.1), RATE, _rack({"effect": effect}), [(0, param, [(0.0, 50.0)])]
+        )
+
+
+def test_a_lane_of_more_than_4096_points_is_refused_by_rust_too():
+    points = [(i / 1000, 0.0) for i in range(4096)]
+    native.rack_process_automated(noise(0.1), RATE, _rack(GAIN), [(0, "db", points)])
+    with pytest.raises(ValueError, match="4097 points; a lane takes at most 4096"):
+        native.rack_process_automated(
+            noise(0.1), RATE, _rack(GAIN), [(0, "db", [*points, (5.0, 0.0)])]
+        )
+
+
+def test_a_rack_of_more_than_32_effects_is_refused_by_rust_too():
+    with pytest.raises(ValueError, match="at most 32 effects, not 33"):
+        native.rack_process(noise(0.1), RATE, _rack(*[GAIN] * 33))

@@ -18,6 +18,8 @@
 //! - talkbox: linear prediction of the input every 15 ms over 30 ms gives its formant
 //!   envelope, an all-pole lattice whose reflection coefficients glide from one analysis to
 //!   the next; the carrier, pre-emphasised and brought to unit RMS, is driven through it.
+//!   The output is turned down to the input's level (10 ms RMS) where it rings louder, and
+//!   rounded off over full scale so it never reaches 2.
 //! - ring_mod: the input times a sine. freq_shift: single sideband modulation, the input's
 //!   analytic signal (Niemitalo's all-pass Hilbert pair) times a complex sine.
 //! - comb: a feedback comb, scaled so its peaks sit at 0 dB.
@@ -368,7 +370,7 @@ impl Radio {
     const SPECS: &'static [ParamSpec] = &[
         ParamSpec::range("noise", -90.0, -20.0, -50.0, "dB"),
         ParamSpec::range("drive", 0.0, 24.0, 6.0, "dB"),
-        ParamSpec::range("seed", 0.0, 65535.0, 0.0, ""),
+        ParamSpec::range("seed", 0.0, 65535.0, 0.0, "").fixed(),
         ParamSpec::range("mix", 0.0, 1.0, 1.0, ""),
     ];
 
@@ -509,7 +511,7 @@ impl Lofi {
         ParamSpec::range("wow", 0.0, 1.0, 0.3, ""),
         ParamSpec::range("flutter", 0.0, 1.0, 0.2, ""),
         ParamSpec::range("noise", -90.0, -30.0, -60.0, "dB"),
-        ParamSpec::range("seed", 0.0, 65535.0, 0.0, ""),
+        ParamSpec::range("seed", 0.0, 65535.0, 0.0, "").fixed(),
         ParamSpec::range("mix", 0.0, 1.0, 1.0, ""),
     ];
 
@@ -837,7 +839,7 @@ impl Whisper {
     const BANDS: usize = 24;
     const SPECS: &'static [ParamSpec] = &[
         ParamSpec::range("mix", 0.0, 1.0, 1.0, ""),
-        ParamSpec::range("seed", 0.0, 65535.0, 0.0, ""),
+        ParamSpec::range("seed", 0.0, 65535.0, 0.0, "").fixed(),
     ];
 
     pub fn new() -> Self {
@@ -1145,7 +1147,21 @@ pub struct Talkbox {
     last_out: f32,
     carrier_power: f32,
     power_pole: f32,
+    // the input's and the output's power, so the output is never louder than what it voices
+    in_power: f32,
+    out_power: f32,
+    level_pole: f32,
     mix: Smoothed,
+}
+
+/// Unity up to full scale, then rounded off towards 2: the talkbox's last guard.
+#[inline]
+fn bounded(v: f32) -> f32 {
+    if v.abs() <= 1.0 {
+        v
+    } else {
+        v.signum() * (1.0 + (v.abs() - 1.0).tanh())
+    }
 }
 
 impl Talkbox {
@@ -1185,6 +1201,9 @@ impl Talkbox {
             last_out: 0.0,
             carrier_power: 0.0,
             power_pole: 0.0,
+            in_power: 0.0,
+            out_power: 0.0,
+            level_pole: 0.0,
             mix: Smoothed::new(1.0),
         };
         t.carrier.tune(DEFAULT_RATE);
@@ -1250,6 +1269,9 @@ impl Effect for Talkbox {
         self.last_out = 0.0;
         self.carrier_power = 0.0;
         self.power_pole = pole(50.0, rate);
+        self.in_power = 0.0;
+        self.out_power = 0.0;
+        self.level_pole = pole(10.0, rate);
         self.carrier.tune(rate);
         self.carrier.synth.reset();
         self.carrier.side.done();
@@ -1297,6 +1319,17 @@ impl Effect for Talkbox {
             }
             let y = v + EMPHASIS * self.last_out;
             self.last_out = if y.abs() < 1e-30 { 0.0 } else { y };
+            // A filter fitted to a held level or a sudden jump can ring far louder than the
+            // input (the de-emphasis alone lifts the lowest notes 30 times): turn it down to
+            // the input's level, and round off what the follower is too slow to catch.
+            self.in_power = x * x + (self.in_power - x * x) * self.level_pole;
+            self.out_power = y * y + (self.out_power - y * y) * self.level_pole;
+            let y = if self.out_power > self.in_power {
+                y * (self.in_power / self.out_power).sqrt()
+            } else {
+                y
+            };
+            let y = bounded(y);
             *f = blend(*f, [y, y], self.mix.next());
         }
         self.carrier.side.done();

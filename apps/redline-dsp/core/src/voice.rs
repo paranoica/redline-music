@@ -807,7 +807,7 @@ impl Drift {
     const SPECS: &'static [ParamSpec] = &[
         ParamSpec::range("depth", 0.0, 100.0, 20.0, "cents"),
         ParamSpec::range("rate", 0.05, 2.0, 0.3, "Hz"),
-        ParamSpec::range("seed", 0.0, 65535.0, 0.0, ""),
+        ParamSpec::range("seed", 0.0, 65535.0, 0.0, "").fixed(),
     ];
 
     pub fn new() -> Self {

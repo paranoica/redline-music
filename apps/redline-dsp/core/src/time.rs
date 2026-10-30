@@ -17,7 +17,8 @@
 //!   u^curve from the input at `time`; once up to speed it splices back onto the live input,
 //!   dropping the lag the spin-up built, so it stays in time with the beat.
 //! - reverse: windows played backwards one window late (latency is one window). Fixed
-//!   windows only; offline only because the lateness is the window.
+//!   windows only, laid from the first frame after reset; a new window applies from the
+//!   next reset. Offline only because the lateness is the window.
 //! - freeze: while `hold` is on, the last `length` of input before the hold loops, its end
 //!   crossfaded into its start.
 //! - granular: Hann grains read around a position that moves at `stretch` times real time,
@@ -270,7 +271,8 @@ impl Effect for Varispeed {
 }
 
 /// Speed without pitch: the varispeed head feeding signalsmith-stretch, which stretches
-/// what it reads to the frames it gives back.
+/// what it reads to the frames it gives back. It runs on a grid of [`CHUNK`] frames counted
+/// from reset, a chunk late, so the host's block size cannot change what comes out.
 pub struct Timestretch {
     speed: f32,
     window: f32,
@@ -282,10 +284,44 @@ pub struct Timestretch {
     owed: f64,
     input: Vec<f32>,
     stand: usize,
+    grid_in: Vec<[f32; 2]>,
+    grid_out: Vec<[f32; 2]>,
+    fill: usize,
 }
 
 impl Timestretch {
     const SPECS: &'static [ParamSpec] = Varispeed::SPECS;
+
+    /// One chunk of the grid: `grid_in` into the history, the head's reading stretched into
+    /// `grid_out`.
+    fn run_chunk(&mut self) {
+        let Some(s) = &mut self.stretch else { return };
+        let window = frames(self.window, self.rate) as f64;
+        let margin = 2 * self.head.splice;
+        for f in &self.grid_in {
+            self.history.push(*f);
+        }
+        let n = CHUNK;
+        self.owed += self.speed as f64 * n as f64;
+        let m = self.owed.floor() as usize;
+        self.owed -= m as f64;
+        let oldest = self.history.oldest() + self.stand as f64;
+        self.head
+            .drift(n as f64, (m + margin) as f64, window, oldest);
+        for k in 0..m {
+            let w = self.head.weight();
+            let y = self.history.at(self.head.delay);
+            let y = if w > 0.0 {
+                mix(y, self.history.at(self.head.old), w)
+            } else {
+                y
+            };
+            self.input[2 * k..2 * k + 2].copy_from_slice(&y);
+            self.head.delay -= 1.0;
+            self.head.old -= 1.0;
+        }
+        s.process(&self.input[..2 * m], self.grid_out.as_flattened_mut());
+    }
 
     pub fn new() -> Self {
         Timestretch {
@@ -299,6 +335,9 @@ impl Timestretch {
             owed: 0.0,
             input: vec![0.0; 4 * CHUNK],
             stand: 0,
+            grid_in: vec![[0.0; 2]; CHUNK],
+            grid_out: vec![[0.0; 2]; CHUNK],
+            fill: 0,
         }
     }
 }
@@ -342,39 +381,27 @@ impl Effect for Timestretch {
             .reset(frames(WINDOW_MAX_MS, rate) + self.stand + splice + 4 * CHUNK);
         self.head.reset(self.stand as f64, splice);
         self.owed = 0.0;
+        self.grid_in.fill([0.0; 2]);
+        self.grid_out.fill([0.0; 2]);
+        self.fill = 0;
     }
     fn process(&mut self, block: &mut [[f32; 2]]) {
-        let Some(s) = &mut self.stretch else { return };
-        let window = frames(self.window, self.rate) as f64;
-        let margin = 2 * self.head.splice;
-        for chunk in block.chunks_mut(CHUNK) {
-            for f in chunk.iter() {
-                self.history.push(*f);
+        if self.stretch.is_none() {
+            return;
+        }
+        for f in block {
+            let out = self.grid_out[self.fill];
+            self.grid_in[self.fill] = *f;
+            self.fill += 1;
+            if self.fill == CHUNK {
+                self.fill = 0;
+                self.run_chunk();
             }
-            let n = chunk.len();
-            self.owed += self.speed as f64 * n as f64;
-            let m = self.owed.floor() as usize;
-            self.owed -= m as f64;
-            let oldest = self.history.oldest() + self.stand as f64;
-            self.head
-                .drift(n as f64, (m + margin) as f64, window, oldest);
-            for k in 0..m {
-                let w = self.head.weight();
-                let y = self.history.at(self.head.delay);
-                let y = if w > 0.0 {
-                    mix(y, self.history.at(self.head.old), w)
-                } else {
-                    y
-                };
-                self.input[2 * k..2 * k + 2].copy_from_slice(&y);
-                self.head.delay -= 1.0;
-                self.head.old -= 1.0;
-            }
-            s.process(&self.input[..2 * m], chunk.as_flattened_mut());
+            *f = out;
         }
     }
     fn latency(&self) -> usize {
-        self.stand + self.stretch.as_ref().map_or(0, Stretch::latency)
+        self.stand + CHUNK + self.stretch.as_ref().map_or(0, Stretch::latency)
     }
 }
 
@@ -526,6 +553,8 @@ pub struct Reverse {
     rate: f32,
     buf: Vec<[f32; 2]>,
     half: usize,
+    // the window in frames, fixed at reset: it is the latency
+    lag: usize,
     front: usize,
     len: usize,
     played: usize,
@@ -535,7 +564,7 @@ pub struct Reverse {
 impl Reverse {
     const WINDOW_MAX: f32 = 2000.0;
     const SPECS: &'static [ParamSpec] = &[
-        ParamSpec::range("window", 20.0, Self::WINDOW_MAX, 250.0, "ms"),
+        ParamSpec::range("window", 20.0, Self::WINDOW_MAX, 250.0, "ms").fixed(),
         ParamSpec::range("fade", 0.0, 20.0, 5.0, "ms"),
     ];
 
@@ -546,15 +575,12 @@ impl Reverse {
             rate: 0.0,
             buf: Vec::new(),
             half: 0,
+            lag: 0,
             front: 0,
             len: 0,
             played: 0,
             pos: 0,
         }
-    }
-
-    fn window_frames(&self) -> usize {
-        frames(self.window, self.rate).clamp(1, self.half.max(1))
     }
 }
 
@@ -578,7 +604,8 @@ impl Effect for Reverse {
         self.buf.clear();
         self.buf.resize(2 * self.half, [0.0; 2]);
         self.front = 0;
-        self.len = self.window_frames();
+        self.lag = frames(self.window, rate).clamp(1, self.half);
+        self.len = self.lag;
         self.played = self.len;
         self.pos = 0;
     }
@@ -591,7 +618,6 @@ impl Effect for Reverse {
             if self.pos == self.len {
                 self.front ^= 1;
                 self.played = self.len;
-                self.len = self.window_frames();
                 self.pos = 0;
                 fade = frames(self.fade, self.rate).min(self.played / 2);
             }
@@ -613,10 +639,13 @@ impl Effect for Reverse {
         }
     }
     fn latency(&self) -> usize {
-        frames(self.window, self.rate)
+        self.lag
     }
     fn offline_only(&self) -> bool {
         true
+    }
+    fn grid(&self) -> usize {
+        self.lag.max(1)
     }
 }
 
@@ -761,7 +790,7 @@ impl Granular {
         ParamSpec::range("scatter", 0.0, 500.0, 0.0, "ms"),
         ParamSpec::range("jitter", 0.0, 12.0, 0.0, "st"),
         ParamSpec::range("stretch", 0.0, 2.0, 1.0, "x"),
-        ParamSpec::range("seed", 0.0, 65535.0, 0.0, ""),
+        ParamSpec::range("seed", 0.0, 65535.0, 0.0, "").fixed(),
     ];
     const FREE: Grain = Grain {
         delay: 0.0,

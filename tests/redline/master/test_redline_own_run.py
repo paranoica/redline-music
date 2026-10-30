@@ -104,8 +104,8 @@ def voice_args(own, tmp_path, *extra):
 
 
 def as_record(settings):
-    # through JSON, so the rack's tuple compares as the list chain.json holds
-    return json.loads(json.dumps(asdict(settings)))
+    # a run writes its settings as their file holds them
+    return to_dict(settings)
 
 
 def only_result(tmp_path):

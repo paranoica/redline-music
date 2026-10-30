@@ -114,3 +114,29 @@ def test_without_rust_a_rack_in_the_engine_is_refused_plainly(setup, monkeypatch
     settings = Settings(rack=(RackEffect("gain"),))
     with pytest.raises(ValueError, match="redline_dsp"):
         Engine(vocal, beat, ctx).render(settings)
+
+
+@pytest.mark.parametrize(
+    "effect",
+    [
+        {"effect": "reverse", "params": {"window": 250, "fade": 5}},
+        {"effect": "reverse_reverb", "params": {"mix": 0.5}},
+    ],
+)
+def test_a_preview_with_an_offline_effect_is_that_span_of_the_whole_render(effect, monkeypatch):
+    # windows laid from the track's first frame: a piece starting between two of them would
+    # reverse other stretches than the whole render does
+    monkeypatch.setattr(engine_module, "PREVIEW_PAD_S", 1.0)
+    monkeypatch.setattr(engine_module, "MAX_PREVIEW_PAD_S", 1.0)
+    monkeypatch.setattr(engine_module, "process_vocal", lambda vocal, *args: (vocal, None))
+    vocal, beat = stems(16.0)
+    engine = Engine(vocal, beat, context(vocal))
+    plain = {"octave_down_on": False, "doubles_on": False, "bass_drive_db": 0}
+    settings = with_rack(effect, master_on=False, **plain)
+    start, end = int(5.1 * RATE), int(6.1 * RATE)
+    whole = engine.render(settings).final[start:end]
+    preview = engine.preview(settings, start, end)
+    assert not np.allclose(
+        whole, engine.render(with_rack(master_on=False, **plain)).final[start:end]
+    )
+    np.testing.assert_allclose(preview, whole, atol=1e-6)

@@ -4,7 +4,7 @@
 //! two paths cannot drift apart in their coefficients; only the loops live in the core. Each
 //! channel gets its own thread here, as the core has none.
 
-use redline_dsp_core::effect::{effects_json, Rack, RackError};
+use redline_dsp_core::effect::{effects_json, Rack, RackError, MAX_LANE_POINTS};
 use redline_dsp_core::{filters, loudness};
 
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
@@ -222,6 +222,13 @@ fn check_lanes(rack: &mut Rack, lanes: &[Lane]) -> Result<(), RackError> {
         if points.is_empty() {
             return Err(RackError(format!("the lane of {param} has no points")));
         }
+        if points.len() > MAX_LANE_POINTS {
+            return Err(RackError(format!(
+                "the lane of {param} has {} points; a lane takes at most {MAX_LANE_POINTS}",
+                points.len()
+            )));
+        }
+        rack.automatable(*slot, param)?;
         let mut last = f64::NEG_INFINITY;
         for &(t, value) in points {
             if !t.is_finite() {
@@ -318,6 +325,17 @@ fn run_rack<'py>(
     Ok(PyArray2::from_owned_array(py, arr))
 }
 
+/// What a render of a piece needs to match the whole: the grid its start must sit on (the
+/// windows of offline-only effects, laid from the first frame) and the rack's latency, the
+/// input past a frame that its output depends on.
+#[pyfunction]
+fn rack_alignment(rate: f32, rack_json: &str) -> PyResult<(usize, usize)> {
+    let error = |e: RackError| PyValueError::new_err(e.to_string());
+    let mut rack = Rack::from_json(rack_json).map_err(error)?;
+    rack.reset(rate).map_err(error)?;
+    Ok((rack.grid(), rack.latency()))
+}
+
 /// The rack's effects and their params, as a JSON list.
 #[pyfunction]
 fn rack_effects() -> String {
@@ -349,5 +367,6 @@ fn redline_dsp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rack_process, m)?)?;
     m.add_function(wrap_pyfunction!(rack_process_automated, m)?)?;
     m.add_function(wrap_pyfunction!(rack_effects, m)?)?;
+    m.add_function(wrap_pyfunction!(rack_alignment, m)?)?;
     Ok(())
 }
