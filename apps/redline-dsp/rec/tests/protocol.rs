@@ -1,4 +1,6 @@
-use redline_rec::protocol::{format, parse, Cause, Command, Dropout, Meters, Reply, TakeReport};
+use redline_rec::protocol::{
+    format, format_wrong_rate, parse, Cause, Command, Dropout, Meters, Reply, TakeReport,
+};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -117,4 +119,15 @@ fn a_take_report_carries_its_dropouts_for_the_sidecar() {
     );
     let back: TakeReport = serde_json::from_value(line(&reply)["take"].clone()).unwrap();
     assert_eq!(back, take);
+}
+
+#[test]
+fn a_beat_at_another_rate_is_one_line_with_both_rates() {
+    let text = format_wrong_rate(48000, 44100);
+    assert!(!text.contains('\n'));
+    let line: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        line,
+        json!({"event": "wrong_rate", "rate": 48000, "beat_rate": 44100})
+    );
 }

@@ -11,7 +11,7 @@ use redline_rec::backend::{
     Graph, USAGE,
 };
 use redline_rec::engine::{engine, serve, Config, Engine, XrunReporter};
-use redline_rec::protocol::format_startup;
+use redline_rec::protocol::{format_startup, format_wrong_rate};
 use redline_rec::wav;
 use std::ffi::{c_char, CStr};
 use std::io::{self, Write};
@@ -88,6 +88,17 @@ fn latency(client: &Client, port: &str, mode: LatencyType) -> (u32, u32) {
         .map_or((0, 0), |p| p.get_latency_range(mode))
 }
 
+/// Tells the driver on stdout which rate to resample the beat to, then refuses it.
+fn refuse_rate(beat_rate: u32, graph_rate: u32) -> Result<(), String> {
+    let refused = check_rate(beat_rate, graph_rate);
+    if refused.is_err() {
+        let mut out = io::stdout().lock();
+        let _ = writeln!(out, "{}", format_wrong_rate(graph_rate, beat_rate));
+        let _ = out.flush();
+    }
+    refused
+}
+
 fn run(args: Args) -> Result<(), String> {
     let beat = wav::read(&args.beat)
         .map_err(|e| format!("cannot read the beat {}: {e}", args.beat.display()))?;
@@ -111,6 +122,8 @@ fn run(args: Args) -> Result<(), String> {
         format!("no JACK server ({e}); is PipeWire with pipewire-jack, or JACK, running?")
     })?;
     let rate = client.sample_rate();
+    // JACK proper knows its rate at open; pipewire-jack is caught after activation
+    refuse_rate(beat.rate, rate)?;
     let frames = beat_frames(&beat, rate)?;
     let beat_len = frames.len() as u64;
 
@@ -149,7 +162,7 @@ fn run(args: Args) -> Result<(), String> {
     let c = active.as_client();
     // pipewire-jack reports the rate asked for at open, which the graph may not run at
     std::thread::sleep(Duration::from_millis(200));
-    check_rate(rate, c.sample_rate())?;
+    refuse_rate(beat.rate, c.sample_rate())?;
 
     let spec = AudioIn::default();
     let audio = spec.jack_port_type();

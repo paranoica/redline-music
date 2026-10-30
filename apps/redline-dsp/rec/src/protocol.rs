@@ -12,6 +12,8 @@
 //! - `{"cmd": "quit"}`.
 //!
 //! Before any reply the backend writes one [`Startup`] line, `{"event": "started", ...}`.
+//! When the beat is not at the graph's rate it writes `{"event": "wrong_rate", "rate": N,
+//! "beat_rate": N}` instead and exits, so the beat can be resampled to `rate`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -153,9 +155,16 @@ pub struct Startup {
 #[serde(tag = "event", rename_all = "snake_case")]
 enum Event<'a> {
     Started(&'a Startup),
+    WrongRate { rate: u32, beat_rate: u32 },
 }
 
 /// The startup line, without the newline.
 pub fn format_startup(startup: &Startup) -> String {
     serde_json::to_string(&Event::Started(startup)).expect("the startup line serialises")
+}
+
+/// The line refusing a beat at `beat_rate` on a graph at `rate`, without the newline.
+pub fn format_wrong_rate(rate: u32, beat_rate: u32) -> String {
+    serde_json::to_string(&Event::WrongRate { rate, beat_rate })
+        .expect("the wrong rate line serialises")
 }
