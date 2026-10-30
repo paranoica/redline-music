@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -66,6 +67,24 @@ def _write(path: Path, text: str) -> None:
     tmp.write_text(text, encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(path)
+
+
+def create_new(path: Path, text: str) -> None:
+    """Create a private text file that must not exist yet.
+
+    Raises:
+        LyricsError: The file exists already.
+    """
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        raise LyricsError(f"{path.name} exists already; it is never overwritten") from None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def excerpts(mine: Sequence[Track], index: FingerprintIndex, seed: int) -> tuple[str, ...]:
@@ -231,7 +250,8 @@ class Session:
             if p.parent != self.folder
         ]
 
-    def _copies(self, track: Track) -> list[Problem]:
+    def copies(self, track: Track) -> list[Problem]:
+        """The runs of min_words words the track shares with an existing text."""
         # generated texts in the index include this seed's own; other seeds are read from
         # their folders below, versions and all
         matches = self.index.check(track, self.min_words, ignore=(MADE,))
@@ -339,7 +359,7 @@ class Session:
         title, text = split_title(draft.text)
         problems, stats = check_draft(text, recipe, self.mark)
         if not any(p.kind == "not lyrics" for p in problems):
-            problems += self._copies(parse_text(text))
+            problems += self.copies(parse_text(text))
             problems += worn_problems(text, recipe.worn)
             if recipe.title is not None:
                 problems += check_title(title, recipe.title, text)
@@ -489,11 +509,11 @@ class Editor:
         # an edit may change the form on purpose: only what makes a text unusable sends it back
         problems = [p for p in problems if p.kind in ("not lyrics", "length", "places")]
         if not any(p.kind == "not lyrics" for p in problems):
-            problems += self.session._copies(parse_text(text))
+            problems += self.session.copies(parse_text(text))
         reasons = [f"{p.kind}, {p.where}: {p.detail}" for p in problems]
         if not problems:
             path = self.folder / f"text-{pending['version']}.txt"
-            _write(path, text)
+            create_new(path, text)
             if title:
                 _write(self.folder / f"title-{pending['version']}.txt", title + "\n")
             edits.pop("pending", None)

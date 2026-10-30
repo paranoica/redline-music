@@ -198,6 +198,10 @@ def skip_reason_ru(skip: Skip) -> str:
                 f"дубль {v['seconds']:.1f} с, бит {v['beat_seconds']:.1f} с: дубль длиннее "
                 f"бита больше чем на {LONGER_S:g} с"
             )
+        case "incomplete":
+            return "запись дубля не завершена или её журнала нет"
+        case "other_beat":
+            return "дубль записан под другой файл бита"
         case "unreadable":
             return f"файл не удалось прочитать ({skip.reason})"
         case _:

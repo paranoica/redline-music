@@ -711,3 +711,25 @@ def test_words_worn_by_the_last_texts_reach_the_recipe_and_the_request(base):
     assert {"пфайзер", "стакане"} <= set(recipe.worn) and "снова" not in recipe.worn
     request = (folder(base, 93) / "request-1.md").read_text(encoding="utf-8")
     assert "Worn out by the last texts" in request and "пфайзер" in request
+
+
+def test_an_edit_never_overwrites_a_text_version_that_appeared_meanwhile(base, capsys):
+    text = saved_seed(base, 66)
+    edit(base, 66, "поменяй первую строку")
+    taken = folder(base, 66) / "text-2.txt"
+    taken.write_text("чужой файл", encoding="utf-8")
+    changed = text.replace(text.splitlines()[1], "та та та та та та та новая строчка тут", 1)
+    (folder(base, 66) / "edit-2" / "draft-1.txt").write_text(changed, encoding="utf-8")
+    capsys.readouterr()
+    assert edit(base, 66) == 2
+    assert "text-2.txt exists already" in capsys.readouterr().err
+    assert taken.read_text(encoding="utf-8") == "чужой файл"
+
+
+def test_a_saved_edit_is_readable_by_the_owner_only(base):
+    text = saved_seed(base, 67)
+    edit(base, 67, "поменяй первую строку")
+    changed = text.replace(text.splitlines()[1], "та та та та та та та новая строчка тут", 1)
+    (folder(base, 67) / "edit-2" / "draft-1.txt").write_text(changed, encoding="utf-8")
+    assert edit(base, 67) == 0
+    assert (folder(base, 67) / "text-2.txt").stat().st_mode & 0o777 == 0o600

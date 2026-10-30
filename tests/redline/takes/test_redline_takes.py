@@ -251,3 +251,50 @@ def test_a_take_logged_with_a_quantum_change_scores_the_worst_dropouts(tmp_path,
     text = report_markdown(ranking, "song", None)
     assert "- take-02: во время дубля сменился квант" in text
     assert "- take-02: выпадения неизвестны" not in text
+
+
+HASH = "ab" * 32
+
+
+def sidecar_for(folder, name, **fields):
+    data = {"dropouts": [], "complete": True, "beat_sha256": HASH, **fields}
+    (folder / name).write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_the_beat_filter_ranks_only_complete_takes_over_that_beat(tmp_path, beat):
+    folder = tmp_path / "takes"
+    for n in range(1, 6):
+        put(folder, f"take-0{n}.wav", vocal(n))
+    sidecar_for(folder, "take-01.json")
+    sidecar_for(folder, "take-03.json", complete=False)
+    sidecar_for(folder, "take-04.json", beat_sha256="cd" * 32)
+    (folder / "take-05.json").write_text(json.dumps({"dropouts": []}), encoding="utf-8")
+    ranking = rank_folder(beat, folder, beat_sha256=HASH)
+    assert [t.name for t in ranking.takes] == ["take-01"]
+    assert sorted((s.name, s.code) for s in ranking.skips) == [
+        ("take-02", "incomplete"),
+        ("take-03", "incomplete"),
+        ("take-04", "other_beat"),
+        ("take-05", "incomplete"),
+    ]
+    text = report_markdown(ranking, "song", None)
+    assert "- take-02: пропущен — запись дубля не завершена" in text
+    assert "- take-04: пропущен — дубль записан под другой файл бита" in text
+
+
+def test_the_beat_filter_with_every_take_left_out_ranks_nothing(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    ranking = rank_folder(beat, folder, beat_sha256=HASH)
+    assert ranking.takes == []
+    assert [(s.name, s.code) for s in ranking.skips] == [("take-01", "incomplete")]
+
+
+def test_without_the_filter_takes_without_the_new_fields_are_ranked(tmp_path, beat):
+    folder = tmp_path / "takes"
+    put(folder, "take-01.wav", vocal(1))
+    put(folder, "take-02.wav", vocal(2))
+    sidecar_for(folder, "take-01.json", complete=False, beat_sha256="cd" * 32)
+    ranking = rank_folder(beat, folder)
+    assert sorted(t.name for t in ranking.takes) == ["take-01", "take-02"]
+    assert ranking.skips == []

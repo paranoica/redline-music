@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 import statistics
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -276,50 +277,57 @@ def write_result(
     vocal, beat, final = rendered.vocal, rendered.beat, rendered.final
     chain, master = rendered.chain, rendered.master
     final_lufs = integrated_lufs(final, rate)
-    folder = new_run_dir(out_dir, label)
-    keep_out_of_git(folder)
-    (folder / "stems").mkdir()
-    sf.write(folder / "final.wav", final, rate, subtype="PCM_24")
-    lift = 10 ** ((final_lufs - integrated_lufs(original, rate)) / 20)
-    sf.write(folder / "original.wav", original * np.float32(lift), rate, subtype="FLOAT")
-    sf.write(folder / "stems" / "vocal.wav", vocal, rate, subtype="FLOAT")
-    sf.write(folder / "stems" / "beat.wav", beat, rate, subtype="FLOAT")
-    pair = {"final": final, "original": original}
-    level = common_lufs(pair, rate)
-    (folder / "compare").mkdir()
-    for name, samples in pair.items():
-        gain = 10 ** ((level - integrated_lufs(samples, rate)) / 20)
-        sf.write(folder / "compare" / f"{name}.wav", samples * gain, rate, subtype="PCM_24")
-    record = {
-        "render": "classic" if classic else "racks",
-        "vocal_level": chain.level,
-        "vocal_db": settings.vocal_db,
-        "timbre": timbre_of(settings),
-        "bass_drive_db": settings.bass_drive_db,
-        "settings": to_dict(settings),
-        "tuning_cents": engine.context.tuning_cents,
-        "vocal": asdict(chain),
-        "master": None if master is None else {**asdict(master), "final_lufs": final_lufs},
-        **(extra or {}),
-    }
-    (folder / "chain.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
-    after = {
-        "mix.lufs": final_lufs,
-        "mix.plr_db": true_peak_db(final) - final_lufs,
-        "mix.crest_db": gated_crest_db(final, rate),
-        "pair.vocal_minus_beat_lu": integrated_lufs(vocal, rate) - integrated_lufs(beat, rate),
-    }
-    write_final_report(
-        folder / "report.md",
-        chain,
-        chain.level,
-        settings.vocal_db,
-        timbre_of(settings),
-        settings.bass_drive_db,
-        master,
-        final_lufs,
-        inputs.track.values,
-        after,
-        [r.values for r in inputs.refs],
-    )
-    return folder
+    target = new_run_dir(out_dir, label)
+    folder = target.with_name(f".tmp-{target.name}")
+    try:
+        keep_out_of_git(folder)
+        (folder / "stems").mkdir()
+        sf.write(folder / "final.wav", final, rate, subtype="PCM_24")
+        lift = 10 ** ((final_lufs - integrated_lufs(original, rate)) / 20)
+        sf.write(folder / "original.wav", original * np.float32(lift), rate, subtype="FLOAT")
+        sf.write(folder / "stems" / "vocal.wav", vocal, rate, subtype="FLOAT")
+        sf.write(folder / "stems" / "beat.wav", beat, rate, subtype="FLOAT")
+        pair = {"final": final, "original": original}
+        level = common_lufs(pair, rate)
+        (folder / "compare").mkdir()
+        for name, samples in pair.items():
+            gain = 10 ** ((level - integrated_lufs(samples, rate)) / 20)
+            sf.write(folder / "compare" / f"{name}.wav", samples * gain, rate, subtype="PCM_24")
+        record = {
+            "render": "classic" if classic else "racks",
+            "vocal_level": chain.level,
+            "vocal_db": settings.vocal_db,
+            "timbre": timbre_of(settings),
+            "bass_drive_db": settings.bass_drive_db,
+            "settings": to_dict(settings),
+            "tuning_cents": engine.context.tuning_cents,
+            "vocal": asdict(chain),
+            "master": None if master is None else {**asdict(master), "final_lufs": final_lufs},
+            **(extra or {}),
+        }
+        (folder / "chain.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
+        after = {
+            "mix.lufs": final_lufs,
+            "mix.plr_db": true_peak_db(final) - final_lufs,
+            "mix.crest_db": gated_crest_db(final, rate),
+            "pair.vocal_minus_beat_lu": integrated_lufs(vocal, rate) - integrated_lufs(beat, rate),
+        }
+        write_final_report(
+            folder / "report.md",
+            chain,
+            chain.level,
+            settings.vocal_db,
+            timbre_of(settings),
+            settings.bass_drive_db,
+            master,
+            final_lufs,
+            inputs.track.values,
+            after,
+            [r.values for r in inputs.refs],
+        )
+        folder.replace(target)
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        target.rmdir()
+        raise
+    return target

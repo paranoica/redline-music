@@ -542,7 +542,28 @@ def _ordered(measured: Sequence[tuple[_Take, TakeMetrics]]) -> list[RankedTake]:
     ]
 
 
-def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
+def _outside(paths: Sequence[Path], beat_sha256: str) -> tuple[list[Path], list[Skip]]:
+    """The takes whose sidecar says complete and names this beat; the others as skips."""
+    kept, skipped = [], []
+    for path in paths:
+        try:
+            data = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if not isinstance(data, dict) or data.get("complete") is not True:
+            skipped.append(
+                Skip(path.stem, "incomplete", "no finished recording logged for this take")
+            )
+        elif data.get("beat_sha256") != beat_sha256:
+            skipped.append(Skip(path.stem, "other_beat", "recorded over another beat file"))
+        else:
+            kept.append(path)
+    return kept, skipped
+
+
+def rank_folder(
+    beat: Path, folder: Path, deep: Deep | None = None, beat_sha256: str | None = None
+) -> Ranking:
     """Measure every take-NN.wav in a folder against the beat and the other takes, and rank.
 
     A take that cannot be decoded, is at another rate than most, is empty or almost silent,
@@ -554,6 +575,8 @@ def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
         beat: The beat the takes were recorded over; frame 0 of a take is frame 0 of it.
         folder: The takes folder; take-NN.json sidecars hold the recorder's dropouts.
         deep: Adds the own-vocal auto search's distance to the references, about 40 s a take.
+        beat_sha256: Ranks only takes whose sidecar says "complete": true and holds this hash
+            as "beat_sha256"; the rest are left out as incomplete or other_beat. None ranks all.
 
     Returns:
         The takes in rank order, cleanest and tightest first.
@@ -563,10 +586,14 @@ def rank_folder(beat: Path, folder: Path, deep: Deep | None = None) -> Ranking:
         AudioError: The beat cannot be read.
     """
     paths = find_takes(folder)
+    filtered: list[Skip] = []
+    if beat_sha256 is not None:
+        paths, filtered = _outside(paths, beat_sha256)
     beat_decoded = decode(beat)
     beat_mono = beat_decoded.samples.mean(axis=1)
     beat_seconds = len(beat_mono) / beat_decoded.rate
     takes, skipped = _kept(paths, beat_seconds)
+    skipped = [*filtered, *skipped]
     grid = beat_grid(beat_mono, beat_decoded.rate)
     timing = agreement([t.onsets for t in takes], [t.seconds for t in takes])
     measured = [
