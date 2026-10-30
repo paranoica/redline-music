@@ -700,7 +700,8 @@ export class Engine {
     const envStep = 1 / DIP;
     const gainStep = 1 / (AB_RAMP_S * this.#rate);
     const openFrom = this.#want && this.#jobs.length === 0 ? heardFrom : n;
-    if (this.#holding && heardFrom < n) this.#due = true;
+    // a hold ends in this block, or ended with the last one
+    if (heardFrom < n && (this.#holding || this.#hold > 0)) this.#due = true;
     this.#holding = heardFrom === n;
     this.#hold = Math.max(0, this.#hold - n);
     for (let i = 0; i < n; i++) {

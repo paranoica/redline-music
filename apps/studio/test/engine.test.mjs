@@ -756,6 +756,24 @@ for (const when of ["stopped", "playing"]) {
   });
 }
 
+test("after a seek while playing with a hold shorter than a block a report comes as the sound starts", () => {
+  const frames = 4 * RATE;
+  const got = [];
+  const wanted = [];
+  for (const [latency, master] of [[0, rack()], [48, lookahead(1)], [130, lookahead(130 / 48)]]) {
+    const { engine, posted } = setup({ frames, vocal: indexed(frames), racks: { master } });
+    assert.ok(posted.some((m) => m.type === "rack" && m.track === "master" && m.latency === latency));
+    engine.handle({ type: "play", playing: true });
+    run(engine, 9600);
+    engine.handle({ type: "seek", frame: 10, seq: 1 });
+    posted.length = 0;
+    const last = untilHeard(engine, posted).at(-1);
+    got.push(`latency ${latency}: ${last.heard && !last.held && last.frame > 10 && last.frame <= 10 + BLOCK}`);
+    wanted.push(`latency ${latency}: true`);
+  }
+  assert.deepEqual(got, wanted);
+});
+
 // a reference whose frame p is heard as p by firstHeard
 const REF = 10000;
 const refSource = { type: "source", name: "reference", data: stereo(REF, (p) => [(0.5 * p) / REF, 0.5]), start: 0, length: REF };
