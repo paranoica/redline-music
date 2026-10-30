@@ -333,6 +333,7 @@ def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     beat.add_argument("--beat-seed", type=int, help="an own beat, by its seed")
     beat.add_argument("--beat", type=Path, help="a beat file (a type beat)")
     new.add_argument("--suno", type=Path, help="the Suno track, instead of recording takes")
+    new.add_argument("--text-seed", type=int, help="a written text, by its seed (latest version)")
     new.add_argument("--ref", type=Path, nargs="+", help="reference files")
     song_commands.add_parser("list", help="the songs' names")
     show = song_commands.add_parser("show", help="print a song's file")

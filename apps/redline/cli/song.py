@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,8 @@ def _new(args: argparse.Namespace) -> int:
     suno = None if args.suno is None else model.relative_to_root(args.suno)
     refs = tuple(model.relative_to_root(p) for p in args.ref or ())
     song = model.new_song(args.name, beat, suno, refs)
+    if args.text_seed is not None:
+        song = replace(song, text=_latest_text(args.text_seed))
     for stored in (beat.get("file"), suno, *refs):
         if stored is not None:
             model.resolve_inside(stored)
@@ -43,6 +46,16 @@ def _new(args: argparse.Namespace) -> int:
         raise model.SongError(f"{args.name}: the song exists already") from None
     print(f"song {saved.name}: {model.song_dir(saved.name) / 'song.json'}", flush=True)
     return 0
+
+
+def _latest_text(seed: int) -> dict[str, int]:
+    from redline.lyrics.write.generate import versions
+
+    folder = model.resolve_inside(f"private/lyrics/generated/{seed}", where="--text-seed")
+    have = versions(folder) if folder.is_dir() else {}
+    if not have:
+        raise model.SongError(f"--text-seed: seed {seed} has no text")
+    return {"seed": seed, "version": max(have)}
 
 
 def _list(args: argparse.Namespace) -> int:

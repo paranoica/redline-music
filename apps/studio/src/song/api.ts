@@ -58,7 +58,7 @@ export interface SongReply {
 }
 
 export type SongChange =
-  | { text: { seed: number; version: number } }
+  | { text: { seed: number; version?: number } }
   | { voice_chosen: string }
   | { beat: { own: number } }
   | { mix_variant: number | null };

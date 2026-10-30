@@ -578,3 +578,16 @@ def test_a_job_without_its_inputs_fails_and_writes_no_result(root, tmp_path, cap
         assert main(["song", "job", kind, NAME, "--result", str(result)]) == 2
     assert not result.exists()
     assert "no voice chosen" in capsys.readouterr().err
+
+
+def test_a_text_chosen_by_its_seed_alone_takes_the_latest_version(made, root):
+    seed = root / "private" / "lyrics" / "generated" / "5"
+    seed.mkdir(parents=True)
+    (seed / "text.txt").write_text("a line\n", encoding="utf-8")
+    (seed / "text-2.txt").write_text("another line\n", encoding="utf-8")
+    status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"text": {"seed": 5}}})
+    assert status == 200
+    assert data["song"]["text"] == {"seed": 5, "version": 2}
+    empty = {"rev": 2, "set": {"text": {"seed": 6}}}
+    assert api(made, "POST", "/api/song", empty)[0] == 422
+    assert model.load(NAME).text == {"seed": 5, "version": 2}

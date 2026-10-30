@@ -86,3 +86,15 @@ def test_show_of_a_missing_song_is_an_error(root, capsys):
 def test_song_alone_prints_help(root, capsys):
     assert main(["song"]) == 0
     assert "song" in capsys.readouterr().out
+
+
+def test_new_with_a_text_seed_takes_its_latest_version(root, capsys):
+    seed = root / "private" / "lyrics" / "generated" / "12"
+    seed.mkdir(parents=True)
+    (seed / "text.txt").write_text("a line\n", encoding="utf-8")
+    (seed / "text-3.txt").write_text("a third line\n", encoding="utf-8")
+    assert main(["song", "new", "demo", "--beat-seed", "5", "--text-seed", "12"]) == 0
+    assert model.load("demo").text == {"seed": 12, "version": 3}
+    assert main(["song", "new", "other", "--beat-seed", "5", "--text-seed", "13"]) != 0
+    assert "13" in capsys.readouterr().err
+    assert model.list_songs() == ["demo"]

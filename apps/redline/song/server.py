@@ -419,11 +419,17 @@ class SongApp:
         if not isinstance(value, dict):
             raise ApiError(HTTPStatus.BAD_REQUEST, "text is {seed, version} or null")
         only(value, "seed", "version")
-        seed, version = _int(value.get("seed"), "seed"), _int(value.get("version"), "version", 1)
+        seed = _int(value.get("seed"), "seed")
         from redline.lyrics.write.generate import versions
 
         folder = model.resolve_inside(LYRICS, self.root) / "generated" / str(seed)
-        if version not in (versions(folder) if folder.is_dir() else {}):
+        have = versions(folder) if folder.is_dir() else {}
+        # a seed alone takes its latest version
+        if value.get("version") is None:
+            version = max(have, default=0)
+        else:
+            version = _int(value.get("version"), "version", 1)
+        if version not in have:
             raise ApiError(
                 HTTPStatus.UNPROCESSABLE_ENTITY,
                 f"seed {seed} has no version {version}",

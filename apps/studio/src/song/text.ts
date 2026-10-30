@@ -187,8 +187,24 @@ export function createTextStation(ctx: Ctx): StationView {
       command: info.command,
       then: "Команда положит запрос и выйдет с кодом 3: это значит «ждёт агента». Когда агент ответит, запусти её ещё раз.",
       pending,
+      actions: [takeSeed()],
       after: "Запись откроется, когда текст выбран: его видно рядом с кнопкой записи.",
     });
+  }
+
+  // a text already written for another song, or one the agent has just saved
+  function takeSeed(): HTMLElement {
+    const field = h("input", { class: "field", inputmode: "numeric", "aria-label": "seed текста", placeholder: "seed" });
+    const take = h("button", { class: "btn btn--ghost", type: "button" }, "Взять текст этого seed");
+    take.addEventListener("click", () => {
+      const seed = Number(field.value.trim());
+      if (field.value.trim() === "" || !Number.isInteger(seed) || seed < 0) {
+        ctx.notice("seed текста — целое число от нуля.");
+        return;
+      }
+      void ctx.change({ text: { seed } });
+    });
+    return h("label", { class: "mix__seed" }, "Уже есть текст: ", field, take);
   }
 
   function draw(): void {
