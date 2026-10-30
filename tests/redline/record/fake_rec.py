@@ -121,6 +121,9 @@ def startup(rate, quantum, round_trip, connect, beat_frames):
         mic=ports[0],
         left=ports[1],
         right=ports[2],
+        mic_aliases=[],
+        left_aliases=[],
+        right_aliases=[],
         beat_frames=beat_frames,
     )
 

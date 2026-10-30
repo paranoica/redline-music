@@ -55,6 +55,9 @@ def started(**changes):
         "mic": "a:capture_1",
         "left": "b:playback_1",
         "right": "b:playback_2",
+        "mic_aliases": [],
+        "left_aliases": [],
+        "right_aliases": [],
         "beat_frames": 96000,
     }
     line.update(changes)
@@ -72,6 +75,37 @@ def test_the_startup_line_gives_rate_quantum_ports_and_the_port_estimate():
 def test_a_round_trip_passed_to_the_engine_is_not_taken_for_the_port_estimate():
     startup = parse_startup(started(round_trip=500, round_trip_source="calibrated"))
     assert startup.estimate == 96 + 192
+
+
+def test_port_aliases_name_the_hardware_in_the_devices():
+    line = started(
+        mic="system:capture_1",
+        mic_aliases=["alsa_pcm:CardA/capture_1"],
+        left_aliases=["alsa_pcm:CardA/playback_1", "alias:two"],
+    )
+    assert parse_startup(line).devices == (
+        "system:capture_1 (alsa_pcm:CardA/capture_1)",
+        "b:playback_1 (alsa_pcm:CardA/playback_1, alias:two)",
+        "b:playback_2",
+    )
+    other = started(mic="system:capture_1", mic_aliases=["alsa_pcm:CardB/capture_1"])
+    assert parse_startup(other).devices[0] != parse_startup(line).devices[0]
+
+
+def test_a_startup_line_without_aliases_keeps_the_port_names():
+    line = json.loads(started())
+    for name in ("mic_aliases", "left_aliases", "right_aliases"):
+        del line[name]
+    assert parse_startup(json.dumps(line)).devices == (
+        "a:capture_1",
+        "b:playback_1",
+        "b:playback_2",
+    )
+
+
+def test_aliases_that_are_not_a_list_of_names_are_refused():
+    with pytest.raises(EngineError, match="aliases"):
+        parse_startup(started(mic_aliases="alsa_pcm:capture_1"))
 
 
 def test_ports_left_unconnected_are_not_part_of_the_devices():

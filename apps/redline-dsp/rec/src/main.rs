@@ -88,6 +88,13 @@ unsafe extern "C" fn to_stderr(msg: *const c_char) {
     }
 }
 
+/// What JACK also calls a port; none when it is not connected or has none.
+fn aliases(client: &Client, port: Option<&str>) -> Vec<String> {
+    port.and_then(|p| client.port_by_name(p))
+        .and_then(|p| p.aliases().ok())
+        .unwrap_or_default()
+}
+
 fn latency(client: &Client, port: &str, mode: LatencyType) -> (u32, u32) {
     client
         .port_by_name(port)
@@ -217,7 +224,12 @@ fn run(args: Args) -> Result<(), String> {
         capture,
         playback: (pl.0.max(pr.0), pl.1.max(pr.1)),
     };
-    let report = startup(
+    let found = [
+        aliases(c, connections.mic.as_deref()),
+        aliases(c, connections.left.as_deref()),
+        aliases(c, connections.right.as_deref()),
+    ];
+    let mut report = startup(
         c.name(),
         &graph,
         args.quantum,
@@ -226,6 +238,11 @@ fn run(args: Args) -> Result<(), String> {
         connections,
         beat_len,
     );
+    [
+        report.mic_aliases,
+        report.left_aliases,
+        report.right_aliases,
+    ] = found;
     control.set_default_budget(Some(report.monitor_budget));
 
     let stdout = io::stdout();

@@ -54,7 +54,8 @@ class Startup:
     """What the engine was granted: rate, quantum, its ports, and the ports' round trip.
 
     estimate is the JACK ports' latency in and out, in frames; None when they report none.
-    devices are the ports the engine connected to: mic, left, right.
+    devices are the ports the engine connected to: mic, left, right, each with its aliases
+    in brackets when JACK reports any (under jackd the names alone are system:capture_1).
     """
 
     rate: int
@@ -85,6 +86,18 @@ def _positive(value: Any, name: str) -> int:
 
 def _frames(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _devices(data: dict[str, Any], shown: str) -> tuple[str, ...]:
+    # an engine before the aliases sends none
+    devices = []
+    for name in ("mic", "left", "right"):
+        port, aliases = data.get(name), data.get(f"{name}_aliases", [])
+        if not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases):
+            raise EngineError(f"the engine's startup line has no usable {name} aliases: {shown}")
+        if isinstance(port, str) and port:
+            devices.append(f"{port} ({', '.join(aliases)})" if aliases else port)
+    return tuple(devices)
 
 
 def parse_startup(line: str) -> Startup:
@@ -123,13 +136,12 @@ def parse_startup(line: str) -> Startup:
         estimate = data["round_trip"]
     else:
         estimate = ranges[0][1] + ranges[1][1]
-    ports = (data.get(name) for name in ("mic", "left", "right"))
     return Startup(
         _positive(data.get("rate"), "rate"),
         _positive(data.get("quantum"), "quantum"),
         # ports that report no latency say nothing about the round trip
         estimate or None,
-        tuple(port for port in ports if isinstance(port, str) and port),
+        _devices(data, shown),
     )
 
 

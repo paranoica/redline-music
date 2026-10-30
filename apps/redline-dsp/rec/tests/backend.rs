@@ -229,7 +229,7 @@ fn wired() -> Connections {
 
 #[test]
 fn the_startup_line_reports_the_graph_and_labels_the_round_trip_an_estimate() {
-    let s = startup(
+    let mut s = startup(
         "redline-rec",
         &graph(),
         64,
@@ -238,6 +238,9 @@ fn the_startup_line_reports_the_graph_and_labels_the_round_trip_an_estimate() {
         wired(),
         96000,
     );
+    assert!(s.mic_aliases.is_empty() && s.left_aliases.is_empty() && s.right_aliases.is_empty());
+    // the backend adds what JACK reports for the connected ports
+    s.mic_aliases = vec!["alsa_pcm:Card/capture_1".into()];
     assert_eq!(s.round_trip, 256);
     assert_eq!(s.round_trip_source, RoundTripSource::PortLatencyEstimate);
     assert_eq!(s.monitor_budget, 480 - 256);
@@ -264,6 +267,9 @@ fn the_startup_line_reports_the_graph_and_labels_the_round_trip_an_estimate() {
             "mic": "system:capture_1",
             "left": "system:playback_1",
             "right": "system:playback_2",
+            "mic_aliases": ["alsa_pcm:Card/capture_1"],
+            "left_aliases": [],
+            "right_aliases": [],
             "beat_frames": 96000
         })
     );

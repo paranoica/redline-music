@@ -203,7 +203,8 @@ pub struct Graph {
 }
 
 /// The startup report: the round trip is the calibrated one when given, else the ports'
-/// estimate, and the monitor budget follows from it.
+/// estimate, and the monitor budget follows from it. The ports' aliases are left for the
+/// backend to fill in.
 pub fn startup(
     client: &str,
     graph: &Graph,
@@ -237,6 +238,9 @@ pub fn startup(
         mic: connections.mic,
         left: connections.left,
         right: connections.right,
+        mic_aliases: Vec::new(),
+        left_aliases: Vec::new(),
+        right_aliases: Vec::new(),
         beat_frames,
     }
 }

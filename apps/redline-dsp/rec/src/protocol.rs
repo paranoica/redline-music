@@ -150,6 +150,10 @@ pub struct Startup {
     pub mic: Option<String>,
     pub left: Option<String>,
     pub right: Option<String>,
+    /// What JACK also calls the connected ports; under jackd only these name the hardware.
+    pub mic_aliases: Vec<String>,
+    pub left_aliases: Vec<String>,
+    pub right_aliases: Vec<String>,
     pub beat_frames: u64,
 }
 
