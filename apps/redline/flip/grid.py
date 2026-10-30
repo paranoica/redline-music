@@ -35,6 +35,10 @@ MIN_ONSETS = 8
 # an onset farther than this from its sixteenth is off the grid and does not steer the fit
 FIT_TOLERANCE_S = 0.02
 DOWNBEAT_SHARE = 0.8
+# a downbeat this close below 0 is the file's start
+ZERO_SNAP_S = 0.005
+# a grid from 0 may fit the onsets this much worse than the fitted one and still be the start
+PHASE_SLACK_S = 0.003
 END_MARGIN_S = 0.01
 
 
@@ -198,15 +202,33 @@ def _downbeat(times: Floats, weights: Floats, index: Floats, offset: float, slop
     return offset + slope * best
 
 
-def _inside_file(downbeat: float, step_s: float) -> float:
-    """The first downbeat inside the file; a bar line well before its start moves on a bar.
+def _misfit(times: Floats, weights: Floats, downbeat: float, step_s: float) -> float:
+    """Weighted mean distance in seconds of the onsets near the grid from their sixteenths."""
+    off = (times - downbeat) / step_s
+    error = np.abs(off - np.round(off)) * step_s
+    near = error < FIT_TOLERANCE_S
+    if not near.any():
+        return math.inf
+    return float(np.average(error[near], weights=weights[near]))
 
-    Within the fit's own tolerance below 0 the file starts on the bar line, and loose timing
-    put the fitted line a little early.
+
+def _inside_file(downbeat: float, step_s: float, times: Floats, weights: Floats) -> float:
+    """The first downbeat inside the file; a bar line before its start moves on a bar.
+
+    A fitted line a few ms before 0 is either loose timing over a file that starts on its bar
+    line, or a file cut just after one. The whole track tells them apart: the onsets fit a grid
+    from 0 about as well as the fitted one only in the first case.
     """
-    if downbeat < -FIT_TOLERANCE_S:
+    if downbeat >= 0.0:
+        return downbeat
+    if downbeat >= -FIT_TOLERANCE_S:
+        at_zero = _misfit(times, weights, 0.0, step_s)
+        fitted = _misfit(times, weights, downbeat, step_s)
+        if at_zero - fitted <= PHASE_SLACK_S:
+            return 0.0
+    if downbeat < -ZERO_SNAP_S:
         return downbeat + step_s * STEPS_PER_BAR
-    return max(0.0, downbeat)
+    return 0.0
 
 
 def find_grid(
@@ -270,7 +292,7 @@ def find_grid(
             period = min(tied, key=lambda p: abs(math.log(p / target)))
     period = _scan_period(times, weights, period)
     offset, slope, index = _fit(times, weights, period)
-    downbeat = _inside_file(_downbeat(times, weights, index, offset, slope), slope)
+    downbeat = _inside_file(_downbeat(times, weights, index, offset, slope), slope, times, weights)
     tempo = 60.0 / slope / STEPS_PER_BEAT
     grid = Grid(tempo, downbeat, (), duration)
     return grid.with_downbeat(downbeat)

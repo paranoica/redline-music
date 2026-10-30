@@ -149,3 +149,11 @@ def test_a_file_that_starts_on_a_bar_line_keeps_its_first_bar_through_loose_timi
                     out[at : at + n] += gain * body[:n]
             moved += find_grid(out, out, RATE, bpm=bpm).downbeat_s > 0.05
     assert moved == 0
+
+
+@pytest.mark.parametrize("late", [0.010, 0.015])
+def test_a_file_trimmed_a_little_after_a_bar_line_keeps_its_phase(late):
+    whole = track(140.0, 24, {0: 1.0, 10: 0.7})
+    drums = whole[int(late * RATE) :]
+    grid = find_grid(drums, drums, RATE, bpm=140.0)
+    assert grid.downbeat_s == pytest.approx(60.0 / 140.0 * 4 - late, abs=0.005)
