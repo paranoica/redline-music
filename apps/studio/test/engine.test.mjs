@@ -300,3 +300,66 @@ test("moving lanes play without allocating on the wasm heap", () => {
   assert.ok(left(out, 4000) > left(out, 100) + 0.005, "the lane moved the gain");
   assert.equal(mallocs, 0);
 });
+
+// silent for the first half, loud for the second
+const lateHalf = (frames, v) => stereo(frames, (n) => (n < frames / 2 ? [0, 0] : [v, v]));
+
+function playToEnd(engine, posted, most = 40000) {
+  const out = [];
+  for (let at = 0; at < most && !posted.some((m) => m.type === "ended"); at += BLOCK) out.push(...run(engine, BLOCK));
+  return Float32Array.from(out);
+}
+
+test("played to its end through a rack with latency, the track is heard to its last frame", () => {
+  const frames = 9600;
+  const { engine, posted } = setup({
+    frames,
+    vocal: lateHalf(frames, 0.5),
+    racks: { vocal: rack({ effect: "limiter", params: { ceiling: 0, lookahead: 5 } }) },
+  });
+  engine.handle({ type: "play", playing: true });
+  const out = playToEnd(engine, posted);
+  assert.ok(posted.some((m) => m.type === "ended"));
+  // the last frame of the track comes out 240 frames late
+  assert.ok(Math.abs(left(out, frames + 239) - 0.5) < 1e-3, `${left(out, frames + 239)}`);
+});
+
+test("played again after its end, the track starts from its start, not with the old tail", () => {
+  const frames = 9600;
+  const { engine, posted } = setup({
+    frames,
+    vocal: lateHalf(frames, 0.5),
+    beat: lateHalf(frames, 0.25),
+    racks: { vocal: rack({ effect: "limiter", params: { ceiling: 0, lookahead: 5 } }) },
+  });
+  engine.handle({ type: "play", playing: true });
+  playToEnd(engine, posted);
+  assert.ok(posted.some((m) => m.type === "ended"));
+  engine.handle({ type: "play", playing: true });
+  const again = run(engine, 4096);
+  const loudest = again.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  assert.ok(loudest < 1e-6, `the first frames carry ${loudest}`);
+  assert.ok(posted.filter((m) => m.type === "levels").at(-1).frame < 4096);
+});
+
+test("a reverb's tail from the end does not ring into the next play", () => {
+  const frames = 9600;
+  const { engine, posted } = setup({
+    frames,
+    vocal: lateHalf(frames, 0.5),
+    racks: { vocal: rack({ effect: "hall", params: { mix: 1, decay: 10 } }) },
+  });
+  engine.handle({ type: "play", playing: true });
+  const out = playToEnd(engine, posted);
+  // the tail rings past the end and fades out, not cut off
+  let last = out.length / 2 - 1;
+  while (last > 0 && Math.abs(left(out, last)) < 1e-6) last--;
+  let before = 0;
+  for (let i = last - 2400; i < last - 1600; i++) before = Math.max(before, Math.abs(left(out, i)));
+  assert.ok(before > 0.05, `${before}`);
+  assert.ok(Math.abs(left(out, last)) < 0.01, `cut off at ${left(out, last)}`);
+  engine.handle({ type: "play", playing: true });
+  const again = run(engine, 2048);
+  const loudest = again.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  assert.ok(loudest < 1e-6, `the tail rang on at ${loudest}`);
+});

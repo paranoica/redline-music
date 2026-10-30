@@ -102,6 +102,7 @@ export class Engine {
   #env = 0;
   // frames the output stays silent after the delay lines were emptied, until they refill
   #hold = 0;
+  #ending = false;
   readonly #gain: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   #target: Record<Source, number> = { result: 1, original: 0, reference: 0, render: 0 };
   readonly #pad = { vocal: new DelayLine(DELAY_CAPACITY), beat: new DelayLine(DELAY_CAPACITY) };
@@ -304,6 +305,21 @@ export class Engine {
     this.#hold = this.#total;
   }
 
+  // the track has played out and faded: back to its start, with nothing of its end left in the racks
+  #finish(): void {
+    this.#ending = false;
+    this.#want = false;
+    this.#jump(0);
+    for (const rack of Object.values(this.#racks)) {
+      for (const inst of [rack.current, rack.pending?.inst, rack.fading?.old]) {
+        if (inst && this.#dsp._rack_reset(inst.handle, this.#rate) !== 0) {
+          this.#error(lastError(this.#dsp), rack.track, inst.version);
+        }
+      }
+    }
+    this.#post({ type: "ended" });
+  }
+
   #heap(): Float32Array {
     return this.#dsp.HEAPF32;
   }
@@ -445,24 +461,26 @@ export class Engine {
     }
     const { vocal, beat, side, mix } = this.#buf;
     const start = this.#read;
-    // the stems' frames of this block, with the loop's wrap
-    let ended = false;
+    // the stems' frames of this block, with the loop's wrap; past the end the racks are fed
+    // silence until what they hold has come out
+    const last = stems.frames + this.#total;
     const v = vocal >> 2;
     const b = beat >> 2;
     let heap = this.#heap();
     for (let i = 0; i < n; i++) {
       const p = this.#read;
-      const inside = !ended && p < stems.frames;
+      const inside = p < stems.frames;
       for (let c = 0; c < 2; c++) {
         heap[v + 2 * i + c] = inside ? (stems.vocal[2 * p + c] as number) : 0;
         heap[b + 2 * i + c] = inside ? (stems.beat[2 * p + c] as number) : 0;
         this.#original[2 * i + c] = inside ? (stems.original[2 * p + c] as number) : 0;
         this.#renderBlock[2 * i + c] = inside && this.#render ? (this.#render[2 * p + c] ?? 0) : 0;
       }
-      if (ended) continue;
-      this.#read++;
-      if (this.#loop.on && this.#read >= this.#loop.end) this.#read = this.#loop.start;
-      else if (this.#read >= stems.frames) ended = true;
+      if (this.#loop.on) {
+        if (++this.#read >= this.#loop.end) this.#read = this.#loop.start;
+      } else if (this.#read < last) {
+        this.#read++;
+      }
     }
 
     this.#track(this.#racks.beat, beat, 0, n, start);
@@ -522,14 +540,11 @@ export class Engine {
 
     this.#window += n;
     if (this.#window >= this.#rate / LEVELS_PER_S) this.#report();
-    if (ended) {
+    // the fade out starts on the next block, which is silent: this one still has the end in it
+    if (!this.#loop.on && this.#read >= last && !this.#ending) {
+      this.#ending = true;
       this.#want = false;
-      this.#running = false;
-      this.#env = 0;
-      this.#read = 0;
-      this.#jobs = [];
-      this.#post({ type: "ended" });
-      return;
+      this.#jobs.push(() => this.#finish());
     }
     if (this.#env === 0) {
       const jobs = this.#jobs;
