@@ -128,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     takes.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     _record(commands)
     _beat(commands)
+    _song(commands)
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
     )
@@ -320,6 +321,22 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     fetch.add_argument("name", help="the instrument's name, as listed")
     for command in (listed, fetch):
         command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
+
+
+def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """Register `redline song` and its subcommands."""
+    song = commands.add_parser("song", help="songs: one folder of choices per track")
+    song_commands = song.add_subparsers(dest="song_command", metavar="command")
+    new = song_commands.add_parser("new", help="start a song under private/songs/<name>/")
+    new.add_argument("name", help="the song's name, one folder name")
+    beat = new.add_mutually_exclusive_group(required=True)
+    beat.add_argument("--beat-seed", type=int, help="an own beat, by its seed")
+    beat.add_argument("--beat", type=Path, help="a beat file (a type beat)")
+    new.add_argument("--suno", type=Path, help="the Suno track, instead of recording takes")
+    new.add_argument("--ref", type=Path, nargs="+", help="reference files")
+    song_commands.add_parser("list", help="the songs' names")
+    show = song_commands.add_parser("show", help="print a song's file")
+    show.add_argument("name", help="the song's name")
 
 
 def check_record(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:

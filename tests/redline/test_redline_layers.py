@@ -72,7 +72,7 @@ def test_every_module_imports_first_in_a_fresh_interpreter():
 def test_core_imports_nothing_above_it():
     above = tuple(
         f"redline.{p}"
-        for p in ("vocal", "master", "engine", "studio", "cli", "lyrics", "measure", "beat")
+        for p in ("vocal", "master", "engine", "studio", "cli", "lyrics", "measure", "beat", "song")
     )
     assert violations("core", above) == []
 

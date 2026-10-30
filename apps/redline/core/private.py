@@ -15,3 +15,22 @@ def write_private(path: Path, text: str) -> None:
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def make_private_dir(path: Path, root: Path) -> Path:
+    """Make a folder and its missing parents under root, each readable by the owner only."""
+    root = root.resolve()
+    target = path.resolve()
+    if not target.is_relative_to(root):
+        raise ValueError(f"{path} is outside {root}")
+    missing = []
+    for folder in (target, *target.parents):
+        if folder == root or folder.exists():
+            break
+        missing.append(folder)
+    for folder in reversed(missing):
+        folder.mkdir(mode=0o700)
+        folder.chmod(0o700)
+    if target.is_dir():
+        target.chmod(0o700)
+    return target
