@@ -574,3 +574,20 @@ def test_a_result_never_takes_over_a_folder_another_run_made_meanwhile(tmp_path,
     assert target == out / "stamp-1"
     assert (target / "final.wav").is_file()
     assert list((out / "stamp").iterdir()) == []
+
+
+def test_a_result_is_still_published_where_the_filesystem_cannot_refuse_a_replace(
+    tmp_path, monkeypatch
+):
+    import errno
+
+    from redline.master import run as master_run
+
+    out = tmp_path / "out"
+    built = out / ".tmp-x"
+    built.mkdir(parents=True)
+    (built / "final.wav").write_bytes(b"x")
+    (out / "stamp").mkdir()
+    monkeypatch.setattr(master_run, "_rename_noreplace", lambda source, target: errno.EINVAL)
+    target = master_run.publish(built, out, "stamp")
+    assert target == out / "stamp-1" and (target / "final.wav").is_file()

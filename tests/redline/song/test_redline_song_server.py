@@ -43,9 +43,15 @@ class FakeRec:
         self.reason = None
         self.open_error = None
         self.attempts = 0
+        self.snapshots = 0
 
-    def snapshot(self):
+    def stage(self):
+        return self.snapshot(count=False).stage
+
+    def snapshot(self, count=True):
         from redline.song.rec import RecSnapshot
+
+        self.snapshots += count
 
         stage = "ready" if self.ready else "closed" if self.reason else "idle"
         return RecSnapshot(
@@ -489,13 +495,17 @@ def test_a_beat_file_that_goes_missing_closes_the_engine_and_a_closed_one_stays_
     assert len(opens(made)) == 1 and not made.app.rec.ready
 
 
-def test_a_beat_change_is_not_saved_when_the_relaunch_finds_a_take_running(made, root):
+def test_a_beat_change_waits_for_the_take_then_is_saved_and_followed(made, root):
     render_beat(root, 4)
     api(made, "POST", "/api/rec/open", {})
-    made.app.rec.open_error = TakeRunning("a take is running")
+    made.app.rec.is_taking = True
     status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
     assert status == 409 and data["code"] == "take_running"
     assert model.load(NAME).beat == {"file": "input/beat.wav"} and model.load(NAME).rev == 1
+    made.app.rec.is_taking = False
+    status, data = api(made, "POST", "/api/song", {"rev": 1, "set": {"beat": {"own": 4}}})
+    assert status == 200 and model.load(NAME).beat == {"own": 4}
+    assert opens(made)[-1].beat.parent.name == "4"
 
 
 def test_a_stale_rev_keeping_a_variant_writes_no_settings_file(made, root):
@@ -800,3 +810,19 @@ def test_a_new_server_reaps_the_jobs_its_dead_predecessor_left(root, monkeypatch
         assert reaped == [root / "work" / "songs" / NAME / "jobs"]
     finally:
         app.jobs.close(timeout=5)
+
+
+def test_a_poll_reads_the_peaks_once_so_a_clip_between_polls_is_kept(made, root):
+    api(made, "POST", "/api/rec/open", {})
+    made.app.rec.snapshots = 0
+    made.app._snap = None
+    api(made, "GET", "/api/rec/state")
+    assert made.app.rec.snapshots == 1
+
+
+def test_a_second_server_for_the_same_song_is_refused_and_reaps_nothing(made, root, monkeypatch):
+    reaped = []
+    monkeypatch.setattr("redline.song.server.reap_orphans", lambda folder: reaped.append(folder))
+    with pytest.raises(model.SongError, match="already open"):
+        SongApp(NAME, make_rec=FakeRec, assets=lambda: (None, None, str))
+    assert reaped == []

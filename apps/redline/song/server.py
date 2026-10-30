@@ -6,6 +6,7 @@ song needs at that moment, read once per request.
 """
 
 import contextlib
+import fcntl
 import functools
 import json
 import math
@@ -17,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
@@ -236,12 +237,13 @@ class SongApp:
         self._engine_lock = threading.Lock()
         self._engine_sig: tuple[str, int, int] | None = None
         self._take_gate = threading.Lock()
-        self._save_lock = threading.Lock()
+        self._save_lock = threading.RLock()
         self._grids: dict[tuple[str, int, int], float | None] = {}
         self._snap: tuple[float, dict[str, Any]] | None = None
         self._snap_lock = threading.Lock()
         make = make_rec or (lambda logged, work: RecOwner(on_take_logged=logged, work=work))
         self.rec = make(self.take_logged, self.work)
+        self._server_lock = self._claim_song()
         self.jobs = JobRunner(hold=self.rec.taking, kill_after=kill_after)
         reap_orphans(self._jobs_dir())
 
@@ -392,6 +394,16 @@ class SongApp:
         runs = sorted(p.name for p in out.iterdir() if p.is_dir() and not p.name.startswith("."))
         return f"output/{self.name}/{runs[-1]}" if runs else None
 
+    def _claim_song(self) -> TextIO:
+        """Hold the song for this server's life: a second one would take its jobs for orphans."""
+        held = (self._state_dir() / "server.lock").open("a", encoding="utf-8")
+        try:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            held.close()
+            raise model.SongError(f"{self.name}: already open in another song studio") from None
+        return held
+
     def _jobs_dir(self) -> Path:
         return self._state_dir() / "jobs"
 
@@ -442,21 +454,14 @@ class SongApp:
         return self._save_beat_change(song, expected, kept)
 
     def _save_beat_change(self, song: model.Song, expected: int, kept: str | None) -> Reply:
+        # under the gate no take starts, so the engine can follow once the song is saved;
+        # an engine opening or calibrating, or any refusal, is left to the next poll
         with self._take_gate:
             if self.rec.taking():
                 raise ApiError(HTTPStatus.CONFLICT, "a take is running", "take_running")
-            if self.song().rev != expected:
-                raise self._stale()
-            try:
-                self._sync_engine(song)
-            except rec.Busy:
-                # opening or calibrating: the next poll points the engine at the saved beat
-                pass
-            except rec.RecError as error:
-                raise _rec_api_error(error) from None
-            except model.SongError as error:
-                raise ApiError(HTTPStatus.CONFLICT, str(error), "bad_song") from None
-            return self._save(song, expected, kept)
+            reply = self._save(song, expected, kept)
+            self._follow_beat()
+            return reply
 
     def _stale(self) -> ApiError:
         return ApiError(
@@ -684,7 +689,7 @@ class SongApp:
         Raises:
             rec.TakeRunning: A take runs, so the engine stays where it is.
         """
-        if self.rec.snapshot().stage in ("idle", "closed", "failed"):
+        if self.rec.stage() in ("idle", "closed", "failed"):
             return
         with self._engine_lock:
             song = self.song() if song is None else song
@@ -898,10 +903,14 @@ class SongApp:
         studio = self.studio()
         if method == "GET":
             return studio_get(studio, inner, query)
-        reply = studio_post(studio, inner, body)
-        if inner == "/api/save" and reply[0] == HTTPStatus.OK:
-            self._keep_settings(Path(json.loads(reply[1])["path"]))
-        return reply
+        if inner != "/api/save":
+            return studio_post(studio, inner, body)
+        # the studio's save and a kept variant write the same settings file
+        with self._save_lock:
+            reply = studio_post(studio, inner, body)
+            if reply[0] == HTTPStatus.OK:
+                self._keep_settings(Path(json.loads(reply[1])["path"]))
+            return reply
 
     def _keep_settings(self, saved: Path) -> None:
         for _ in range(2):

@@ -576,3 +576,10 @@ def test_an_open_during_a_take_is_refused_at_once_and_never_blocks_the_stop(read
         ready.open(fix.request())
     assert not ready._state.opening
     assert ready.toggle().code != "recording"
+
+
+def test_reading_the_stage_leaves_the_peaks_for_the_snapshot(ready):
+    with ready._lock:
+        ready._state.peaks = (0.999, 0.5)
+    assert ready.stage() == "ready"
+    assert ready.snapshot().mic_peak == 0.999

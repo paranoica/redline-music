@@ -275,18 +275,24 @@ AT_FDCWD = -100
 RENAME_NOREPLACE = 1
 
 
+def _rename_noreplace(source: Path, target: Path) -> int:
+    """renameat2 with RENAME_NOREPLACE; 0, or the errno (ENOSYS when the libc lacks it)."""
+    renameat2 = getattr(ctypes.CDLL(None, use_errno=True), "renameat2", None)
+    if renameat2 is None:
+        return errno.ENOSYS
+    done = renameat2(AT_FDCWD, os.fsencode(source), AT_FDCWD, os.fsencode(target), RENAME_NOREPLACE)
+    return 0 if done == 0 else ctypes.get_errno()
+
+
 def _rename_new(source: Path, target: Path) -> None:
     """Rename, refusing an existing target, an empty folder too (which rename takes over)."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = getattr(libc, "renameat2", None)
-    if renameat2 is None:
+    code = _rename_noreplace(source, target)
+    if code in (errno.EINVAL, errno.ENOSYS):
+        # a filesystem or libc without the flag: check, then rename, as before it
         if target.exists():
             raise FileExistsError(errno.EEXIST, "exists", str(target))
         source.replace(target)
-        return
-    done = renameat2(AT_FDCWD, os.fsencode(source), AT_FDCWD, os.fsencode(target), RENAME_NOREPLACE)
-    if done != 0:
-        code = ctypes.get_errno()
+    elif code:
         raise OSError(code, os.strerror(code), str(target))
 
 

@@ -292,6 +292,11 @@ class RecOwner:
         """
         self._submit("close", lambda cmd: self._close(cmd, reason), False, timeout)
 
+    def stage(self) -> str:
+        """The engine's stage, leaving the peaks for the next snapshot."""
+        with self._lock:
+            return self._state.stage
+
     def snapshot(self) -> RecSnapshot:
         """The state at the last tick, without touching the engine.
 
