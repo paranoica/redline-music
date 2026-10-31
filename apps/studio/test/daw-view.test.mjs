@@ -299,3 +299,9 @@ test("selecting a lane opens the editor; picking the open lane again keeps what 
   assert.equal(editorOpenAfter(false, "beat", "beat"), false);
   assert.equal(editorOpenAfter(true, "beat", "beat"), true);
 });
+
+test("a beat file read into a flip is edited as a flip before its first render", () => {
+  assert.equal(factsOf(reply(), [], { flipAnalysed: true }).beatKind, "flip");
+  assert.equal(factsOf(reply(), [], { flipAnalysed: false }).beatKind, "file");
+  assert.equal(factsOf(reply(), [], { flipAnalysed: null }).beatKind, "file");
+});

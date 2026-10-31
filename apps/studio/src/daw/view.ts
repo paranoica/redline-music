@@ -39,7 +39,9 @@ const running = (j: Job): boolean => j.state === "queued" || j.state === "runnin
 export function factsOf(reply: SongReply, jobs: readonly Job[], extra: { flipAnalysed: boolean | null }): ScreenFacts {
   const s = reply.stations;
   const raw = given(reply);
-  const kind = beatKindOf(s.beat);
+  const declared = beatKindOf(s.beat);
+  // a beat file already read into a flip is edited as one; its first render becomes the beat
+  const kind: BeatKind = declared === "file" && extra.flipAnalysed === true ? "flip" : declared;
   const suno = s.voice.kind === "suno";
   const takeNames = suno ? [] : [...(s.voice.takes ?? [])];
   const refsList = reply.song["references"];
@@ -50,7 +52,7 @@ export function factsOf(reply: SongReply, jobs: readonly Job[], extra: { flipAna
     bpm: typeof s.beat.bpm === "number" && s.beat.bpm > 0 ? s.beat.bpm : null,
     takeNames,
     hasBeatAudio: bool(raw, "beat_audio") ?? (kind === "own" ? s.beat.rendered === true : s.beat.file !== null),
-    beatAnalysed: bool(raw, "beat_analysed") ?? (kind === "file" ? extra.flipAnalysed === true : true),
+    beatAnalysed: bool(raw, "beat_analysed") ?? (declared === "file" ? extra.flipAnalysed === true : true),
     takes: takeNames.length,
     chosen: suno ? null : (s.voice.chosen ?? null),
     voiceKind: voiceGiven === "own" || voiceGiven === "suno" ? voiceGiven : suno ? "suno" : "own",

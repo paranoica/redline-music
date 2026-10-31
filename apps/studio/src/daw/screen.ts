@@ -28,7 +28,7 @@ import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } 
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
 import { BLOCKER_TEXT, commitPlan, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Pending, type Transport, type TransportEvent } from "./transport.ts";
-import { capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
+import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
 
@@ -271,7 +271,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       marks = scoreMarks(score);
     } else if (facts.beatKind === "flip" && (flipDraft.doc ?? flip?.draft)) {
       const doc = (flipDraft.doc ?? flip?.draft) as NonNullable<FlipState["draft"]>;
-      g = grid(doc.grid.bpm);
+      // until the first render the beat plays the source itself, whose first bar starts at its downbeat
+      g = grid(doc.grid.bpm, beatKindOf(reply.stations.beat) === "file" ? doc.grid.downbeat_s : 0);
       clips = flipClips(doc);
       total = Math.max(1, flipBars(doc.arrangement));
       marks = { bass: [], drums: [] };
