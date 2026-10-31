@@ -61,13 +61,6 @@ export type FlipOp = (doc: FlipDoc) => FlipDoc | Refusal | null;
 
 const keyOf = (doc: FlipDoc): string => JSON.stringify(doc);
 
-const owners = new WeakMap<object, FlipDraft>();
-
-// the draft that works through this api client
-export function draftOf(api: object): FlipDraft | undefined {
-  return owners.get(api);
-}
-
 export class FlipDraft {
   readonly #host: FlipDraftHost;
   readonly #sleep: (ms: number) => Promise<void>;
@@ -92,7 +85,6 @@ export class FlipDraft {
     this.#host = host;
     this.#sleep = host.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.#queue = this.#newQueue();
-    owners.set(host.api, this);
   }
 
   get doc(): FlipDoc | null {

@@ -12,6 +12,10 @@
 }
 .daw .chip:hover:not(:disabled) { background: var(--raised-hover); }
 .daw .chip[aria-checked="true"], .daw .chip[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.daw .chip--small { height: 20px; padding: 0 8px; font-size: 11px; border-radius: 5px; }
+.daw .chip--tag { background: var(--well); cursor: default; gap: 4px; padding-right: 4px; }
+.daw .chip__x { width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-dim); cursor: pointer; line-height: 1; }
+.daw .chip__x:hover { background: var(--raised-hover); color: var(--text); }
 .daw .chip--ghost { background: transparent; border-color: var(--line); color: var(--text-dim); }
 .daw .pickseg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; }
 .daw .pickseg button { height: 28px; padding: 0 10px; background: var(--raised); border: 0; border-left: 1px solid var(--line); font-size: 12px; color: var(--text-dim); cursor: pointer; }
@@ -40,6 +44,8 @@
 /* the piano roll */
 .daw .rpane { height: 100%; display: grid; grid-template-rows: 30px 1fr; }
 .daw .rollbar { display: flex; align-items: center; gap: 8px; padding: 0 16px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
+.daw .rollbar__chip { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.daw .rollbar__hint { margin-left: auto; }
 .daw .roll { overflow: auto; min-height: 0; outline-offset: -2px; }
 .daw .roll__in { display: grid; grid-template-columns: 52px max-content; }
 .daw .keys { position: sticky; left: 0; z-index: 3; background: var(--surface); border-right: 1px solid var(--line); }
@@ -88,6 +94,7 @@
 .daw .fx { display: flex; gap: 24px; padding: 18px 24px; align-items: flex-start; height: 100%; overflow: auto; }
 .daw .fx__flip { display: grid; gap: 10px; padding-right: 24px; border-right: 1px solid var(--line); }
 .daw .fx__row { display: flex; align-items: center; gap: 10px; }
+.daw .fx__row--wrap { flex-wrap: wrap; gap: 6px; }
 .daw .fx__lbl { color: var(--muted); font-size: 12px; min-width: 40px; }
 .daw .fx__main { display: grid; gap: 8px; }
 .daw .fx__knobs { display: flex; gap: 22px; }

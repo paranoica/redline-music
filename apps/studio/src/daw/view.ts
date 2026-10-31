@@ -239,7 +239,7 @@ export function editorTabs(lane: LaneKind, beat: BeatKind): EditorTab[] {
     case "drums":
       return ["drums"];
     case "beat":
-      return beat === "own" ? ["roll", "drums", "fx"] : ["fx"];
+      return beat === "own" || beat === "flip" ? ["roll", "drums", "fx"] : ["fx"];
     default:
       return ["fx"];
   }

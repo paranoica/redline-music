@@ -2,7 +2,7 @@
 // and the bottom editor under them, collapsed until a tab is opened.
 
 import { createApi as createBeatApi, type Library } from "../beat/api.ts";
-import type { Score } from "../beat/model.ts";
+import { deleteSection, duplicateSection, moveSection, type Score, type SectionEdit } from "../beat/model.ts";
 import { History } from "../core/history.ts";
 import { KeySurface, Scope } from "../core/lifecycle.ts";
 import type { Loop } from "../core/loop.ts";
@@ -23,6 +23,7 @@ import { drawHits, drawNotes, drawWave, sizedCanvas, type PeakData } from "./dra
 import { BEAT_LANES, Editor } from "./editor.ts";
 import { exportPlan, exportText, type ExportPhase } from "./export.ts";
 import { FlipDraft, flipLayout, StaleDraft, withBlocks } from "./flipdraft.ts";
+import { layerProblem } from "./roll.ts";
 import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } from "./lyrics.ts";
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
@@ -93,6 +94,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       if (!ready || scope.closed) return;
       rebuildModel();
       render();
+      bottom.flipEdited();
     },
     say: (text) => say(text),
   });
@@ -198,6 +200,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     api,
     beatApi,
     flipApi,
+    flipDraft,
+    confirm: (text) => confirm(text),
     reply: () => reply,
     facts: () => facts,
     jobs: () => jobs,
@@ -1094,7 +1098,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       if (!target || (facts.beatKind !== "own" && facts.beatKind !== "flip")) return;
       picked = Number(target.dataset["clip"]);
       bottom.selectBlock(picked);
-      if (facts.beatKind === "own") editorOpen = true;
+      editorOpen = true;
       select(kind);
       render();
     });
@@ -1102,8 +1106,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   // ---------- blocks of the beat lane ----------
-  // Own-beat blocks are not editable from here yet: that goes through the editor's draft.
-  const blocksEditable = (): boolean => facts.beatKind === "flip" && flipDraft.doc !== null;
+  const blocksEditable = (): boolean => (facts.beatKind === "flip" && flipDraft.doc !== null) || (facts.beatKind === "own" && bottom.score !== null);
 
   // one flip edit on the block arrangement; the pick follows the block the op made or moved
   function flipBlocks(make: (l: Layout) => BlockEdit | Refusal | null): void {
@@ -1127,8 +1130,35 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     }
   }
 
+  // one section edit of an own beat, through the editor's draft and history
+  function ownSections(make: (s: Score) => SectionEdit): void {
+    if (transport.mode === "recording") {
+      say("Во время записи бит не правится.");
+      return;
+    }
+    const current = bottom.score;
+    if (!current) {
+      say("Партитура ещё грузится.");
+      return;
+    }
+    const out = make(current);
+    if (!out.ok) {
+      say(out.reason);
+      return;
+    }
+    if (!bottom.editScore(out.score)) return;
+    picked = out.selected;
+    bottom.selectBlock(out.selected);
+    rebuildModel();
+    render();
+  }
+
   function duplicateBlock(i: number): void {
     if (!blocksEditable()) return;
+    if (facts.beatKind === "own") {
+      ownSections((s) => duplicateSection(s, i));
+      return;
+    }
     flipBlocks((l) => {
       const why = copyRefusal(l, i);
       return why ? { ok: false, reason: why } : copyBlockTo(l, i, i + 1);
@@ -1137,6 +1167,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   function removeBlock(i: number): void {
     if (!blocksEditable()) return;
+    if (facts.beatKind === "own") {
+      ownSections((s) => deleteSection(s, i));
+      return;
+    }
     flipBlocks((l) => {
       const why = deleteRefusal(l, i);
       return why ? { ok: false, reason: why } : deleteBlock(l, i);
@@ -1144,12 +1178,14 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   function stepBlock(i: number, dir: -1 | 1): void {
-    if (blocksEditable()) flipBlocks((l) => moveBlock(l, i, dir));
+    if (!blocksEditable()) return;
+    if (facts.beatKind === "own") ownSections((s) => moveSection(s, i, i + dir));
+    else flipBlocks((l) => moveBlock(l, i, dir));
   }
 
   function cutBlock(i: number): void {
     const clip = clips[i];
-    if (!blocksEditable() || !clip) return;
+    if (!blocksEditable() || !clip || facts.beatKind !== "flip") return;
     const at = splitAt(clip, hoverBar);
     if (at === null) {
       say("Разрезать можно блок от двух тактов.");
@@ -1174,7 +1210,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       btn("◀", "Сдвинуть левее", () => stepBlock(i, -1), i === 0),
       btn("▶", "Сдвинуть правее", () => stepBlock(i, 1), i === clips.length - 1),
       btn("Копия", "Копия после блока (Ctrl+D)", () => duplicateBlock(i)),
-      btn("Разрезать", "Разрезать по такту под курсором, без него — посередине", () => cutBlock(i), (c.source?.toBar ?? 0) - (c.source?.fromBar ?? 0) < 2),
+      ...(facts.beatKind === "flip" ? [btn("Разрезать", "Разрезать по такту под курсором, без него — посередине", () => cutBlock(i), (c.source?.toBar ?? 0) - (c.source?.fromBar ?? 0) < 2)] : []),
       btn("Удалить", "Удалить блок (Delete)", () => removeBlock(i)),
     );
     bar.style.setProperty("left", `${c.fromBar * BAR_PX + 4}px`);
@@ -1237,7 +1273,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
           return;
         }
         picked = index;
-        flipBlocks((l) => (drop.copy ? copyBlockTo(l, index, drop.to) : moveBlockTo(l, index, drop.to)));
+        if (facts.beatKind === "own") ownSections((s) => (drop.copy ? duplicateSection(s, index, drop.to) : moveSection(s, index, drop.to)));
+        else flipBlocks((l) => (drop.copy ? copyBlockTo(l, index, drop.to) : moveBlockTo(l, index, drop.to)));
       };
       doc.addEventListener("pointermove", move);
       doc.addEventListener("pointerup", up);
@@ -1361,6 +1398,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         el.append(clipOf(c, block(c.fromBar, c.bars, c.label, "--beat", 60, wavePainter(beatPeaks, from, from + c.bars * barSeconds(g), "--beat"))));
       }
       beatLaneEl = el;
+      if (facts.beatKind === "own") bottom.prepare();
       if (blocksEditable()) {
         dragBlocks(el);
         const chosen = picked === null ? undefined : clips[picked];
@@ -1428,9 +1466,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     }
     what.replaceChildren("Редактор: ", h("b", {}, names[selected]));
     const tabs = editorTabs(selected, facts.beatKind);
+    const layers = facts.beatKind === "flip" && flipDraft.doc ? layerProblem(flipDraft.doc) : null;
     tabBox.replaceChildren(
       ...tabs.map((t) => {
-        const b = h("button", { class: "etab", type: "button", role: "tab", "aria-selected": String(t === tab), "data-tab": t }, TAB_NAMES[t]);
+        const blocked = layers !== null && (t === "roll" || t === "drums");
+        const b = h("button", { class: "etab", type: "button", role: "tab", "aria-selected": String(t === tab), "data-tab": t, disabled: blocked, title: blocked ? (layers ?? undefined) : undefined }, TAB_NAMES[t]);
         b.addEventListener("click", () => {
           tab = t;
           editorOpen = true;
@@ -1723,7 +1763,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         return;
       case "delete":
         // a Delete inside the editor belongs to what is edited there, a roll note
-        if (picked !== null && !editor.contains(e.target as Node | null)) removeBlock(picked);
+        if (picked !== null && !editor.contains(e.target as Node | null) && !bottom.notePicked) removeBlock(picked);
         return;
     }
   });

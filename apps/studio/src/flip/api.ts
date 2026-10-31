@@ -3,7 +3,8 @@
 import { apiPath, apiRoot } from "../core/mount.ts";
 import { ApiError } from "../song/api.ts";
 import type { Job } from "../song/api.ts";
-import type { Analysis, Block, FlipDoc } from "./model.ts";
+import type { Score } from "../beat/model.ts";
+import type { Analysis, Block, FlipDoc, FlipNote } from "./model.ts";
 
 export interface FlipState {
   source: string;
@@ -91,6 +92,11 @@ export function createFlipApi({ base, token }: FlipApiOptions) {
       }).catch(() => {});
     },
     propose: async (): Promise<Block[]> => ((await (await flip("/propose", "POST", {})).json()) as { arrangement: Block[] }).arrangement,
+    // the source's 808 notes per source bar, snapped to the saved draft's grid
+    sourceNotes: async (): Promise<FlipNote[][]> => ((await (await flip("/source-notes", "GET")).json()) as { bars: FlipNote[][] }).bars,
+    // a beat score of one block's ours layer, for the editor's audition; the block is the one being edited
+    blockScore: async (block: Block, grid?: { bpm: number; swing: number }): Promise<Score> =>
+      ((await (await flip("/block-score", "POST", grid ? { block, grid } : { block })).json()) as { score: Score }).score,
     render: async (base: number): Promise<number> => ((await (await flip("/render", "POST", { base })).json()) as { n: number }).n,
     use: async (n: number, rev: number): Promise<void> => {
       await flip("/use", "POST", { n, rev });

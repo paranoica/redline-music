@@ -270,7 +270,7 @@ test("the editor shows only the tabs of the selected lane", () => {
   assert.deepEqual(editorTabs("drums", "own"), ["drums"]);
   assert.deepEqual(editorTabs("beat", "own"), ["roll", "drums", "fx"]);
   // a flip or a plain file has no roll or grid in this version
-  assert.deepEqual(editorTabs("beat", "flip"), ["fx"]);
+  assert.deepEqual(editorTabs("beat", "flip"), ["roll", "drums", "fx"]);
   assert.deepEqual(editorTabs("beat", "file"), ["fx"]);
   assert.deepEqual(editorTabs("voice", "file"), ["fx"]);
   assert.deepEqual(editorTabs("takes", "own"), ["fx"]);

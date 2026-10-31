@@ -1,18 +1,19 @@
 // The effects tab: the simple knobs of the voice or the beat over the studio's settings, «Авто —
-// как в референсах», the full chain in a drawer, and a flip's 808 and hats switches.
+// как в референсах», the full chain in a drawer, and a flip's 808 and hats switches, the effects
+// of its selected block and «Собрать по тексту».
 // A knob is heard at once through the studio player and saved after a quiet moment: the studio
 // saves only settings it has rendered exactly, so each save is a render and then the save.
 
 import { createApi as createMixApi } from "../api.ts";
 import { apiPath, apiRoot } from "../core/mount.ts";
 import type { FlipApi, FlipState } from "../flip/api.ts";
-import type { BassMode, FlipDoc, HatsMode } from "../flip/model.ts";
-import type { Job, StartKind } from "../song/api.ts";
+import { fitPatterns, MAX_BARS, paintEffect, tapeCap, totalBars, type BassMode, type Block, type FlipDoc, type FlipEffect, type HatsMode, type Refusal } from "../flip/model.ts";
+import { ApiError, type Job, type StartKind } from "../song/api.ts";
 import { jobActive } from "../song/jobs.ts";
 import type { Schema, Settings } from "../types.ts";
 import { ChainPanels } from "../ui/chain.ts";
 import { h } from "../ui/dom.ts";
-import { draftOf, type FlipDraft } from "./flipdraft.ts";
+import type { FlipDraft, FlipOp } from "./flipdraft.ts";
 import { KnobControl } from "./knob.ts";
 import { KNOBS, knobsFromSettings, knobText, settingsFromKnob, type Knob } from "./knobs.ts";
 import { SaveQueue, type SaveState } from "./queue.ts";
@@ -37,6 +38,12 @@ export interface FxHost {
   startJob(kind: StartKind): Promise<void>;
   flip(): FlipState | null;
   flipApi: FlipApi;
+  flipDraft: FlipDraft;
+  // the block of the flip's arrangement picked on the beat lane
+  flipBlock(): number | null;
+  // whether the song has a text to arrange the flip for
+  hasText(): boolean;
+  confirm(text: string): boolean;
   // the song changed on the server: read it again
   reload(): Promise<void>;
   // a line on the beat lane while a flip rebuilds, null when done
@@ -382,7 +389,7 @@ function defaultsKnob(schema: Schema, k: Knob): number {
   return safeKnobs(defaults)?.[k.id] ?? 0.5;
 }
 
-// ---------- a flip's 808 and hats ----------
+// ---------- a flip's 808, hats, block effects and arrangement ----------
 
 const BASS_MODES: [BassMode, string][] = [
   ["original", "оригинал"],
@@ -395,29 +402,109 @@ const HAT_MODES: [HatsMode, string][] = [
   ["ours", "наши"],
 ];
 
+export const BLOCK_EFFECTS: [string, string][] = [
+  ["reverse", "реверс"],
+  ["tape_stop", "остановка ленты"],
+  ["tape_start", "разгон ленты"],
+  ["stutter", "статтер"],
+  ["granular", "гранулятор"],
+];
+
+const effectName = (effect: string): string => BLOCK_EFFECTS.find(([id]) => id === effect)?.[1] ?? effect;
+
+const TAPE_DEFAULT_S = 0.5;
+
+// the play-order bars [from, to) of block i
+export function blockSpan(blocks: readonly Block[], i: number): { from: number; to: number } | null {
+  const block = blocks[i];
+  if (!block) return null;
+  const from = totalBars(blocks.slice(0, i));
+  return { from, to: from + (block.to_bar - block.from_bar) };
+}
+
+// the effects that start in block i, with their place in the doc's list
+export function blockEffects(doc: FlipDoc, i: number): { index: number; effect: FlipEffect }[] {
+  const span = blockSpan(doc.arrangement, i);
+  if (!span) return [];
+  return doc.effects.flatMap((effect, index) => (effect.from_bar >= span.from && effect.from_bar < span.to ? [{ index, effect }] : []));
+}
+
+// an effect with its default params over the whole of block i
+export function addBlockEffect(doc: FlipDoc, i: number, effect: string): FlipDoc | Refusal {
+  const span = blockSpan(doc.arrangement, i);
+  if (!span) return { ok: false, reason: "Выбери блок на дорожке бита." };
+  const params: Record<string, number> = {};
+  if (effect === "tape_stop" || effect === "tape_start") {
+    const cap = tapeCap(doc.grid.bpm, span.to - span.from);
+    if (cap < TAPE_DEFAULT_S) params["duration"] = cap;
+  }
+  const effects = paintEffect(doc.effects, { effect, from_bar: span.from, to_bar: span.to, params }, totalBars(doc.arrangement));
+  if (!effects) return { ok: false, reason: "Эффекту не хватило тактов." };
+  return { ...doc, effects };
+}
+
+export function removeEffect(doc: FlipDoc, index: number): FlipDoc | Refusal {
+  if (!doc.effects[index]) return { ok: false, reason: "Такого эффекта нет." };
+  return { ...doc, effects: doc.effects.filter((_, k) => k !== index) };
+}
+
+// whether replacing the arrangement would lose work: notes, drums or effects
+export function replaceRisk(doc: FlipDoc): boolean {
+  return doc.effects.length > 0 || doc.arrangement.some((b) => b.drums !== undefined || b.notes !== undefined);
+}
+
+// the arrangement a proposal gives, with plain blocks; effects and hat patterns belonged to the old ones
+export function replaceArrangement(doc: FlipDoc, proposal: readonly Block[]): FlipDoc | Refusal {
+  if (!proposal.length) return { ok: false, reason: "Из текста не вышло ни одного блока." };
+  const arrangement = proposal.map((b) => ({ label: b.label, from_bar: b.from_bar, to_bar: b.to_bar }));
+  if (totalBars(arrangement) > MAX_BARS) return { ok: false, reason: `Расстановка не длиннее ${MAX_BARS} тактов.` };
+  return { ...doc, arrangement, hats: { ...doc.hats, patterns: fitPatterns([], arrangement.length) }, effects: [] };
+}
+
+export const REPLACE_ASK = "Блоки с нотами, барабанами или эффектами заменятся новой расстановкой. Продолжить?";
+
+const proposeFailure = (error: unknown): string => (error instanceof ApiError && error.code === "no_text" ? "У песни нет текста для расстановки." : message(error));
+
+// Asks the server for an arrangement for the song's text and puts it in the draft as one edit,
+// after a question when it would replace blocks with notes, drums or effects. True when it did.
+export async function proposeInto(draft: FlipDraft, api: Pick<FlipApi, "propose">, confirm: (text: string) => boolean, say: (text: string) => void): Promise<boolean> {
+  let proposal: Block[];
+  try {
+    proposal = await api.propose();
+  } catch (error) {
+    say(`Не собралось по тексту: ${proposeFailure(error)}`);
+    return false;
+  }
+  const doc = draft.doc;
+  if (!doc) return false;
+  if (!proposal.length) {
+    say("Из текста не вышло ни одного блока: расстановка осталась как была.");
+    return false;
+  }
+  if (replaceRisk(doc) && !confirm(REPLACE_ASK)) return false;
+  return draft.apply((d) => replaceArrangement(d, proposal));
+}
+
 class FlipModes {
   readonly #host: FxHost;
   readonly #box: HTMLElement;
+  #proposing = false;
 
   constructor(host: FxHost, box: HTMLElement) {
     this.#host = host;
     this.#box = box;
   }
 
-  #draft(): FlipDraft | undefined {
-    return draftOf(this.#host.flipApi);
-  }
-
   show(): void {
-    const draft = this.#draft();
-    const d = draft?.doc ?? null;
-    if (!draft || !d) {
+    const draft = this.#host.flipDraft;
+    const d = draft.doc;
+    if (!d) {
       this.#box.replaceChildren(h("p", { class: "fx__note" }, "Черновика флипа нет."));
       return;
     }
     const busy = draft.rendering;
-    this.#box.replaceChildren(
-      h("div", { class: "fx__row" }, h("span", { class: "fx__lbl" }, "808"), seg("808", BASS_MODES, d.bass808.mode, busy, (m) => this.#edit(draft, (x) => (x.bass808.mode = m)))),
+    const rows: HTMLElement[] = [
+      h("div", { class: "fx__row" }, h("span", { class: "fx__lbl" }, "808"), seg("808", BASS_MODES, d.bass808.mode, busy, (m) => this.#edit(draft, (x) => ({ ...x, bass808: { ...x.bass808, mode: m } })))),
       h(
         "div",
         { class: "fx__row" },
@@ -426,23 +513,73 @@ class FlipModes {
           this.#edit(draft, (x) => {
             x.hats.mode = m;
             if (m !== "original" && !x.hats.remove.includes("hh")) x.hats.remove.unshift("hh");
+            return x;
           }),
         ),
       ),
-    );
+      this.#blockRow(draft, d),
+    ];
+    const chips = this.#chips(draft, d);
+    if (chips) rows.push(chips);
+    rows.push(this.#proposeRow(d));
+    this.#box.replaceChildren(...rows);
+  }
+
+  #blockRow(draft: FlipDraft, d: FlipDoc): HTMLElement {
+    const at = this.#host.flipBlock();
+    const block = at === null ? undefined : d.arrangement[at];
+    const row = h("div", { class: "fx__row fx__row--wrap" }, h("span", { class: "fx__lbl" }, "На блок"));
+    for (const [id, name] of BLOCK_EFFECTS) {
+      const add = h("button", { class: "chip chip--small", type: "button", disabled: !block, title: block ? `${name} на весь блок «${block.label}»` : "Выбери блок на дорожке бита" }, `+ ${name}`);
+      add.addEventListener("click", () => {
+        if (at !== null) this.#edit(draft, (doc) => addBlockEffect(doc, at, id));
+      });
+      row.append(add);
+    }
+    return row;
+  }
+
+  #chips(draft: FlipDraft, d: FlipDoc): HTMLElement | null {
+    const at = this.#host.flipBlock();
+    const list = at === null ? [] : blockEffects(d, at);
+    if (!list.length) return null;
+    const row = h("div", { class: "fx__row fx__row--wrap" }, h("span", { class: "fx__lbl" }, "Стоят"));
+    for (const { index, effect } of list) {
+      const name = effectName(effect.effect);
+      const drop = h("button", { class: "chip__x", type: "button", title: `Убрать: ${name}`, "aria-label": `Убрать: ${name}` }, "×");
+      drop.addEventListener("click", () => this.#edit(draft, (doc) => removeEffect(doc, index)));
+      row.append(h("span", { class: "chip chip--small chip--tag", title: `такты ${effect.from_bar + 1}–${effect.to_bar}` }, name, drop));
+    }
+    return row;
+  }
+
+  #proposeRow(d: FlipDoc): HTMLElement {
+    const has = this.#host.hasText();
+    const go = h("button", { class: "chip", type: "button", disabled: !has || this.#proposing || d.arrangement.length === 0, title: has ? "Расставить блоки под текст песни" : "У песни нет текста" }, this.#proposing ? "Собираю…" : "Собрать по тексту");
+    go.addEventListener("click", () => void this.#propose());
+    return h("div", { class: "fx__row" }, h("span", { class: "fx__lbl" }, ""), go, h("span", { class: "fx__note" }, has ? "заменит расстановку; Ctrl+Z вернёт" : "текста у песни нет"));
+  }
+
+  async #propose(): Promise<void> {
+    if (this.#proposing) return;
+    this.#proposing = true;
+    this.show();
+    try {
+      await proposeInto(this.#host.flipDraft, this.#host.flipApi, (text) => this.#host.confirm(text), (text) => this.#host.say(text));
+    } finally {
+      this.#proposing = false;
+      this.show();
+    }
   }
 
   async flush(): Promise<void> {
-    await this.#draft()?.flush();
+    await this.#host.flipDraft.flush();
   }
 
   dispose(): void {}
 
-  #edit(draft: FlipDraft, change: (d: FlipDoc) => void): void {
-    draft.apply((d) => {
-      change(d);
-      return d;
-    });
+  #edit(draft: FlipDraft, op: FlipOp): void {
+    draft.apply(op);
     this.show();
   }
 }

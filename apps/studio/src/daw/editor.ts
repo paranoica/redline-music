@@ -12,11 +12,12 @@ import type { Job, SongApi, SongChange, SongReply, StartKind } from "../song/api
 import { h, icon } from "../ui/dom.ts";
 import type { Clip } from "./clips.ts";
 import { BeatDraft } from "./draft.ts";
-import { DrumsView, type BeatEditing, type Block } from "./drums.ts";
+import { DrumsView, flipDrums, scoreDrums, type BeatEditing, type Block } from "./drums.ts";
+import type { FlipDraft } from "./flipdraft.ts";
 import { FxPane, type StudioLike } from "./fx.ts";
 import type { LyricLayout } from "./lyrics.ts";
 import type { Playback } from "./player.ts";
-import { RollView } from "./roll.ts";
+import { FlipRoll, layerProblem, RollView, scoreRoll, SourceNotes } from "./roll.ts";
 import { chooseShare, shareGate, type ShareChoice } from "./share.ts";
 import { TextTab } from "./text-tab.ts";
 import type { EditorTab, LaneKind, ScreenFacts } from "./view.ts";
@@ -26,6 +27,11 @@ const STOP = "M7 7h10v10H7z";
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const hasText = (reply: SongReply): boolean => {
+  const t = reply.stations.text;
+  return t.seed !== null && t.version !== undefined && t.version !== null;
+};
+
 export const BEAT_LANES: readonly LaneKind[] = ["beat", "bass", "drums"];
 
 export interface EditorHost {
@@ -34,6 +40,8 @@ export interface EditorHost {
   api: SongApi;
   beatApi: BeatApi;
   flipApi: FlipApi;
+  flipDraft: FlipDraft;
+  confirm(text: string): boolean;
   reply(): SongReply;
   facts(): ScreenFacts;
   jobs(): readonly Job[];
@@ -74,6 +82,9 @@ export class Editor {
   readonly #host: EditorHost;
   readonly #roll: RollView;
   readonly #drums: DrumsView;
+  readonly #flipRoll: RollView;
+  readonly #flipDrums: DrumsView;
+  readonly #source: SourceNotes;
   readonly #fx: FxPane;
   readonly #text: TextTab;
   readonly #draft: BeatDraft;
@@ -82,6 +93,7 @@ export class Editor {
   #ask: Ask | null = null;
   #block: number | null = null;
   #auditioning = false;
+  #auditionSeq = 0;
   #lane: LaneKind | null = null;
   #tab: EditorTab | null = null;
   #closed = false;
@@ -95,8 +107,16 @@ export class Editor {
       block: () => this.block(),
       edit: (section, pattern, change) => this.#edit(section, pattern, change),
     };
-    this.#roll = new RollView(editing);
-    this.#drums = new DrumsView(editing);
+    this.#roll = new RollView(scoreRoll(editing));
+    this.#drums = new DrumsView(scoreDrums(editing));
+    this.#source = new SourceNotes(host.flipApi, () => host.flipDraft.flush(), () => host.repaint());
+    const flipEditing = {
+      doc: () => host.flipDraft.doc,
+      apply: (op: Parameters<FlipDraft["apply"]>[0]) => host.flipDraft.apply(op),
+      block: () => this.block(),
+    };
+    this.#flipRoll = new RollView(new FlipRoll({ ...flipEditing, source: () => this.#source.get(host.flipDraft.doc) }));
+    this.#flipDrums = new DrumsView(flipDrums(flipEditing));
     this.#fx = new FxPane({
       base: host.base,
       token: host.token,
@@ -106,6 +126,10 @@ export class Editor {
       startJob: (kind) => host.startJob(kind),
       flip: () => host.flip(),
       flipApi: host.flipApi,
+      flipDraft: host.flipDraft,
+      flipBlock: () => (host.facts().beatKind === "flip" ? (this.block()?.section ?? null) : null),
+      hasText: () => hasText(host.reply()),
+      confirm: (text) => host.confirm(text),
       reload: () => host.reload(),
       beatBusy: (text) => {
         this.#flipBusy = text;
@@ -169,6 +193,11 @@ export class Editor {
     return null;
   }
 
+  // a roll note is picked, so Delete is the roll's and not the timeline's
+  get notePicked(): boolean {
+    return this.#flipRoll.hasPick || this.#roll.hasPick;
+  }
+
   block(): Block | null {
     const clips = this.#host.clips().filter((c) => c.bars >= 1);
     if (!clips.length) return null;
@@ -183,7 +212,23 @@ export class Editor {
 
   selectBlock(index: number): void {
     this.#block = index;
+    this.#source.retry();
     if (this.#auditioning) void this.#startAudition();
+  }
+
+  // the own beat's score is read once the beat lane is on screen, so block ops have it
+  prepare(): void {
+    this.#syncSeed();
+    if (this.#host.facts().beatKind === "own" && !this.#draft.score) void this.#draft.load();
+  }
+
+  // An edit of the whole score, such as a section move: it goes into the same draft and history
+  // as the roll's. False when the score is not loaded or a question is open.
+  editScore(next: Score): boolean {
+    if (!this.#draft.score || this.#ask) return false;
+    this.#answered.clear();
+    this.#apply(next, true);
+    return true;
   }
 
   // the song's playback took over
@@ -208,15 +253,16 @@ export class Editor {
     this.#paintAudition();
   }
 
-  // Ctrl+Z / Ctrl+Y inside the editor; false when it is not the editor's to take
+  // Ctrl+Z / Ctrl+Y for the editor; false when it has nothing to take. An own beat's score
+  // history answers whichever tab is open.
   undo(redo: boolean): boolean {
-    if (this.#tab === "roll" || this.#tab === "drums") {
-      const past = this.#history;
-      if (!past || !this.#draft.score) return false;
+    const past = this.#history;
+    if (this.#host.facts().beatKind === "own" && past && this.#draft.score) {
       const to = redo ? past.redo() : past.undo();
-      if (!to) return true;
-      this.#apply(to, false);
-      return true;
+      if (to) {
+        this.#apply(to, false);
+        return true;
+      }
     }
     if (this.#tab === "fx" && !redo) return this.#fx.undo();
     return false;
@@ -321,12 +367,16 @@ export class Editor {
 
   #content(tab: EditorTab, lane: LaneKind): Node[] {
     switch (tab) {
-      case "roll":
-        this.#roll.show();
-        return [this.#askBar(), this.#roll.root].filter((n): n is HTMLElement => n !== null);
-      case "drums":
-        this.#drums.show();
-        return [this.#askBar(), this.#drums.root].filter((n): n is HTMLElement => n !== null);
+      case "roll": {
+        const view = this.#host.facts().beatKind === "flip" ? this.#flipRoll : this.#roll;
+        view.show();
+        return [this.#askBar(), view.root].filter((n): n is HTMLElement => n !== null);
+      }
+      case "drums": {
+        const view = this.#host.facts().beatKind === "flip" ? this.#flipDrums : this.#drums;
+        view.show();
+        return [this.#askBar(), view.root].filter((n): n is HTMLElement => n !== null);
+      }
       case "fx": {
         const f = this.#host.facts();
         const group = BEAT_LANES.includes(lane) ? "beat" : "voice";
@@ -353,13 +403,27 @@ export class Editor {
     return bar;
   }
 
+  #flipLayer(): boolean {
+    const f = this.#host.facts();
+    const doc = this.#host.flipDraft.doc;
+    return f.beatKind === "flip" && doc !== null && layerProblem(doc) === null && (this.#tab === "roll" || this.#tab === "drums");
+  }
+
   #paintAudition(): void {
     const f = this.#host.facts();
-    const show = f.beatKind === "own" && this.#lane !== null && BEAT_LANES.includes(this.#lane) && this.#draft.score !== null;
+    const inBeat = this.#lane !== null && BEAT_LANES.includes(this.#lane);
+    const flip = f.beatKind === "flip";
+    const show = flip ? inBeat && this.#flipLayer() : f.beatKind === "own" && inBeat && this.#draft.score !== null;
+    if (flip && !show && this.#auditioning) {
+      this.#auditioning = false;
+      void this.#host.playback()?.stopAudition();
+    }
     this.audition.hidden = !show;
     this.audition.setAttribute("aria-pressed", String(this.#auditioning));
     this.audition.replaceChildren(icon(this.#auditioning ? STOP : PLAY, "eplay__icon"));
-    this.audition.title = this.#auditioning ? "Остановить кусок" : "Послушать кусок по кругу, с правками";
+    const on = flip ? "Послушать блок по кругу: только наш слой, без исходника" : "Послушать кусок по кругу, с правками";
+    this.audition.title = this.#auditioning ? "Остановить" : on;
+    this.audition.setAttribute("aria-label", this.audition.title);
   }
 
   async #toggleAudition(): Promise<void> {
@@ -374,16 +438,46 @@ export class Editor {
     await this.#startAudition();
   }
 
+  // the block's ours layer as a beat score: the server builds it from the block being edited
+  async #flipScore(): Promise<{ score: Score; bars: number } | null> {
+    const doc = this.#host.flipDraft.doc;
+    const at = this.block();
+    const block = doc && at ? doc.arrangement[at.section] : undefined;
+    if (!doc || !block) return null;
+    const score = await this.#host.flipApi.blockScore(block, { bpm: doc.grid.bpm, swing: doc.grid.swing });
+    return { score, bars: block.to_bar - block.from_bar };
+  }
+
+  // a flip edit while the block plays: the layer is asked for again and swapped in
+  flipEdited(): void {
+    if (!this.#auditioning || this.#host.facts().beatKind !== "flip") return;
+    const seq = ++this.#auditionSeq;
+    void this.#flipScore().then(
+      (made) => {
+        if (made && seq === this.#auditionSeq && this.#auditioning) this.#host.playback()?.updateAudition(made.score);
+      },
+      (error: unknown) => this.#host.say(`Слой не обновился: ${message(error)}`),
+    );
+  }
+
   async #startAudition(): Promise<void> {
     const pb = this.#host.playback();
+    if (!pb) return;
+    const flip = this.#host.facts().beatKind === "flip";
     const score = this.#draft.score;
     const block = this.block();
-    if (!pb || !score || !block) return;
+    if (!block || (!flip && !score)) return;
     this.#host.stopSong();
     this.#auditioning = true;
     this.#paintAudition();
+    const seq = ++this.#auditionSeq;
     try {
-      await pb.audition(score, block.fromBar, block.bars);
+      if (flip) {
+        await this.#host.flipDraft.flush();
+        const made = await this.#flipScore();
+        if (!made || seq !== this.#auditionSeq || !this.#auditioning) return;
+        await pb.audition(made.score, 0, made.bars);
+      } else if (score) await pb.audition(score, block.fromBar, block.bars);
     } catch (error) {
       this.#auditioning = false;
       this.#paintAudition();
