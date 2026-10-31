@@ -143,9 +143,8 @@ def made(root, tmp_path):
 
     dist = tmp_path / "dist"
     dist.mkdir()
-    (dist / "song.html").write_bytes(b"<!doctype html><title>song</title>")
     (dist / "daw.html").write_bytes(b"<!doctype html><title>daw</title>")
-    (dist / "song.js").write_text("1", encoding="utf-8")
+    (dist / "daw.js").write_text("1", encoding="utf-8")
     host = AppHost(
         make_rec=FakeRec,
         make_app=functools.partial(
@@ -236,12 +235,12 @@ def test_every_post_refuses_a_missing_token_and_a_foreign_host(made, path):
 
 def test_the_page_carries_the_studio_policy_and_needs_the_token(made):
     status, headers, body = call(made, "GET", f"/?t={TOKEN}", token=None)
-    # the song screen is the page; the older song page is not served at /
+    # the song screen is the page
     assert status == 200 and b"<title>daw</title>" in body
     assert "wasm-unsafe-eval" in headers["Content-Security-Policy"]
     assert "media-src 'self' blob:" in headers["Content-Security-Policy"]
     assert call(made, "GET", "/", token=None)[0] == 403
-    assert call(made, "GET", "/song.js", token=None)[0] == 200
+    assert call(made, "GET", "/daw.js", token=None)[0] == 200
     assert call(made, "GET", "/secret.py", token=None)[0] == 404
 
 

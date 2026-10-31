@@ -110,3 +110,13 @@ test("variants made for another voice or beat read as stale, other refusals stil
   fake(409, { code: "busy" });
   await assert.rejects(createSongApi({ token: "t" }).variants());
 });
+
+test("a new song is posted to the songs list with the server's body", async () => {
+  const calls = fake(201, { name: "n" });
+  const api = createSongApi({ token: "tok" });
+  const body = { name: "n", beat: { own: 3 }, text_seed: null };
+  assert.deepEqual(await api.createSong(body), { name: "n" });
+  assert.equal(`${calls[0].init.method} ${calls[0].url}`, "POST /api/songs");
+  assert.equal(calls[0].init.headers["X-Token"], "tok");
+  assert.deepEqual(JSON.parse(calls[0].init.body), body);
+});

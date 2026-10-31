@@ -175,6 +175,12 @@ export interface SongListItem {
   modified: string;
 }
 
+export interface NewSong {
+  name: string;
+  beat: { file: string } | { own: number };
+  text_seed: number | null;
+}
+
 export interface VariantsReply {
   auto: Record<string, unknown> & { distance_before?: number | null; distance_after?: number | null; at_edge?: string[] };
   variants: { settings: Record<string, unknown>; axis: string; direction: string; value: number; distance: number | null }[];
@@ -240,6 +246,7 @@ export function createSongApi({ base, token }: SongApiOptions) {
     close: (): void => lifetime.abort(),
     songs: () => json<{ songs: SongListItem[]; active: string | null }>(call("GET", "/songs")),
     sources: () => json<{ beats: string[]; seeds: number[]; texts: { seed: number; title: string }[] }>(call("GET", "/songs/sources")),
+    createSong: (body: NewSong) => json<{ name: string }>(call("POST", "/songs", body)),
     openSong: (name: string) => json<{ active: string }>(call("POST", "/songs/open", { name })),
     peaks: (of: "beat" | "take", name?: string, n?: number) => {
       const q = new URLSearchParams({ of });

@@ -1,6 +1,6 @@
 // Builds the pages into dist/: index.html, app.js, worklet.js, beat-worklet.js, styles.css,
-// redline_dsp.wasm, the beat editor's beat.html, beat.js and beat.css, the song screen's daw.html, daw.js and
-// daw.css, and the older song page's song.html, song.js, song.css and flip.css.
+// redline_dsp.wasm, the beat editor's beat.html, beat.js and beat.css, and the song screen's daw.html, daw.js
+// and daw.css.
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import * as esbuild from "esbuild";
 
@@ -14,7 +14,6 @@ await mkdir(dist, { recursive: true });
 async function copyStatic() {
   await copyFile(new URL("index.html", src), new URL("index.html", dist));
   await copyFile(new URL("beat.html", src), new URL("beat.html", dist));
-  await copyFile(new URL("song.html", src), new URL("song.html", dist));
   await copyFile(new URL("daw.html", src), new URL("daw.html", dist));
   await copyFile(new URL("engine/redline_dsp.wasm", src), new URL("redline_dsp.wasm", dist));
 }
@@ -27,15 +26,11 @@ const builds = [
   { ...common, entryPoints: ["src/worklet/beat-processor.ts"], outfile: "dist/beat-worklet.js", platform: "browser", external: ["node:*"] },
   // the page makes event tables on its own copy of the wasm, through the same glue
   { ...common, entryPoints: ["src/beat/page.ts"], outfile: "dist/beat.js", platform: "browser", external: ["node:*"] },
-  // the song page bundles both surfaces, so it carries the same glue exceptions
-  { ...common, entryPoints: ["src/song/page.ts"], outfile: "dist/song.js", platform: "browser", external: ["node:*"] },
   // the song screen plays through the studio engine and the beat engine, so it carries the glue too
   { ...common, entryPoints: ["src/daw/page.ts"], outfile: "dist/daw.js", platform: "browser", external: ["node:*"] },
   { ...common, entryPoints: ["src/styles/daw.css"], outfile: "dist/daw.css", format: undefined },
-  { ...common, entryPoints: ["src/styles/song.css"], outfile: "dist/song.css", format: undefined },
   { ...common, entryPoints: ["src/styles/main.css"], outfile: "dist/styles.css", format: undefined },
   { ...common, entryPoints: ["src/styles/beat.css"], outfile: "dist/beat.css", format: undefined },
-  { ...common, entryPoints: ["src/styles/flip.css"], outfile: "dist/flip.css", format: undefined },
 ];
 
 await copyStatic();

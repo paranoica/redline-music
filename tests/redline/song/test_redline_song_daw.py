@@ -75,7 +75,7 @@ def daw(root, tmp_path):
 
     dist = tmp_path / "dist"
     dist.mkdir()
-    (dist / "song.html").write_bytes(b"<!doctype html><title>song</title>")
+    (dist / "daw.html").write_bytes(b"<!doctype html><title>daw</title>")
     host = AppHost(
         make_rec=FakeRec,
         make_app=functools.partial(

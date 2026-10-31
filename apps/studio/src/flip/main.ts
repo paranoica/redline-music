@@ -7,7 +7,7 @@ import { ApiError } from "../song/api.ts";
 import type { Job } from "../song/api.ts";
 import { Poller } from "../song/poll.ts";
 import { TakePlayer } from "../song/takes.ts";
-import { finishedKinds, JOB_STATE, jobActive } from "../song/steps.ts";
+import { finishedKinds, JOB_STATE, jobActive } from "../song/jobs.ts";
 import { h } from "../ui/dom.ts";
 import { playButton } from "../ui/play.ts";
 import { createFlipApi, DraftError, effectRanges } from "./api.ts";

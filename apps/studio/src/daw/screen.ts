@@ -1,7 +1,7 @@
 // The song screen: a transport bar, track heads and lanes on a bar ruler with a red playhead,
-// and the collapsed editor strip under them. The bottom editor's panes are left empty here.
+// and the bottom editor under them, collapsed until a tab is opened.
 
-import { createApi as createBeatApi } from "../beat/api.ts";
+import { createApi as createBeatApi, type Library } from "../beat/api.ts";
 import type { Score } from "../beat/model.ts";
 import { History } from "../core/history.ts";
 import { KeySurface, Scope } from "../core/lifecycle.ts";
@@ -10,22 +10,24 @@ import { createFlipApi, type FlipState } from "../flip/api.ts";
 import { totalBars as flipBars } from "../flip/model.ts";
 import { acceptSong, ApiError, createSongApi } from "../song/api.ts";
 import type { Job, LayoutReply, Ranking, RecSnapshot, SongApi, SongChange, SongReply, StartKind } from "../song/api.ts";
+import { finishedKinds, JOB_NAMES, jobActive, refusalText } from "../song/jobs.ts";
 import { Poller } from "../song/poll.ts";
-import { takeLabel } from "../song/rail.ts";
 import { CALIBRATION, meterLevel, PeakHold, recPhase, stageRows, type OpenStage } from "../song/record.ts";
-import { finishedKinds, JOB_NAMES, jobActive, refusalText } from "../song/steps.ts";
 import { TakePlayer } from "../song/takes.ts";
 import { parseLyric, type LyricPart } from "../song/text.ts";
 import { dismissable, h, icon } from "../ui/dom.ts";
-import { Audition } from "./audition.ts";
+import { Audition, loadZones } from "./audition.ts";
 import { fileClips, flipClips, ownClips, type Clip } from "./clips.ts";
 import { drawHits, drawNotes, drawWave, sizedCanvas, type PeakData } from "./draw.ts";
+import { BEAT_LANES, Editor } from "./editor.ts";
+import { exportPlan, exportText, type ExportPhase } from "./export.ts";
 import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } from "./lyrics.ts";
 import { Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
 import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, type Effect, type Transport, type TransportEvent } from "./transport.ts";
 import { capTakes, chipText, dawKey, editorTabs, factsOf, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
+import { takeLabel } from "./words.ts";
 
 export const BAR_PX = 60;
 const FALLBACK_BPM = 120;
@@ -91,6 +93,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   let failedAt: OpenStage | null = null;
   let flip: FlipState | null = null;
   let score: Score | null = null;
+  let beatLibraries: Library[] = [];
+  let studioPlayer: StudioPlayer | null = null;
   let lyric: LyricPart[] = [];
   let layout: LayoutReply = { start_bar: null, bars_per_line: null };
   let facts: ScreenFacts;
@@ -110,6 +114,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   let allTakes = false;
   let calibrationOffered = false;
   let engineBusy = false;
+  let exportPhase: ExportPhase = { kind: "idle" };
+  let exportDone: HTMLElement | null = null;
   const lanes: Record<LaneId, LaneState> = { beat: { gain: 1, mute: false, solo: false }, voice: { gain: 1, mute: false, solo: false } };
   const hold = new PeakHold();
   let history: History<Snapshot> | null = null;
@@ -156,11 +162,52 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   const timeline = h("div", { class: "timeline" }, inner);
   const arr = h("main", { class: "arr" }, heads, timeline);
 
+  const loading = h("div", { class: "loading", role: "status" }, "загружаю песню…");
+  arr.append(loading);
+
+  const bottom: Editor = new Editor({
+    base: options.base,
+    token: options.token,
+    api,
+    beatApi,
+    flipApi,
+    reply: () => reply,
+    facts: () => facts,
+    jobs: () => jobs,
+    flip: () => flip,
+    clips: () => clips,
+    playheadBar: () => toBars(g, position()),
+    playback: () => playback,
+    studio: () => (studioPlayer?.ready && playback?.kind === "studio" ? studioPlayer : null),
+    stopSong: () => {
+      takePlayer.stop();
+      if (transport.mode === "playing") dispatch({ type: "pause" });
+    },
+    startJob: (kind) => startJob(kind),
+    change: (set) => change(set),
+    reload: () => reload(),
+    layout: () => lyricLayout() ?? DEFAULT_LAYOUT,
+    nudge: (to) => nudge(to),
+    scoreChanged: (next) => {
+      score = next;
+      rebuildModel();
+      render();
+    },
+    beatState: () => {
+      if (!ready) return;
+      rebuildModel();
+      render();
+    },
+    repaint: () => paintEditor(),
+    say: (text) => say(text),
+    overlay: root,
+  });
+
   const what = h("span", { class: "what" });
   const tabBox = h("div", { class: "etabs__tabs", role: "tablist" });
   const collapse = h("button", { class: "add", type: "button" }, "развернуть ▴");
   const panes = h("div", { class: "ebody" });
-  const editor = h("section", { class: "editor collapsed", "aria-label": "Редактор" }, h("div", { class: "etabs" }, what, tabBox, h("span", { class: "spacer" }), collapse), panes);
+  const editor = h("section", { class: "editor collapsed", "aria-label": "Редактор" }, h("div", { class: "etabs" }, what, tabBox, bottom.audition, h("span", { class: "spacer" }), collapse), panes);
   const hint = h("div", { class: "hint", role: "status" });
   const app = h("div", { class: "app" }, top, arr, editor);
   root.append(app, hint);
@@ -176,6 +223,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   // ---------- model ----------
   function rebuildModel(): void {
     facts = factsOf(reply, jobs, { flipAnalysed: flip ? flip.analysis !== null : null });
+    if (facts.beatKind === "own" && (bottom.beatDirty || bottom.rendering)) facts = { ...facts, beatDirty: true };
     const analysis = flip?.analysis ?? null;
     if (facts.beatKind === "own" && score) {
       g = grid(score.bpm);
@@ -217,9 +265,9 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     const studioReady = facts.studioReady;
     const next = new Playback({
       simple: () => new SimplePlayer({ base: options.base, token: options.token }, chosen),
-      studio: () => new StudioPlayer({ base: options.base, token: options.token, onError: say }),
+      studio: () => (studioPlayer = new StudioPlayer({ base: options.base, token: options.token, onError: say })),
       ready: async () => studioReady && (await api.mixReady()) === "ready",
-      audition: new Audition({ onError: say }),
+      audition: new Audition({ onError: say, prepare: (client) => loadZones(client, beatLibraries, (library, file) => beatApi.zone(library, file)) }),
     });
     playback = next;
     for (const lane of ["beat", "voice"] as const) next.setLane(lane, lanes[lane]);
@@ -265,6 +313,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     switch (effect) {
       case "play":
         takePlayer.stop();
+        bottom.auditionOff();
         // loading the sound can take a while; the end-of-song check waits for it
         playStarted = Infinity;
         void playback
@@ -294,7 +343,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         void stopRecord();
         return;
       case "export":
-        say("Экспорт подключается следующим шагом.");
+        void runExport();
         return;
     }
   }
@@ -346,19 +395,101 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   async function commitBeat(): Promise<void> {
     try {
-      const session = await beatApi.session();
-      let s = await beatApi.render(session.score_file);
-      while (s.state !== "done") {
-        if (s.state === "failed") throw new Error(s.error ?? "рендер не прошёл");
-        await scope.sleep(500);
-        if (scope.closed) return;
-        s = await beatApi.renderStatus();
-      }
-      await reload();
+      await bottom.commitBeat();
+      if (scope.closed) return;
       dispatch({ type: "renderDone" });
     } catch (error) {
       dispatch({ type: "error", message: `Бит не собрался: ${message(error)}` });
     }
+  }
+
+  // ---------- export ----------
+  // the own beat's commit goes through the transport ("commit", then the "export" effect), so the
+  // steps run here are read from the facts as they are after it
+  function pressExport(): void {
+    if (exportBusy()) return;
+    closeExportDone();
+    dispatch({ type: "export", render: exportPlan(facts)[0] === "commit" });
+  }
+
+  function exportBusy(): boolean {
+    return exportPhase.kind === "running" || (transport.mode === "rendering" && transport.then === "export");
+  }
+
+  async function runExport(): Promise<void> {
+    if (exportPhase.kind === "running") return;
+    try {
+      for (const s of exportPlan(facts)) {
+        if (s === "commit") continue;
+        exportPhase = { kind: "running", step: s };
+        paintExport();
+        await runJob(s);
+        await reload();
+      }
+      exportPhase = { kind: "done", folder: reply.stations.result.folder };
+    } catch (error) {
+      if (scope.closed) return;
+      exportPhase = { kind: "failed", message: message(error) };
+      say(`Экспорт не прошёл: ${message(error)}`);
+    }
+    if (!scope.closed) paintExport();
+  }
+
+  // starts the job, or follows one of the same kind already running, until it ends
+  async function runJob(kind: "mix" | "result"): Promise<void> {
+    try {
+      await api.startJob(kind);
+    } catch (error) {
+      await refreshJobs().catch(() => {});
+      const same = error instanceof ApiError && error.code === "busy" && jobs.some((j) => j.kind === kind && jobActive(j));
+      if (!same) throw new Error(error instanceof ApiError ? refusalText(error, jobs) : message(error));
+    }
+    for (;;) {
+      await refreshJobs();
+      const job = jobs.find((j) => j.kind === kind);
+      if (job && !jobActive(job)) {
+        if (job.state === "done") return;
+        throw new Error(job.state === "cancelled" ? `${JOB_NAMES[kind]} отменено` : `${JOB_NAMES[kind]}: ${job.reason ?? "не вышло"}`);
+      }
+      await scope.sleep(1000);
+      if (scope.closed) throw new Error("страница закрыта");
+    }
+  }
+
+  function paintExport(): void {
+    const blockers = exportBlockers(facts);
+    const committing = transport.mode === "rendering" && transport.then === "export";
+    const running = exportPhase.kind === "running" || committing || facts.exporting;
+    exportBtn.textContent = committing ? exportText({ kind: "running", step: "commit" }) : exportPhase.kind === "idle" && facts.exporting ? exportText({ kind: "running", step: "result" }) : exportText(exportPhase);
+    exportBtn.disabled = blockers.length > 0 || running;
+    exportBtn.setAttribute("aria-busy", String(running));
+    exportBtn.title = blockers.length ? BLOCKER_TEXT[blockers[0] as keyof typeof BLOCKER_TEXT] : running ? "Идёт экспорт" : facts.mixStale ? "Сведение устарело: экспорт сначала сведёт" : "Собрать итог";
+    if (exportPhase.kind === "done" && !exportDone) showExportDone(exportPhase.folder);
+  }
+
+  function showExportDone(folder: string | null): void {
+    const close = h("button", { class: "btn btn--ghost", type: "button", title: "Закрыть", "aria-label": "Закрыть" }, "×");
+    close.addEventListener("click", closeExportDone);
+    const parts: (Node | string)[] = [h("b", {}, "Готово")];
+    if (folder) {
+      const copy = h("button", { class: "btn btn--ghost", type: "button" }, "Скопировать путь");
+      copy.addEventListener("click", () => {
+        void navigator.clipboard?.writeText(folder).then(
+          () => (copy.textContent = "Скопировано"),
+          () => (copy.textContent = "Не удалось"),
+        );
+      });
+      parts.push(h("span", { class: "export-done__path" }, folder), copy);
+    } else parts.push(h("span", { class: "export-done__path" }, "итог собран, папку сервер не назвал"));
+    exportDone = h("div", { class: "export-done", role: "status" }, ...parts, close);
+    top.append(exportDone);
+  }
+
+  function closeExportDone(): void {
+    exportDone?.remove();
+    exportDone = null;
+    if (exportPhase.kind !== "running") exportPhase = { kind: "idle" };
+    paintExport();
   }
 
   // ---------- recording ----------
@@ -495,7 +626,15 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     const kind = factsOf(reply, jobs, { flipAnalysed: null }).beatKind;
     const tasks: Promise<unknown>[] = [];
     if (kind === "own") {
-      tasks.push(beatApi.session().then((s) => (score = s.score), () => (score = null)));
+      tasks.push(
+        beatApi.session().then(
+          (s) => {
+            score = bottom.score ?? s.score;
+            beatLibraries = s.libraries;
+          },
+          () => (score = bottom.score),
+        ),
+      );
       flip = null;
     } else {
       score = null;
@@ -537,6 +676,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     jobs = next;
     jobsPoller.setWanted(jobs.some(jobActive));
     if (done.includes("rank")) await loadRanking();
+    if (done.length) bottom.jobsDone(done, jobs);
     const key = jobs.filter(jobActive).map((j) => `${j.kind}:${j.state}:${j.step ?? ""}`).join();
     if (done.length) await reload().catch(() => {});
     else {
@@ -584,6 +724,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         return false;
       }
       if (!(await change({ voice_chosen: s.chosen }))) return false;
+      if (!facts.studioReady && !jobs.some((j) => (j.kind === "separate" || j.kind === "mix") && jobActive(j))) void startJob("separate");
     }
     if (JSON.stringify(s.layout) !== JSON.stringify(layout)) {
       try {
@@ -603,6 +744,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   async function undo(redo: boolean): Promise<void> {
+    if (editorOpen && bottom.undo(redo)) return;
     if (!history) return;
     const to = redo ? history.redo() : history.undo();
     if (!to) return;
@@ -638,9 +780,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     chip.textContent = chipText(next);
     chip.disabled = next === "done" || next === "pick" || next === "export";
     chip.hidden = suno && next === "record";
-    const blockers = exportBlockers(facts);
-    exportBtn.disabled = blockers.length > 0;
-    exportBtn.title = blockers.length ? BLOCKER_TEXT[blockers[0] as keyof typeof BLOCKER_TEXT] : facts.mixStale ? "Сведение устарело: экспорт сначала сведёт" : "Собрать итог";
+    paintExport();
     paintStrip();
   }
 
@@ -797,16 +937,18 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         takeRows(headEls, laneEls);
       } else if (kind === "beat") {
         headEls.push(head("beat", "Бит", beatSub(), "--beat", laneControls("beat")));
-        laneEls.push(beatLane(view.beat));
+        laneEls.push(pickable(beatLane(view.beat), "beat"));
       } else if (kind === "bass") {
         headEls.push(head("bass", "808", "ноты", "--bass", []));
         const el = lane("bass");
-        for (const c of clips) el.append(block(c.fromBar, c.bars, "", "--bass", 60, (ctx, _w, hgt) => drawNotes(ctx, marks.bass, c.fromBar, c.bars, BAR_PX, hgt, color("--bass"))));
+        for (const c of clips) el.append(clipOf(c, block(c.fromBar, c.bars, "", "--bass", 60, (ctx, _w, hgt) => drawNotes(ctx, marks.bass, c.fromBar, c.bars, BAR_PX, hgt, color("--bass")))));
+        pickable(el, "bass");
         laneEls.push(el);
       } else if (kind === "drums") {
         headEls.push(head("drums", "Барабаны", "удары", "--drum", []));
         const el = lane("drums");
-        for (const c of clips) el.append(block(c.fromBar, c.bars, "", "--drum", 60, (ctx, _w, hgt) => drawHits(ctx, marks.drums, c.fromBar, c.bars, BAR_PX, hgt, color("--drum"))));
+        for (const c of clips) el.append(clipOf(c, block(c.fromBar, c.bars, "", "--drum", 60, (ctx, _w, hgt) => drawHits(ctx, marks.drums, c.fromBar, c.bars, BAR_PX, hgt, color("--drum")))));
+        pickable(el, "drums");
         laneEls.push(el);
       }
     }
@@ -818,6 +960,26 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     paintFrame();
   }
 
+  function clipOf(c: Clip, el: HTMLElement): HTMLElement {
+    el.dataset["clip"] = String(c.index);
+    const on = selected !== null && BEAT_LANES.includes(selected) && bottom.block()?.section === c.index && facts.beatKind === "own";
+    el.classList.toggle("clip--on", on);
+    return el;
+  }
+
+  // a click on a block selects its lane and the block, and opens the editor
+  function pickable(el: HTMLElement, kind: LaneKind): HTMLElement {
+    el.addEventListener("click", (e) => {
+      const target = (e.target as HTMLElement).closest<HTMLElement>(".clip[data-clip]");
+      if (!target || facts.beatKind !== "own") return;
+      bottom.selectBlock(Number(target.dataset["clip"]));
+      editorOpen = true;
+      select(kind);
+      render();
+    });
+    return el;
+  }
+
   function voiceSub(): string {
     if (facts.voiceKind === "suno") return "трек из Suno";
     if (facts.takes === 0) return "дублей нет";
@@ -825,6 +987,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   function beatSub(): string {
+    const busy = bottom.beatLine();
+    if (busy) return busy;
     if (facts.beatKind === "own") return reply.stations.beat.seed !== undefined ? `свой · ${reply.stations.beat.seed}` : "свой";
     const file = reply.stations.beat.file ?? "";
     return facts.beatKind === "flip" ? "флип" : (file.split("/").pop() ?? "файл");
@@ -929,7 +1093,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     if (mode === "blocks") {
       for (const c of clips) {
         const from = toSeconds(g, c.fromBar);
-        el.append(block(c.fromBar, c.bars, c.label, "--beat", 60, wavePainter(beatPeaks, from, from + c.bars * barSeconds(g), "--beat")));
+        el.append(clipOf(c, block(c.fromBar, c.bars, c.label, "--beat", 60, wavePainter(beatPeaks, from, from + c.bars * barSeconds(g), "--beat"))));
       }
       return el;
     }
@@ -960,7 +1124,14 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   // ---------- the editor shell ----------
+  function leaveBeat(): void {
+    if (facts.beatKind !== "own" || !bottom.beatDirty || transport.mode !== "idle") return;
+    dispatch({ type: "renderStarted" });
+    void commitBeat();
+  }
+
   function select(kind: LaneKind): void {
+    if (selected !== null && BEAT_LANES.includes(selected) && !BEAT_LANES.includes(kind)) leaveBeat();
     selected = kind;
     const tabs = editorTabs(kind, facts.beatKind);
     if (!tab || !tabs.includes(tab)) tab = tabs[0] ?? null;
@@ -992,11 +1163,12 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         return b;
       }),
     );
-    panes.replaceChildren(...tabs.map((t) => h("div", { class: `epane${t === tab ? " on" : ""}`, "data-pane": t, role: "tabpanel" })));
+    bottom.mount(panes, selected, tab, tabs, editorOpen);
   }
 
   collapse.addEventListener("click", () => {
     editorOpen = !editorOpen;
+    if (!editorOpen && selected !== null && BEAT_LANES.includes(selected)) leaveBeat();
     paintEditor();
   });
 
@@ -1059,6 +1231,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       ruler.removeEventListener("pointercancel", up);
       const gst = rulerGesture(down, ev.clientX - left, BAR_PX, total);
       if (gst.kind === "seek") {
+        if (loopOn && loop && (gst.bar < loop.fromBar || gst.bar >= loop.toBar)) {
+          loopOn = false;
+          playback?.setLoop(null);
+        }
         paintLoop();
         seekTo(toSeconds(g, gst.bar));
         return;
@@ -1221,7 +1397,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   recBtn.addEventListener("click", pressRecord);
   loopBtn.addEventListener("click", toggleLoop);
   moreBtn.addEventListener("click", () => void openMenu());
-  exportBtn.addEventListener("click", () => dispatch({ type: "export", render: needsRender() }));
+  exportBtn.addEventListener("click", pressExport);
   chip.addEventListener("click", () => {
     switch (nextStep(facts)) {
       case "analyse":
@@ -1285,6 +1461,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   await Promise.all([refreshSide(), loadText(), loadRanking(), firstLayout, api.recState().then(applySnapshot, () => {})]);
   rebuildModel();
   ready = true;
+  loading.remove();
   history = new History<Snapshot>(snapshot());
   // the engine may already be recording from before the page loaded
   if ((rec as RecSnapshot | null)?.recording) transport = { mode: "recording", step: "recording" };
@@ -1297,6 +1474,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     async dispose() {
       if (scope.closed) return;
       flushWaiters();
+      await bottom.dispose();
       scope.dispose();
       api.close();
       flipApi.close();

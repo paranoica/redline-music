@@ -78,7 +78,6 @@ def served(root, tmp_path):
 
     dist = tmp_path / "dist"
     dist.mkdir()
-    (dist / "song.html").write_bytes(b"<!doctype html><title>song</title>")
     (dist / "daw.html").write_bytes(b"<!doctype html><title>daw</title>")
     make_app = functools.partial(
         SongApp, argv=argv, build_studio=fake_studio, assets=lambda: (None, None, str)
