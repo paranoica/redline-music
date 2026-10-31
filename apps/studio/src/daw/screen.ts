@@ -22,9 +22,9 @@ import { drawHits, drawNotes, drawWave, sizedCanvas, type PeakData } from "./dra
 import { BEAT_LANES, Editor } from "./editor.ts";
 import { exportPlan, exportText, type ExportPhase } from "./export.ts";
 import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } from "./lyrics.ts";
-import { Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type LaneId, type LaneState } from "./player.ts";
+import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
-import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, type Effect, type Transport, type TransportEvent } from "./transport.ts";
+import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, takeEnded, type Effect, type Transport, type TransportEvent } from "./transport.ts";
 import { capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
@@ -272,10 +272,18 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     const old = playback;
     const chosen = facts.chosen;
     const studioReady = facts.studioReady;
-    const next = new Playback({
+    const make: BackendMakers = {
       simple: () => new SimplePlayer({ base: options.base, token: options.token }, chosen),
       studio: () => (studioPlayer = new StudioPlayer({ base: options.base, token: options.token, onError: say })),
       ready: async () => studioReady && (await api.mixReady()) === "ready",
+    };
+    // a new render, the studio built or another take while the song plays: it goes on from there
+    if (old && onNewKey({ had: true, playing: transport.mode === "playing", beatAudio: facts.hasBeatAudio }) === "renew") {
+      playbackLoad = old.renew(make).catch((error: unknown) => say(`Звук не загрузился: ${message(error)}`));
+      return;
+    }
+    const next = new Playback({
+      ...make,
       audition: new Audition({ onError: say, prepare: (client) => loadZones(client, beatLibraries, (library, file) => beatApi.zone(library, file)) }),
     });
     playback = next;
@@ -392,8 +400,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       return;
     }
     takePlayer.stop();
-    heldStop = rec?.recording === true;
-    dispatch({ type: "record", render: needsRender(), held: heldStop });
+    dispatch({ type: "record", render: needsRender(), held: rec?.recording === true });
   }
 
   function seekTo(seconds: number): void {
@@ -539,6 +546,12 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         .then(() => refreshJobs())
         .catch(() => {});
     }
+    if (takeEnded(transport, s)) {
+      dispatch({ type: "recordStopped" });
+      void reload()
+        .then(() => refreshJobs())
+        .catch(() => {});
+    }
     syncRecPoll();
     paintStrip();
     if (was?.take !== s?.take || was?.recording !== s?.recording) render();
@@ -588,11 +601,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     }
   }
 
-  // the start's toggle while it is out: a stop pressed meanwhile waits for it, and sends no
-  // toggle of its own when no take started
+  // the start's toggle while it is out: a stop pressed meanwhile waits for it
   let starting: Promise<boolean> | null = null;
-  // the stop is for a take the screen did not start, judged from a snapshot that may be old
-  let heldStop = false;
 
   async function startRecord(): Promise<void> {
     const toggle = api.recToggle();
@@ -624,19 +634,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   async function stopRecord(): Promise<void> {
     try {
-      let started = starting ? await starting : true;
-      if (heldStop) {
-        heldStop = false;
-        // a toggle with no take in the engine would start one
-        const s = await api.recState();
-        applySnapshot(s);
-        started = s.recording && !s.stopping;
-      }
-      if (!started) {
-        dispatch({ type: "recordStopped" });
-        return;
-      }
-      await api.recToggle();
+      if (starting) await starting;
+      // the take may have been stopped from another tab: a toggle with no take would start one
+      const s = await api.recState();
+      applySnapshot(s);
+      if (stopAction(s) === "toggle") await api.recToggle();
       await waitRec((x) => (!x.recording && !x.stopping) || x.out_of_sync);
       dispatch({ type: "recordStopped" });
       await reload();

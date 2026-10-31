@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { auditionRange } from "../src/daw/audition.ts";
-import { Playback, TAKE_LEAD, fitLoop, laneDbSlots, laneGains, laneStart, positionAt, segmentEnd, startPoint, withLaneGains } from "../src/daw/player.ts";
+import { Playback, TAKE_LEAD, fitLoop, onNewKey, laneDbSlots, laneGains, laneStart, positionAt, segmentEnd, startPoint, withLaneGains } from "../src/daw/player.ts";
 
 const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg ?? ""} ${a} != ${b}`);
 
@@ -341,4 +341,144 @@ test("dispose lets go of the backend and refuses later calls", async () => {
   assert.equal(playback.kind, null);
   await playback.sync();
   assert.equal(made.length, 1);
+});
+
+// a new render or another take: new stand-in backends for the same owner
+function remake(made, { kind = "simple", duration = 100, ready = kind === "studio", hold = null } = {}) {
+  const make = () => {
+    const p = new FakePlayer(kind, duration);
+    if (hold) {
+      const load = p.load.bind(p);
+      p.load = async () => {
+        await hold.promise;
+        await load();
+      };
+    }
+    made.push(p);
+    return p;
+  };
+  return { simple: make, studio: make, ready: async () => ready };
+}
+
+function gate() {
+  let open;
+  const promise = new Promise((r) => (open = r));
+  return { promise, open };
+}
+
+test("a new key while the song plays: the new backend takes over where it was and plays on", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  playback.setLoop({ start: 0, end: 40 });
+  playback.setLane("beat", { gain: 0.5 });
+  await playback.play(3);
+  made[0].pos = 7.5;
+  await playback.renew(remake(made));
+  // the same kind is rebuilt: the old one plays the old render
+  assert.equal(made.length, 2);
+  const [old, next] = made;
+  assert.equal(old.playing, false);
+  assert.equal(old.disposed, true);
+  assert.equal(next.loaded, true);
+  assert.equal(next.playing, true);
+  assert.equal(next.pos, 7.5);
+  assert.deepEqual(next.calls.filter((c) => c.startsWith("play") || c.startsWith("stop")), ["play 7.5"]);
+  assert.deepEqual(next.loop, { start: 0, end: 40 });
+  assert.deepEqual(next.gains, { beat: 0.5, voice: 1 });
+  assert.equal(playback.kind, "simple");
+  assert.equal(playback.playing, true);
+});
+
+test("the song plays on the old backend while the new one loads; a pause meanwhile is kept", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  await playback.play(2);
+  const hold = gate();
+  const renewed = playback.renew(remake(made, { hold }));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(made[0].playing, true);
+  assert.equal(playback.playing, true);
+  made[0].pos = 9;
+  playback.pause();
+  hold.open();
+  await renewed;
+  const next = made[1];
+  assert.equal(next.playing, false);
+  assert.equal(next.pos, 9);
+  assert.equal(made[0].disposed, true);
+});
+
+test("a new key while stopped swaps at the held position without playing; a studio key builds the studio", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  made[0].pos = 4;
+  await playback.renew(remake(made, { kind: "studio" }));
+  assert.equal(playback.kind, "studio");
+  assert.equal(made[1].pos, 4);
+  assert.equal(made[1].playing, false);
+  assert.equal(made[0].disposed, true);
+});
+
+test("the hand-over counts as playing until the new backend has started", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  await playback.play(1);
+  const started = gate();
+  const seen = [];
+  const make = remake(made);
+  const simple = make.simple;
+  make.simple = () => {
+    const p = simple();
+    const play = p.play.bind(p);
+    p.play = async (from) => {
+      seen.push(playback.playing);
+      await started.promise;
+      await play(from);
+    };
+    return p;
+  };
+  const renewed = playback.renew(make);
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(seen, [true]);
+  assert.equal(playback.playing, true);
+  started.open();
+  await renewed;
+  assert.equal(made[1].playing, true);
+});
+
+test("a new key is swapped in place only while the song plays a beat; otherwise the player is built again", () => {
+  assert.equal(onNewKey({ had: true, playing: true, beatAudio: true }), "renew");
+  assert.equal(onNewKey({ had: true, playing: false, beatAudio: true }), "rebuild");
+  assert.equal(onNewKey({ had: false, playing: true, beatAudio: true }), "rebuild");
+  assert.equal(onNewKey({ had: true, playing: true, beatAudio: false }), "rebuild");
+});
+
+test("a pause or a stop asked while the renewed backend starts is kept once it has started", async () => {
+  for (const how of ["pause", "stop"]) {
+    const { playback, made } = owner(false);
+    await playback.sync();
+    await playback.play(1);
+    made[0].pos = 6;
+    const started = gate();
+    const make = remake(made);
+    const simple = make.simple;
+    make.simple = () => {
+      const p = simple();
+      const play = p.play.bind(p);
+      p.play = async (from) => {
+        await started.promise;
+        await play(from);
+      };
+      return p;
+    };
+    const renewed = playback.renew(make);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    playback[how]();
+    started.open();
+    await renewed;
+    const next = made[1];
+    assert.equal(next.playing, false, how);
+    assert.equal(playback.playing, false, how);
+    assert.equal(next.pos, how === "stop" ? 0 : 6, how);
+  }
 });

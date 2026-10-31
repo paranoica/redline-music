@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { IDLE, exportBlockers, nextStep, recordBlockers, step } from "../src/daw/transport.ts";
+import { IDLE, exportBlockers, nextStep, recordBlockers, step, stopAction, takeEnded } from "../src/daw/transport.ts";
 
 const idle = IDLE;
 const failed = { mode: "idle", error: "boom" };
@@ -219,4 +219,35 @@ test("export is disabled with no refs and with no chosen take of an own voice", 
   assert.deepEqual(exportBlockers({ ...DONE, chosen: null }), ["no-take"]);
   assert.deepEqual(exportBlockers({ ...DONE, refsCount: 0, chosen: null }), ["no-refs", "no-take"]);
   assert.deepEqual(exportBlockers({ ...DONE, voiceKind: "suno", chosen: null }), []);
+});
+
+// the recorder's snapshot as the screen reads it before a stop and on every poll
+const snap = (over = {}) => ({ recording: false, stopping: false, take: null, ...over });
+const live = snap({ recording: true, take: "take-003.wav" });
+
+test("a stop toggles only a take the engine holds and is not finishing", () => {
+  assert.equal(stopAction(live), "toggle");
+  // the take started, the meter has not caught up yet: still a take to stop
+  assert.equal(stopAction(snap({ take: "take-003.wav" })), "toggle");
+  // stopped from another tab: a toggle now would start a take nobody sees
+  assert.equal(stopAction(snap()), "settle");
+  // another tab is stopping it
+  assert.equal(stopAction(snap({ recording: true, stopping: true, take: "take-003.wav" })), "settle");
+  assert.equal(stopAction(snap({ stopping: true, take: "take-003.wav" })), "settle");
+  // the take has ended in the engine, the meter still shows it
+  assert.equal(stopAction(snap({ recording: true })), "settle");
+});
+
+test("a take the transport shows recording ends when a snapshot shows no take and none finishing", () => {
+  const recording = rec("recording");
+  assert.equal(takeEnded(recording, snap()), true);
+  assert.equal(takeEnded(recording, live), false);
+  assert.equal(takeEnded(recording, snap({ take: "take-003.wav" })), false);
+  assert.equal(takeEnded(recording, snap({ stopping: true, take: "take-003.wav" })), false);
+  assert.equal(takeEnded(recording, snap({ stopping: true })), false);
+  assert.equal(takeEnded(recording, snap({ recording: true })), false);
+  assert.equal(takeEnded(recording, null), false);
+  // before the take started, or while this tab stops it, the screen's own flow decides
+  for (const s of ["opening", "calibrate", "counting", "stopping"]) assert.equal(takeEnded(rec(s), snap()), false, s);
+  for (const t of [idle, failed, playing, rendering("record")]) assert.equal(takeEnded(t, snap()), false, t.mode);
 });

@@ -134,6 +134,35 @@ export function step(state: Transport, e: TransportEvent): Step {
   return next ?? to(state);
 }
 
+// ---------- the recorder's take, as a snapshot shows it ----------
+
+export interface TakeView {
+  recording: boolean;
+  stopping: boolean;
+  // the take the session holds (running, or one whose stop timed out); the meter's `recording`
+  // lags it by a tick either way
+  take: string | null;
+}
+
+// "held": a toggle stops it; "finishing": a stop is under way or the meter has not caught up;
+// "none": a toggle would start a new take
+function takeState(s: TakeView): "held" | "finishing" | "none" {
+  if (s.stopping) return "finishing";
+  if (s.take !== null) return "held";
+  return s.recording ? "finishing" : "none";
+}
+
+// what a stop does: toggle only a take the engine holds; otherwise (stopped or being stopped from
+// another tab) wait until no take is left and show the takes
+export function stopAction(s: TakeView): "toggle" | "settle" {
+  return takeState(s) === "held" ? "toggle" : "settle";
+}
+
+// a take the transport shows recording that the engine no longer has: it was stopped elsewhere
+export function takeEnded(t: Transport, s: TakeView | null): boolean {
+  return t.mode === "recording" && t.step === "recording" && s !== null && takeState(s) === "none";
+}
+
 // ---------- the next step and the disabled buttons ----------
 
 export interface SongFacts {

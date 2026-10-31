@@ -59,6 +59,8 @@ export class BeatDraft {
   #saved = "";
   #loading: Promise<void> | null = null;
   #committing: Promise<void> | null = null;
+  // a commit's save of the next numbered score, while it is out
+  #saving: Promise<unknown> | null = null;
   #rendering = false;
   #renders = 0;
   #state: SaveState = "idle";
@@ -69,11 +71,13 @@ export class BeatDraft {
     this.#sleep = host.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     const options = {
       delay: DRAFT_MS,
-      // the base is read when the draft goes out: a commit may have saved a newer score meanwhile
-      send: (score: Score) => {
+      // the base is read when the draft goes out, after a commit's save that is out: a draft over
+      // the score before it would be refused as stale
+      send: async (score: Score) => {
+        while (this.#saving) await this.#saving.catch(() => {});
         const base = this.#base;
-        if (!base) return Promise.reject(new Error("партитура не загрузилась"));
-        return host.api.saveDraft(score, base).then(() => undefined);
+        if (!base) throw new Error("партитура не загрузилась");
+        await host.api.saveDraft(score, base);
       },
       onState: (state: SaveState, error?: unknown) => {
         this.#state = state;
@@ -188,13 +192,17 @@ export class BeatDraft {
     const api = this.#host.api;
     const text = serialize(score);
     if (text !== this.#saved) {
+      const saving = api.save(score, base);
+      this.#saving = saving;
       try {
-        base = (await api.save(score, base)).file;
+        base = (await saving).file;
+        this.#base = base;
+        this.#saved = text;
       } catch (error) {
         throw new Error(`партитура не сохранилась: ${refusal(error)}`);
+      } finally {
+        this.#saving = null;
       }
-      this.#base = base;
-      this.#saved = text;
       // an edit made while the save was out: its draft goes again, over the new score
       const now = this.#score;
       if (now && serialize(now) !== text) this.#queue.push(now);

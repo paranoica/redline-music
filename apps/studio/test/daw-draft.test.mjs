@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Refused } from "../src/beat/api.ts";
 import { BeatDraft } from "../src/daw/draft.ts";
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -173,4 +174,45 @@ test("the render shows as running until the song has reloaded with it, and each 
   // nothing to commit: no render, no count
   await d.commit();
   assert.equal(d.renders, 1);
+});
+
+test("a draft due while a commit's save is out waits for it and goes over the new score, with no false failure", async () => {
+  const api = server({ pairs: [same(score(0))], holdSave: true });
+  // the server has the new score as soon as the save is asked for, and refuses a draft over an older one
+  let newest = "score-001.json";
+  const save = api.save;
+  api.save = (s, base) => {
+    newest = `score-${String(api.calls.saves.length + 2).padStart(3, "0")}.json`;
+    return save(s, base);
+  };
+  const saveDraft = api.saveDraft;
+  api.saveDraft = async (s, base) => {
+    if (base !== newest) {
+      api.calls.drafts.push({ score: s, base, refused: true });
+      throw new Refused(409, "stale base", ["stale base"]);
+    }
+    return saveDraft(s, base);
+  };
+  const { d, seen, timer } = draftWith(api);
+  await d.load();
+  d.apply(score(1));
+  const commit = d.commit();
+  await settle();
+  assert.equal(api.calls.saves.length, 1);
+  d.apply(score(2));
+  // the quiet moment runs out while the save is still out
+  timer.fire();
+  await settle();
+  assert.deepEqual(api.calls.drafts.filter((x) => x.refused), []);
+  assert.deepEqual(seen.says, []);
+  api.held[0].resolve();
+  await commit;
+  timer.fire();
+  await settle();
+  assert.deepEqual(api.calls.drafts.filter((x) => x.refused), []);
+  assert.deepEqual(seen.says, []);
+  const last = api.calls.drafts.at(-1);
+  assert.deepEqual(last.score, score(2));
+  assert.equal(last.base, "score-002.json");
+  assert.equal(d.saveState, "saved");
 });

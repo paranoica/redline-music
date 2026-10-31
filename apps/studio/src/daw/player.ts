@@ -1,5 +1,6 @@
 // The song page's playback: two backends behind one interface and the owner that picks one,
-// swaps them at a stopped moment and keeps a block's audition and the song from playing together.
+// swaps them at a stopped moment (a new render or take also while it plays) and keeps a block's
+// audition and the song from playing together.
 // SimplePlayer plays the beat file and the raw take until the studio is built; StudioPlayer plays
 // the chosen take through the studio engine's vocal, beat and master racks, the exact mix.
 
@@ -141,9 +142,21 @@ export function studioReady(api: Pick<SongApi, "mixReady">): () => Promise<boole
   return async () => (await api.mixReady()) === "ready";
 }
 
+// A new key for the song's player (a new render, another take). While the song plays a beat the
+// player renews its backend in place and the song goes on; otherwise it is built again.
+export function onNewKey(f: { had: boolean; playing: boolean; beatAudio: boolean }): "renew" | "rebuild" {
+  return f.had && f.playing && f.beatAudio ? "renew" : "rebuild";
+}
+
+export type BackendMakers = Pick<PlaybackDeps, "simple" | "studio" | "ready">;
+
 export class Playback {
-  readonly #deps: PlaybackDeps;
+  #deps: PlaybackDeps;
   #player: SongPlayer | null = null;
+  // a renewed backend is starting where the old one played
+  #handing = false;
+  // the last pause or stop, and how many there were, for one asked during a hand-over
+  #halted: { count: number; how: "pause" | "stop" } = { count: 0, how: "pause" };
   #loop: Loop | null = null;
   readonly #lanes: Record<LaneId, LaneState> = {
     beat: { gain: 1, mute: false, solo: false },
@@ -161,7 +174,7 @@ export class Playback {
   }
 
   get playing(): boolean {
-    return this.#player?.playing ?? false;
+    return this.#handing || (this.#player?.playing ?? false);
   }
 
   get duration(): number {
@@ -179,24 +192,36 @@ export class Playback {
   // asks whether the studio is ready and swaps to the backend that fits, unless the song plays;
   // the new one goes on from the old one's position
   sync(): Promise<void> {
-    const run = this.#queue.then(() => this.#sync());
+    return this.#enqueue(false);
+  }
+
+  // new backends (a new render, another take): one is built even of the same kind and takes over
+  // at the old one's position, playing on if the song plays
+  renew(make: BackendMakers): Promise<void> {
+    this.#deps = { ...this.#deps, simple: make.simple, studio: make.studio, ready: make.ready };
+    return this.#enqueue(true);
+  }
+
+  #enqueue(renew: boolean): Promise<void> {
+    const run = this.#queue.then(() => this.#sync(renew));
     this.#queue = run.catch(() => {});
     return run;
   }
 
-  async #sync(): Promise<void> {
+  async #sync(renew: boolean): Promise<void> {
     if (this.#closed) return;
     let ready: boolean;
     try {
       ready = await this.#deps.ready();
     } catch (error) {
-      // the probe failed: what plays now goes on playing
-      if (this.#player) return;
-      throw error;
+      // the probe failed: what plays now goes on playing, or is renewed as it is
+      if (!this.#player) throw error;
+      if (!renew) return;
+      ready = this.#player.kind === "studio";
     }
     const want: BackendKind = ready ? "studio" : "simple";
     const old = this.#player;
-    if (this.#closed || old?.kind === want || old?.playing) return;
+    if (this.#closed || (!renew && (old?.kind === want || old?.playing))) return;
     const next = want === "studio" ? this.#deps.studio() : this.#deps.simple();
     try {
       await next.load();
@@ -205,16 +230,33 @@ export class Playback {
       throw error;
     }
     // closed, or the old one started playing while the new one loaded: try again later
-    if (this.#closed || this.#player !== old || old?.playing) {
+    if (this.#closed || this.#player !== old || (!renew && old?.playing)) {
       await next.dispose();
       return;
     }
     const at = old?.position() ?? 0;
+    const playing = old?.playing ?? false;
+    if (playing) old?.pause();
     this.#player = next;
-    if (old) await old.dispose();
     this.#applyLoop();
     this.#applyLanes();
-    next.seek(startPoint(at, this.#loop && fitLoop(this.#loop, next.duration), next.duration));
+    const from = startPoint(at, this.#loop && fitLoop(this.#loop, next.duration), next.duration);
+    if (playing) await this.#handOver(next, from);
+    else next.seek(from);
+    if (old) await old.dispose();
+  }
+
+  async #handOver(next: SongPlayer, from: number): Promise<void> {
+    const halts = this.#halted.count;
+    this.#handing = true;
+    try {
+      await next.play(from);
+    } finally {
+      this.#handing = false;
+    }
+    if (this.#halted.count === halts) return;
+    if (this.#halted.how === "stop") next.stop();
+    else next.pause();
   }
 
   async play(from?: number): Promise<void> {
@@ -226,10 +268,12 @@ export class Playback {
   }
 
   pause(): void {
+    this.#halted = { count: this.#halted.count + 1, how: "pause" };
     this.#player?.pause();
   }
 
   stop(): void {
+    this.#halted = { count: this.#halted.count + 1, how: "stop" };
     this.#player?.stop();
     // also cancels an audition still starting
     void this.#deps.audition.stop().catch(() => {});
