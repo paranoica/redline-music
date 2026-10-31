@@ -307,6 +307,23 @@ test("starting an audition stops the song where it is, and playing the song stop
   assert.equal(made[0].playing, true);
 });
 
+test("stop ends a block audition too, so it cannot play into a take, and cancels one still starting", async () => {
+  const { playback, made, audition } = owner(false);
+  await playback.sync();
+  await playback.audition({ bpm: 120 }, 0, 4);
+  assert.equal(audition.playing, true);
+  playback.stop();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(audition.playing, false);
+  assert.equal(audition.stops, 1);
+  assert.equal(made[0].calls.at(-1), "stop");
+  // the stand-in cannot be half started; the stop is asked for regardless
+  playback.stop();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(audition.stops, 2);
+  assert.equal(audition.playing, false);
+});
+
 test("an edit while no audition plays is not sent; stopping one that is not playing does nothing", async () => {
   const { playback, audition } = owner(false);
   await playback.sync();

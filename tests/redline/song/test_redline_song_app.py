@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 import soundfile as sf
 from redline.cli import main
-from redline.song import model, server
+from redline.song import model, rec, server
 from redline.song.app import AppHost, Gate
 from redline.song.jobs import JobRunner
 from redline.song.server import SongApp, make_server
@@ -248,6 +248,60 @@ def test_sources_list_only_what_exists_and_no_lyric_text(served, root):
     assert "secret line" not in json.dumps(data)
 
 
+def test_a_title_that_is_not_utf8_still_lists_its_seed(served, root):
+    add_text(root, 12, titles={1: "First"})
+    folder = add_text(root, 13)
+    (folder / "title.txt").write_bytes(b"Ab\xffc\n")
+    status, data = api(served, "GET", "/api/songs/sources")
+    assert status == 200
+    assert data["texts"] == [{"seed": 12, "title": "First"}, {"seed": 13, "title": "Ab\ufffdc"}]
+
+
+# names
+
+
+def test_a_name_of_64_characters_is_taken(served, root):
+    add_score(root, 3)
+    name = "n" * 64
+    assert api(served, "POST", "/api/songs", {"name": name, "beat": {"own": 3}}) == (
+        201,
+        {"name": name},
+    )
+    assert model.list_songs() == [name]
+
+
+@pytest.mark.parametrize("name", ["n" * 65, "n" * 300])
+def test_a_name_over_64_characters_is_422_naming_the_limit(served, root, name):
+    add_score(root, 3)
+    status, data = api(served, "POST", "/api/songs", {"name": name, "beat": {"own": 3}})
+    assert status == 422 and "64 characters" in data["error"]
+    assert str(root) not in data["error"]
+    assert model.list_songs() == []
+    status, data = api(served, "POST", "/api/songs/open", {"name": name})
+    assert status == 422 and "64 characters" in data["error"]
+
+
+@pytest.mark.parametrize(
+    ("name", "rule"),
+    [
+        ("a\x01b", "control"),
+        ("a\x7fb", "control"),
+        ("a\x85b", "control"),
+        ("a\u202ab", "direction"),
+        ("a\u202eb", "direction"),
+        ("a\u2066b", "direction"),
+        ("a\u2069b", "direction"),
+    ],
+)
+def test_a_name_with_control_or_direction_characters_is_422_naming_the_rule(
+    served, root, name, rule
+):
+    add_score(root, 3)
+    status, data = api(served, "POST", "/api/songs", {"name": name, "beat": {"own": 3}})
+    assert status == 422 and rule in data["error"]
+    assert model.list_songs() == []
+
+
 # switch
 
 
@@ -284,6 +338,55 @@ def test_opening_a_song_while_a_take_records_is_409_and_the_old_one_stays(served
     assert free("b") and not free("a")
     served.host.rec.is_taking = False
     assert api(served, "POST", "/api/songs/open", {"name": "b"}) == (200, {"active": "b"})
+
+
+@pytest.mark.parametrize("error", ["refused", "desync"])
+def test_a_switch_while_a_stop_that_timed_out_is_pending_is_409_and_the_take_ranks(
+    root, tmp_path, error
+):
+    from redline.record.process import EngineError
+    from redline.record.protocol import EngineDesync
+    from test_redline_song_rec import LATE, Fixture
+
+    add_song(root, "a")
+    add_song(root, "b")
+    fix = Fixture(tmp_path)
+
+    def make_rec(logged, work):
+        return rec.RecOwner(fix.opener, on_take_logged=logged, work=work, tick_s=0.01)
+
+    make_app = functools.partial(
+        SongApp,
+        argv=lambda kind, name, seed, result: [sys.executable, "-c", WRITE_RANK, str(result)],
+        build_studio=fake_studio,
+        assets=lambda: (None, None, str),
+    )
+    host = AppHost(make_rec=make_rec, make_app=make_app, kill_after=0.3, switch_timeout=0.5)
+    try:
+        host.open("a")
+        app = host.active
+        app.rec_command("open", {})
+        assert until(lambda: host.rec.stage() == "ready")
+        assert app.rec_command("toggle", {})[0] == 200
+        fix.engine.stop_errors.append(
+            EngineError("the take did not finish within 10 s: audio?")
+            if error == "refused"
+            else EngineDesync(LATE)
+        )
+        with pytest.raises(server.ApiError):
+            app.rec_command("toggle", {})
+        assert host.rec._ready.session.pending is not None
+        with pytest.raises(server.ApiError) as refused:
+            host.open("b")
+        assert refused.value.payload["code"] == "take_running"
+        assert host.active is app
+        app.rec_command("toggle" if error == "refused" else "open", {})
+        assert until(lambda: host.jobs.state("a").get("rank", {}).get("state") == "done")
+    finally:
+        host.rec.shutdown(10)
+        host.jobs.close(timeout=5)
+        if host.active is not None:
+            host.active.close()
 
 
 def test_opening_waits_for_requests_in_flight_and_gives_up_as_busy(served, root):

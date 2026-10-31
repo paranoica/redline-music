@@ -241,3 +241,14 @@ export function editorTabs(lane: LaneKind, beat: BeatKind): EditorTab[] {
       return ["fx"];
   }
 }
+
+// the editor opens on a lane newly selected; the same lane again leaves it as the user set it
+export function editorOpenAfter(open: boolean, was: LaneKind | null, now: LaneKind): boolean {
+  return now !== was || open;
+}
+
+// what the song's player is built from; an own beat renders to the same file, so `renders` counts
+// the renders the screen waited for
+export function playbackKey(f: Pick<ScreenFacts, "chosen" | "studioReady" | "hasBeatAudio">, beatFile: string | null, renders: number): string {
+  return JSON.stringify([f.chosen, f.studioReady, beatFile, f.hasBeatAudio, renders]);
+}

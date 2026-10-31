@@ -5,6 +5,7 @@ import io
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -527,6 +528,137 @@ def test_mix_is_refused_while_a_separation_runs(daw, root):
     status, data = api(daw, "POST", "/api/jobs/start", {"kind": "mix"})
     assert status == 409 and data["code"] == "busy"
     api(daw, "POST", "/api/jobs/cancel", {"kind": "separate"})
+
+
+def on_keep(app, action):
+    """Run action in a thread of its own when the chain first reads the song to keep variant 0."""
+    original = app.song
+    fired = []
+
+    def song():
+        chain = app._mix
+        in_chain = "_run_mix" in threading.current_thread().name
+        if not fired and in_chain and chain is not None and chain.step == "keep":
+            fired.append(True)
+            side = threading.Thread(target=action, daemon=True)
+            side.start()
+            side.join(0.5)
+        return original()
+
+    app.song = song
+
+
+def test_a_cancel_landing_in_the_keep_step_either_keeps_nothing_or_answers_done(daw, root):
+    choose_take(daw)
+    mark_separated(daw)
+    app = daw.app
+    answers = []
+    on_keep(app, lambda: answers.append(json.loads(app._cancel_mix()[1])["state"]))
+    assert api(daw, "POST", "/api/jobs/start", {"kind": "mix"})[0] == 202
+    assert finished(daw) and until(lambda: answers)
+    final = jobs_of(daw, "mix")["state"]
+    if answers[0] == "running":
+        assert final == "cancelled"
+        assert model.load(NAME).mix["variant"] is None
+        assert not (root / "private" / "songs" / NAME / "mix.json").exists()
+    else:
+        assert answers[0] == final == "done"
+
+
+def test_close_during_the_keep_step_returns_only_after_the_chain_wrote_its_last(daw, root):
+    choose_take(daw)
+    mark_separated(daw)
+    app = daw.app
+    seen = {}
+    settings = root / "work" / "studio" / NAME / "settings.json"
+
+    def close():
+        app.close()
+        seen["rev"] = model.load(NAME).rev
+        seen["settings"] = settings.exists()
+
+    on_keep(app, close)
+    assert api(daw, "POST", "/api/jobs/start", {"kind": "mix"})[0] == 202
+    assert until(lambda: "rev" in seen)
+    assert until(lambda: app._mix.state != "running")
+    time.sleep(0.2)
+    assert model.load(NAME).rev == seen["rev"]
+    assert settings.exists() == seen["settings"]
+
+
+def test_close_while_a_mix_step_runs_ends_the_chain_cancelled_before_it_returns(daw, root):
+    choose_take(daw)
+    daw.plan["separate"] = "sleep"
+    assert api(daw, "POST", "/api/jobs/start", {"kind": "mix"})[0] == 202
+    assert until(lambda: (jobs_of(daw, "mix") or {}).get("pid") is not None)
+    app = daw.app
+    app.close()
+    assert app._mix.state == "cancelled"
+    assert model.load(NAME).mix["variant"] is None
+    assert daw.calls == ["separate"]
+
+
+def test_a_separation_asked_together_with_mix_never_runs_beside_it(daw, root):
+    choose_take(daw)
+    daw.plan["separate"] = "sleep"
+    app = daw.app
+    original = app._start
+    inside, go = threading.Event(), threading.Event()
+
+    def start(kind, seed, *args, **kwargs):
+        if kind == "separate":
+            inside.set()
+            go.wait(5)
+        return original(kind, seed, *args, **kwargs)
+
+    app._start = start
+    answers = {}
+
+    def ask(kind):
+        answers[kind] = api(daw, "POST", "/api/jobs/start", {"kind": kind})
+
+    separate = threading.Thread(target=ask, args=("separate",))
+    separate.start()
+    assert inside.wait(5)
+    mix = threading.Thread(target=ask, args=("mix",))
+    mix.start()
+    mix.join(0.5)
+    go.set()
+    separate.join(10)
+    mix.join(10)
+    try:
+        assert answers["separate"][0] == 202
+        assert answers["mix"][0] == 409 and answers["mix"][1]["code"] == "busy"
+    finally:
+        api(daw, "POST", "/api/jobs/cancel", {"kind": "separate"})
+        if answers["mix"][0] == 202:
+            api(daw, "POST", "/api/jobs/cancel", {"kind": "mix"})
+        assert finished(daw, "separate")
+
+
+def test_layout_saves_from_many_threads_all_succeed_and_one_of_them_is_kept(daw, root):
+    app = daw.app
+    bodies = [{"start_bar": n, "bars_per_line": 1 + n % 2} for n in range(8)]
+    errors = []
+    start = threading.Barrier(len(bodies))
+
+    def save(body):
+        start.wait()
+        for _ in range(100):
+            try:
+                assert app.post_layout(body)[0] == 200
+            except Exception as error:  # noqa: BLE001
+                errors.append(error)
+
+    threads = [threading.Thread(target=save, args=(body,)) for body in bodies]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert errors == []
+    assert api(daw, "GET", "/api/song/layout")[1] in bodies
+    folder = root / "private" / "songs" / NAME
+    assert not [p.name for p in folder.iterdir() if p.name.endswith(".tmp")]
 
 
 # facts

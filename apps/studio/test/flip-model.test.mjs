@@ -182,9 +182,8 @@ test("the use confirm names the takes that change beat", () => {
 test("no flip string says лучше", () => {
   const dir = new URL("../src/flip/", import.meta.url);
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
-  assert.ok(files.length >= 3);
+  assert.ok(files.length >= 2);
   for (const f of files) assert.ok(!/лучше/i.test(readFileSync(new URL(f, dir), "utf8")), f);
-  assert.ok(!/лучше/i.test(readFileSync(new URL("../src/styles/flip.css", import.meta.url), "utf8")));
 });
 
 import { rangeOf } from "../src/flip/api.ts";

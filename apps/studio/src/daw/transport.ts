@@ -13,12 +13,13 @@ export type Transport =
   | { mode: "recording"; step: RecordStep }
   | { mode: "rendering"; then: Pending | null };
 
-// `render`: the newest score is not rendered yet, so the press commits it and waits
+// `render`: the newest score is not rendered yet, so the press commits it and waits; `held`: the
+// recorder holds a take the screen does not show, so the press stops that take
 export type TransportEvent =
   | { type: "play"; render: boolean }
   | { type: "pause" }
   | { type: "stop" }
-  | { type: "record"; render: boolean }
+  | { type: "record"; render: boolean; held?: boolean }
   | { type: "export"; render: boolean }
   | { type: "opened"; calibrate: boolean }
   | { type: "calibrated" }
@@ -28,8 +29,9 @@ export type TransportEvent =
   | { type: "renderDone" }
   | { type: "error"; message: string };
 
-// "commit": save the newest score and render it; "stop": stop playback and go back to the start
-export type Effect = "commit" | "play" | "pause" | "stop" | "open-engine" | "start-record" | "stop-record" | "export";
+// "commit": save the newest score and render it; "stop": stop playback and any block audition and
+// go back to the start; "watch-take": poll the recorder until it holds no take, then show the takes
+export type Effect = "commit" | "play" | "pause" | "stop" | "open-engine" | "start-record" | "stop-record" | "watch-take" | "export";
 
 export interface Step {
   state: Transport;
@@ -45,14 +47,16 @@ const rendering = (then: Pending | null): Transport => ({ mode: "rendering", the
 // what a press does once the beat is rendered
 function go(what: Pending): Step {
   if (what === "play") return to({ mode: "playing" }, "play");
-  if (what === "record") return to(recording("opening"), "open-engine");
+  if (what === "record") return to(recording("opening"), "stop", "open-engine");
   return to(IDLE, "export");
 }
 
 function fromIdle(e: TransportEvent): Step | null {
   switch (e.type) {
-    case "play":
     case "record":
+      if (e.held) return to(recording("stopping"), "stop-record");
+      return e.render ? to(rendering(e.type), "commit") : go(e.type);
+    case "play":
     case "export":
       return e.render ? to(rendering(e.type), "commit") : go(e.type);
     case "stop":
@@ -72,7 +76,8 @@ function fromPlaying(e: TransportEvent): Step | null {
       return to(IDLE, "stop");
     // the engine records over the beat on its own, so the page's playback stops first
     case "record":
-      return e.render ? to(rendering("record"), "stop", "commit") : to(recording("opening"), "stop", "open-engine");
+      if (e.held) return to(recording("stopping"), "stop", "stop-record");
+      return e.render ? to(rendering("record"), "stop", "commit") : go("record");
     case "export":
       return e.render ? to(rendering("export"), "stop", "commit") : to({ mode: "playing" }, "export");
     default:
@@ -116,7 +121,10 @@ function fromRecording(step: RecordStep, e: TransportEvent): Step | null {
 export function step(state: Transport, e: TransportEvent): Step {
   if (e.type === "error") {
     const failed: Transport = { mode: "idle", error: e.message };
-    return state.mode === "playing" ? to(failed, "stop") : to(failed);
+    if (state.mode === "playing") return to(failed, "stop");
+    // from counting on, a take may be running or finishing in the engine
+    if (state.mode === "recording" && state.step !== "opening" && state.step !== "calibrate") return to(failed, "watch-take");
+    return to(failed);
   }
   let next: Step | null;
   if (state.mode === "idle") next = fromIdle(e);

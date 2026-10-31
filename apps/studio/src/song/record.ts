@@ -1,6 +1,7 @@
 // The recording engine's snapshot as a model: its phase, the opening stages, the meter.
 
-import type { RecSnapshot } from "./api.ts";
+import { takeLabel } from "../daw/words.ts";
+import type { RecReply, RecSnapshot } from "./api.ts";
 
 const decimal = (value: number, digits: number): string => value.toFixed(digits).replace(".", ",").replace("-", "−");
 
@@ -33,6 +34,36 @@ export function recPhase(s: RecSnapshot | null): RecPhase {
   if (s.stage === "closed") return "closed";
   if (s.stage === "calibrating") return "calibrating";
   return s.stage === "ready" ? "ready" : "opening";
+}
+
+const OPEN_PHASES: readonly RecPhase[] = ["opening", "calibrating", "ready", "live", "stopping", "out_of_sync"];
+
+// `busy`: the screen waits on the recorder (a take, a waiter, a take being watched)
+export function recPollMs(phase: RecPhase, busy: boolean): number {
+  return busy || OPEN_PHASES.includes(phase) ? 50 : 1000;
+}
+
+// What a toggle sent to start a take answered: null when the take started, else why it did not.
+// A take whose stop timed out is collected by the next toggle, so that answer is no new take.
+export function startRefusal(reply: RecReply): string | null {
+  const v = reply.values ?? {};
+  const take = typeof v["take"] === "string" ? ` (${takeLabel(`${v["take"]}.wav`)})` : "";
+  switch (reply.code) {
+    case "recording":
+      return null;
+    case "quantum_moved":
+      return `Дубль не начался: буфер звуковой карты сменился (было ${String(v["was"])}, стало ${String(v["now"])} кадров). Закрой движок и открой снова.`;
+    case "kept_late":
+      return `Дубль не начался: движок дописал прошлый дубль${take}, он сохранён. Нажми запись ещё раз.`;
+    case "finished_late_discarded":
+      return `Дубль не начался: движок дописал прошлый дубль${take}, он сброшен. Нажми запись ещё раз.`;
+    case "kept":
+      return `Дубль не начался: движок закончил дубль, который уже шёл${take}, он сохранён.`;
+    case "discarded":
+      return `Дубль не начался: движок сбросил дубль, который уже шёл${take}.`;
+    default:
+      return `Дубль не начался: ответ движка ${reply.code}.`;
+  }
 }
 
 // `failedAt` is the stage the engine was in before it failed, when the page saw it

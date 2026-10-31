@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { dragTarget, glidePairs, pitchAt, rollHit, stepAt } from "../src/daw/roll.ts";
+import { dragTarget, glidePairs, pitchAt, rollHit, rollScrollTop, stepAt } from "../src/daw/roll.ts";
 
 // a 2-bar pattern shown over a 4-bar block: 32 pattern steps, 64 view steps, 10 px a step,
 // 8 px a semitone, MIDI 40 on the top row down to 28
@@ -98,4 +98,23 @@ test("glides are found whatever order the notes come in, and none in an empty ro
   assert.deepEqual(glidePairs([]), []);
   // two notes starting together are a chord, not a glide
   assert.deepEqual(glidePairs([note(0, 0, 4, 36), note(1, 0, 4, 40)]), []);
+});
+
+test("the roll opens scrolled so the block's notes are in view, the lowest included", () => {
+  // 13 rows of 8 px: 104 px of roll in a 40 px view, scrolled 0..64
+  const view = 40;
+  // MIDI 30..32 is rows 8..10, 64..88 px: centred at 76
+  assert.equal(rollScrollTop(L, [30, 32, 31], view), 56);
+  // the bottom row alone: as far down as the roll goes, not left under the edge
+  assert.equal(rollScrollTop(L, [28], view), 64);
+  const top = rollScrollTop(L, [29], view);
+  assert.ok((40 - 29) * 8 >= top && (40 - 29 + 1) * 8 <= top + view, "MIDI 29 is in view");
+  // the top row alone: the roll's start
+  assert.equal(rollScrollTop(L, [40], view), 0);
+  // notes wider than the view: the lowest stay in view at its bottom
+  assert.equal(rollScrollTop(L, [30, 40], 40), 48);
+  // a view taller than the roll does not scroll
+  assert.equal(rollScrollTop(L, [28, 40], 200), 0);
+  // no notes: the middle of the roll
+  assert.equal(rollScrollTop(L, [], view), 32);
 });

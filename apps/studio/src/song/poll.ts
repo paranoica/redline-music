@@ -18,12 +18,13 @@ export interface PollOptions {
 }
 
 export class Poller {
-  readonly #ms: number;
+  #ms: number;
   readonly #tick: () => Promise<void> | void;
   readonly #clock: PollClock;
   #wanted = false;
   #visible = true;
   #timer: unknown = null;
+  #armedMs = 0;
   #inFlight = false;
   #closed = false;
 
@@ -48,6 +49,16 @@ export class Poller {
     this.#sync();
   }
 
+  // a shorter interval replaces the wait already set; a longer one starts after it
+  setMs(ms: number): void {
+    if (ms === this.#ms) return;
+    this.#ms = ms;
+    if (this.#timer !== null && ms < this.#armedMs) {
+      this.#clock.clearTimeout(this.#timer);
+      this.#arm(ms);
+    }
+  }
+
   // the tab is visible
   setVisible(on: boolean): void {
     this.#visible = on;
@@ -69,6 +80,7 @@ export class Poller {
   }
 
   #arm(ms: number): void {
+    this.#armedMs = ms;
     this.#timer = this.#clock.setTimeout(() => {
       this.#timer = null;
       void this.#run();

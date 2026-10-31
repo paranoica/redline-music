@@ -12,7 +12,7 @@ import { acceptSong, ApiError, createSongApi } from "../song/api.ts";
 import type { Job, LayoutReply, Ranking, RecSnapshot, SongApi, SongChange, SongReply, StartKind } from "../song/api.ts";
 import { finishedKinds, JOB_NAMES, jobActive, refusalText } from "../song/jobs.ts";
 import { Poller } from "../song/poll.ts";
-import { CALIBRATION, meterLevel, PeakHold, recPhase, stageRows, type OpenStage } from "../song/record.ts";
+import { CALIBRATION, meterLevel, PeakHold, recPhase, recPollMs, stageRows, startRefusal, type OpenStage } from "../song/record.ts";
 import { TakePlayer } from "../song/takes.ts";
 import { parseLyric, type LyricPart } from "../song/text.ts";
 import { dismissable, h, icon } from "../ui/dom.ts";
@@ -25,7 +25,7 @@ import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } 
 import { Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
 import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, type Effect, type Transport, type TransportEvent } from "./transport.ts";
-import { capTakes, chipText, dawKey, editorTabs, factsOf, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
+import { capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
 
@@ -120,7 +120,12 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   const hold = new PeakHold();
   let history: History<Snapshot> | null = null;
   let playback: Playback | null = null;
-  let playbackKey = "";
+  let playbackAt = "";
+  // the newest player's beat load, for a commit that waits for the new render to be heard
+  let playbackLoad: Promise<void> = Promise.resolve();
+  // a take the transport lost track of (a failed start or stop): the recorder is polled until it
+  // holds none, then the takes are read again
+  let watchTake = false;
   let ready = false;
   let jobsKey = "";
   let songSeq = 0;
@@ -186,6 +191,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     startJob: (kind) => startJob(kind),
     change: (set) => change(set),
     reload: () => reload(),
+    beatRendered: async () => {
+      await reload();
+      await playbackLoad;
+    },
     layout: () => lyricLayout() ?? DEFAULT_LAYOUT,
     nudge: (to) => nudge(to),
     scoreChanged: (next) => {
@@ -257,9 +266,9 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   // ---------- playback ----------
   function syncPlayback(): void {
-    const key = JSON.stringify([facts.chosen, facts.studioReady, reply.stations.beat.file, facts.hasBeatAudio]);
-    if (key === playbackKey && playback) return;
-    playbackKey = key;
+    const key = playbackKey(facts, reply.stations.beat.file, bottom.renders);
+    if (key === playbackAt && playback) return;
+    playbackAt = key;
     const old = playback;
     const chosen = facts.chosen;
     const studioReady = facts.studioReady;
@@ -274,9 +283,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     next.setLoop(currentLoop());
     if (old) {
       if (transport.mode === "playing") dispatch({ type: "stop" });
+      // the old player's audition goes with it
+      bottom.auditionOff();
       void old.dispose();
     }
-    if (facts.hasBeatAudio) next.sync().catch((error: unknown) => say(`Звук не загрузился: ${message(error)}`));
+    playbackLoad = facts.hasBeatAudio ? next.sync().catch((error: unknown) => say(`Звук не загрузился: ${message(error)}`)) : Promise.resolve();
   }
 
   function currentLoop(): Loop | null {
@@ -327,7 +338,9 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       case "pause":
         playback?.pause();
         return;
+      // the playback's stop also ends a block audition
       case "stop":
+        bottom.auditionOff();
         playback?.stop();
         return;
       case "commit":
@@ -341,6 +354,9 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         return;
       case "stop-record":
         void stopRecord();
+        return;
+      case "watch-take":
+        watchTake = true;
         return;
       case "export":
         void runExport();
@@ -371,8 +387,13 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       say(BLOCKER_TEXT[blocked[0] as keyof typeof BLOCKER_TEXT]);
       return;
     }
+    if (rec?.stopping) {
+      say("Движок дописывает дубль, подожди.");
+      return;
+    }
     takePlayer.stop();
-    dispatch({ type: "record", render: needsRender() });
+    heldStop = rec?.recording === true;
+    dispatch({ type: "record", render: needsRender(), held: heldStop });
   }
 
   function seekTo(seconds: number): void {
@@ -493,12 +514,12 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   // ---------- recording ----------
-  const recPoller = new Poller({ ms: 300, tick: async () => applySnapshot(await api.recState()) });
+  const recPoller = new Poller({ ms: 1000, tick: async () => applySnapshot(await api.recState()) });
   scope.add(() => recPoller.dispose());
 
   function syncRecPoll(): void {
-    const phase = recPhase(rec);
-    recPoller.setWanted(transport.mode === "recording" || waiters.length > 0 || phase === "opening" || phase === "calibrating" || phase === "live" || phase === "stopping");
+    recPoller.setMs(recPollMs(recPhase(rec), transport.mode === "recording" || waiters.length > 0 || watchTake));
+    recPoller.setWanted(ready);
   }
 
   function applySnapshot(s: RecSnapshot | null): void {
@@ -511,6 +532,12 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         waiters.splice(waiters.indexOf(w), 1);
         w.done(s);
       }
+    }
+    if (watchTake && s && !s.recording && !s.stopping) {
+      watchTake = false;
+      void reload()
+        .then(() => refreshJobs())
+        .catch(() => {});
     }
     syncRecPoll();
     paintStrip();
@@ -561,9 +588,26 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     }
   }
 
+  // the start's toggle while it is out: a stop pressed meanwhile waits for it, and sends no
+  // toggle of its own when no take started
+  let starting: Promise<boolean> | null = null;
+  // the stop is for a take the screen did not start, judged from a snapshot that may be old
+  let heldStop = false;
+
   async function startRecord(): Promise<void> {
+    const toggle = api.recToggle();
+    starting = toggle.then(
+      (r) => startRefusal(r) === null,
+      () => false,
+    );
     try {
-      await api.recToggle();
+      // anything but a started take (a late take collected, a moved quantum) is no take: the
+      // screen must not wait for one, nor send a second toggle that would start one unseen
+      const refused = startRefusal(await toggle);
+      if (refused !== null) {
+        dispatch({ type: "error", message: refused });
+        return;
+      }
       const s = await waitRec((x) => x.recording || x.stage === "failed" || x.out_of_sync);
       if (!s || transport.mode !== "recording") return;
       if (!s.recording) {
@@ -573,11 +617,25 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       dispatch({ type: "recordStarted" });
     } catch (error) {
       dispatch({ type: "error", message: recRefusal(error) });
+    } finally {
+      starting = null;
     }
   }
 
   async function stopRecord(): Promise<void> {
     try {
+      let started = starting ? await starting : true;
+      if (heldStop) {
+        heldStop = false;
+        // a toggle with no take in the engine would start one
+        const s = await api.recState();
+        applySnapshot(s);
+        started = s.recording && !s.stopping;
+      }
+      if (!started) {
+        dispatch({ type: "recordStopped" });
+        return;
+      }
       await api.recToggle();
       await waitRec((x) => (!x.recording && !x.stopping) || x.out_of_sync);
       dispatch({ type: "recordStopped" });
@@ -1132,6 +1190,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   function select(kind: LaneKind): void {
     if (selected !== null && BEAT_LANES.includes(selected) && !BEAT_LANES.includes(kind)) leaveBeat();
+    editorOpen = editorOpenAfter(editorOpen, selected, kind);
     selected = kind;
     const tabs = editorTabs(kind, facts.beatKind);
     if (!tab || !tabs.includes(tab)) tab = tabs[0] ?? null;
@@ -1465,6 +1524,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   history = new History<Snapshot>(snapshot());
   // the engine may already be recording from before the page loaded
   if ((rec as RecSnapshot | null)?.recording) transport = { mode: "recording", step: "recording" };
+  syncRecPoll();
   jobsPoller.setWanted(jobs.some(jobActive));
   syncPlayback();
   render();

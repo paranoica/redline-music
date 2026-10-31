@@ -116,3 +116,49 @@ test("a tick finishing after the poll stopped schedules nothing; a failing tick 
   bad.dispose();
   assert.equal(clock.timers.size, 0);
 });
+
+test("the interval can change: the next wait uses it, and a shorter one replaces a longer wait", async () => {
+  const waits = [];
+  let next = 1;
+  const timers = new Map();
+  const clock = {
+    setTimeout(fn, ms) {
+      const id = next++;
+      timers.set(id, fn);
+      waits.push(ms);
+      return id;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+  };
+  const fire = () => {
+    const [id, fn] = [...timers][0];
+    timers.delete(id);
+    fn();
+  };
+  let ticks = 0;
+  const p = new Poller({ ms: 1000, tick: () => void ticks++, clock });
+  p.setWanted(true);
+  fire();
+  await settle();
+  assert.equal(ticks, 1);
+  assert.equal(waits.at(-1), 1000);
+  p.setMs(50);
+  assert.equal(timers.size, 1);
+  assert.equal(waits.at(-1), 50);
+  fire();
+  await settle();
+  assert.equal(waits.at(-1), 50);
+  // a longer interval waits for the timer already set
+  p.setMs(1000);
+  assert.equal(timers.size, 1);
+  assert.equal(waits.at(-1), 50);
+  fire();
+  await settle();
+  assert.equal(waits.at(-1), 1000);
+  // the same interval again changes nothing
+  const set = waits.length;
+  p.setMs(1000);
+  assert.equal(waits.length, set);
+});

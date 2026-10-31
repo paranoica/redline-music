@@ -175,7 +175,11 @@ def written_texts(root: Path) -> list[dict[str, Any]]:
             continue
         version = max(have)
         title_file = path / ("title.txt" if version == 1 else f"title-{version}.txt")
-        title = title_file.read_text(encoding="utf-8").strip() if title_file.is_file() else ""
+        title = (
+            title_file.read_text(encoding="utf-8", errors="replace").strip()
+            if title_file.is_file()
+            else ""
+        )
         texts.append({"seed": int(path.name), "title": title})
     return sorted(texts, key=lambda t: t["seed"])
 

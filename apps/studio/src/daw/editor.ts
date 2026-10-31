@@ -4,26 +4,23 @@
 // selected block live through the beat engine.
 
 import type { Api as BeatApi } from "../beat/api.ts";
-import { Refused } from "../beat/api.ts";
-import { ModelError, serialize, type Score } from "../beat/model.ts";
+import { ModelError, type Score } from "../beat/model.ts";
 import { History } from "../core/history.ts";
 import { apiPath, apiRoot } from "../core/mount.ts";
 import type { FlipApi, FlipState } from "../flip/api.ts";
 import type { Job, SongApi, SongChange, SongReply, StartKind } from "../song/api.ts";
 import { h, icon } from "../ui/dom.ts";
 import type { Clip } from "./clips.ts";
+import { BeatDraft } from "./draft.ts";
 import { DrumsView, type BeatEditing, type Block } from "./drums.ts";
 import { FxPane, type StudioLike } from "./fx.ts";
 import type { LyricLayout } from "./lyrics.ts";
 import type { Playback } from "./player.ts";
-import { SaveQueue, type SaveState } from "./queue.ts";
 import { RollView } from "./roll.ts";
 import { chooseShare, shareGate, type ShareChoice } from "./share.ts";
 import { TextTab } from "./text-tab.ts";
 import type { EditorTab, LaneKind, ScreenFacts } from "./view.ts";
 
-const DRAFT_MS = 600;
-const RENDER_POLL_MS = 500;
 const PLAY = "M8 5.5v13L18 12z";
 const STOP = "M7 7h10v10H7z";
 
@@ -51,6 +48,8 @@ export interface EditorHost {
   startJob(kind: StartKind): Promise<void>;
   change(set: SongChange): Promise<boolean>;
   reload(): Promise<void>;
+  // the song reloads after a render and the player has the new beat
+  beatRendered(): Promise<void>;
   layout(): LyricLayout;
   nudge(to: Partial<LyricLayout>): void;
   // the edited score, for the lanes
@@ -77,20 +76,11 @@ export class Editor {
   readonly #drums: DrumsView;
   readonly #fx: FxPane;
   readonly #text: TextTab;
-  readonly #queue: SaveQueue<{ score: Score; base: string }>;
-  #seed: number | null = null;
-  #score: Score | null = null;
-  #base: string | null = null;
-  // the newest saved score as text, to tell an edit from it
-  #saved = "";
-  #loading: Promise<void> | null = null;
+  readonly #draft: BeatDraft;
   #history: History<Score> | null = null;
   readonly #answered = new Set<string>();
   #ask: Ask | null = null;
   #block: number | null = null;
-  #committing: Promise<void> | null = null;
-  #rendering = false;
-  #draftState: SaveState = "idle";
   #auditioning = false;
   #lane: LaneKind | null = null;
   #tab: EditorTab | null = null;
@@ -101,7 +91,7 @@ export class Editor {
   constructor(host: EditorHost) {
     this.#host = host;
     const editing: BeatEditing = {
-      score: () => this.#score,
+      score: () => this.#draft.score,
       block: () => this.block(),
       edit: (section, pattern, change) => this.#edit(section, pattern, change),
     };
@@ -133,14 +123,17 @@ export class Editor {
       nudge: (to) => host.nudge(to),
       say: (text) => host.say(text),
     });
-    this.#queue = new SaveQueue({
-      delay: DRAFT_MS,
-      send: ({ score, base }) => host.beatApi.saveDraft(score, base).then(() => undefined),
-      onState: (state, error) => {
-        this.#draftState = state;
-        if (state === "failed") host.say(`Черновик бита не сохранился: ${refusal(error)}`);
-        host.beatState();
+    this.#draft = new BeatDraft({
+      api: host.beatApi,
+      facts: () => host.facts(),
+      loaded: (score, edited) => {
+        this.#history = new History<Score>(score);
+        if (edited) host.scoreChanged(score);
       },
+      loadEnded: () => host.repaint(),
+      reload: () => host.beatRendered(),
+      changed: () => host.beatState(),
+      say: (text) => host.say(text),
     });
     this.audition = h("button", { class: "eplay", type: "button", title: "Послушать кусок по кругу, с правками", "aria-pressed": "false", hidden: true });
     this.audition.append(icon(PLAY, "eplay__icon"));
@@ -152,23 +145,27 @@ export class Editor {
 
   // an own-beat edit the server's newest score does not have, saved or not
   get beatDirty(): boolean {
-    return this.#score !== null && (serialize(this.#score) !== this.#saved || this.#queue.pending);
+    return this.#draft.dirty;
   }
 
   // the score as edited, null until it is loaded
   get score(): Score | null {
-    return this.#score;
+    return this.#draft.score;
   }
 
   get rendering(): boolean {
-    return this.#rendering;
+    return this.#draft.rendering;
+  }
+
+  get renders(): number {
+    return this.#draft.renders;
   }
 
   // the words on the beat lane while it is being rebuilt, null when it is not
   beatLine(): string | null {
-    if (this.#rendering) return "бит обновляется…";
+    if (this.#draft.rendering) return "бит обновляется…";
     if (this.#flipBusy) return this.#flipBusy;
-    if (this.#draftState === "failed") return "черновик не сохранён";
+    if (this.#draft.saveState === "failed") return "черновик не сохранён";
     return null;
   }
 
@@ -201,7 +198,7 @@ export class Editor {
     this.#tab = tab;
     this.#syncSeed();
     const own = this.#host.facts().beatKind === "own" && BEAT_LANES.includes(lane);
-    if (own && !this.#score && !this.#loading) void this.#load();
+    if (own && !this.#draft.score) void this.#draft.load();
     const els = tabs.map((t) => {
       const pane = h("div", { class: `epane${t === tab ? " on" : ""}`, "data-pane": t, role: "tabpanel" });
       if (t === tab && open) pane.append(...this.#content(t, lane));
@@ -215,7 +212,7 @@ export class Editor {
   undo(redo: boolean): boolean {
     if (this.#tab === "roll" || this.#tab === "drums") {
       const past = this.#history;
-      if (!past || !this.#score) return false;
+      if (!past || !this.#draft.score) return false;
       const to = redo ? past.redo() : past.undo();
       if (!to) return true;
       this.#apply(to, false);
@@ -232,14 +229,7 @@ export class Editor {
   // Saves the edited score as the next numbered one and renders it, then the song reloads.
   // `wait` false: the render is started and left to the server.
   commitBeat(wait = true): Promise<void> {
-    if (this.#committing) return this.#committing;
-    const run = this.#commit(wait).finally(() => {
-      this.#committing = null;
-      this.#rendering = false;
-      if (!this.#closed) this.#host.beatState();
-    });
-    this.#committing = run;
-    return run;
+    return this.#draft.commit(wait);
   }
 
   async dispose(): Promise<void> {
@@ -248,7 +238,7 @@ export class Editor {
     await this.#fx.flush().catch(() => {});
     if (this.beatDirty) await this.commitBeat(false).catch(() => {});
     this.#closed = true;
-    this.#queue.dispose();
+    this.#draft.dispose();
     this.#fx.dispose();
     if (this.#auditioning) await this.#host.playback()?.stopAudition();
   }
@@ -258,44 +248,17 @@ export class Editor {
   #syncSeed(): void {
     const b = this.#host.reply().stations.beat;
     const seed = b.kind === "own" && typeof b.seed === "number" ? b.seed : null;
-    if (seed === this.#seed) return;
-    this.#seed = seed;
-    this.#score = null;
-    this.#base = null;
-    this.#saved = "";
+    if (!this.#draft.reset(seed)) return;
     this.#history = null;
     this.#answered.clear();
     this.#ask = null;
     this.#block = null;
   }
 
-  #load(): Promise<void> {
-    if (this.#loading) return this.#loading;
-    const seed = this.#seed;
-    this.#loading = (async () => {
-      try {
-        const [draft, session] = await Promise.all([this.#host.beatApi.draft(), this.#host.beatApi.session()]);
-        if (this.#closed || seed !== this.#seed) return;
-        this.#score = draft.score;
-        this.#base = draft.base;
-        this.#saved = session.score_file === draft.base ? serialize(session.score) : "";
-        this.#history = new History<Score>(draft.score);
-        if (serialize(draft.score) !== this.#saved) this.#host.scoreChanged(draft.score);
-        this.#host.beatState();
-      } catch (error) {
-        this.#host.say(`Партитура не загрузилась: ${refusal(error)}`);
-      } finally {
-        this.#loading = null;
-        if (!this.#closed) this.#host.repaint();
-      }
-    })();
-    return this.#loading;
-  }
-
   // ---------- edits ----------
 
   #edit(section: number, pattern: string, change: (score: Score, pattern: string) => Score): void {
-    const score = this.#score;
+    const score = this.#draft.score;
     if (!score || this.#ask) return;
     const gate = shareGate(score, section, pattern, this.#answered);
     if (gate.kind === "ask") {
@@ -309,7 +272,7 @@ export class Editor {
   #answer(choice: ShareChoice | null): void {
     const ask = this.#ask;
     this.#ask = null;
-    const score = this.#score;
+    const score = this.#draft.score;
     if (!ask || !score || choice === null) {
       this.#host.repaint();
       return;
@@ -334,73 +297,23 @@ export class Editor {
   }
 
   #apply(next: Score, push: boolean): void {
-    this.#score = next;
+    this.#draft.apply(next);
     if (push) this.#history?.push(next);
-    if (this.#base) this.#queue.push({ score: next, base: this.#base });
     this.#host.playback()?.updateAudition(next);
     this.#host.scoreChanged(next);
     this.#host.beatState();
   }
 
-  // ---------- commit ----------
-
-  async #commit(wait: boolean): Promise<void> {
-    const facts = this.#host.facts();
-    if (facts.beatKind !== "own") return;
-    if (!this.#score) await this.#load();
-    const score = this.#score;
-    let base = this.#base;
-    if (!score || !base) {
-      if (!facts.beatDirty && facts.hasBeatAudio) return;
-      throw new Error("партитура не загрузилась");
-    }
-    if (!(await this.#queue.flush())) throw new Error("черновик не сохранился");
-    const api = this.#host.beatApi;
-    const text = serialize(score);
-    if (text !== this.#saved) {
-      try {
-        base = (await api.save(score, base)).file;
-      } catch (error) {
-        throw new Error(`партитура не сохранилась: ${refusal(error)}`);
-      }
-      this.#base = base;
-      this.#saved = text;
-    } else if (!facts.beatDirty && facts.hasBeatAudio) return;
-    this.#rendering = true;
-    this.#host.beatState();
-    let state = await this.#startRender(base);
-    if (!wait) return;
-    while (state.state !== "done" || state.score_file !== base) {
-      if (state.state === "failed") throw new Error(state.error ?? "рендер не прошёл");
-      if (state.state === "idle") state = await this.#startRender(base);
-      await new Promise((r) => setTimeout(r, RENDER_POLL_MS));
-      if (this.#closed) return;
-      state = await api.renderStatus();
-      if (state.state === "done" && state.score_file !== base) state = await this.#startRender(base);
-    }
-    this.#rendering = false;
-    await this.#host.reload();
-  }
-
-  async #startRender(file: string): Promise<{ state: string; score_file: string | null; error: string | null }> {
-    try {
-      return await this.#host.beatApi.render(file);
-    } catch (error) {
-      // a render already running: wait for it, then ours
-      if (error instanceof Refused && error.status === 409) return { state: "running", score_file: null, error: null };
-      throw error;
-    }
-  }
-
   // the page goes away: the newest draft goes out with the request kept alive
   #leaveNow(): void {
-    if (!this.#queue.pending || !this.#score || !this.#base) return;
+    const unsent = this.#draft.unsent();
+    if (!unsent) return;
     const url = apiPath(apiRoot(this.#host.base, "/api/beat"), "/draft");
     void fetch(url, {
       method: "POST",
       keepalive: true,
       headers: { "X-Token": this.#host.token, "Content-Type": "application/json" },
-      body: JSON.stringify({ score: this.#score, base: this.#base }),
+      body: JSON.stringify(unsent),
     }).catch(() => {});
   }
 
@@ -442,7 +355,7 @@ export class Editor {
 
   #paintAudition(): void {
     const f = this.#host.facts();
-    const show = f.beatKind === "own" && this.#lane !== null && BEAT_LANES.includes(this.#lane) && this.#score !== null;
+    const show = f.beatKind === "own" && this.#lane !== null && BEAT_LANES.includes(this.#lane) && this.#draft.score !== null;
     this.audition.hidden = !show;
     this.audition.setAttribute("aria-pressed", String(this.#auditioning));
     this.audition.replaceChildren(icon(this.#auditioning ? STOP : PLAY, "eplay__icon"));
@@ -463,7 +376,7 @@ export class Editor {
 
   async #startAudition(): Promise<void> {
     const pb = this.#host.playback();
-    const score = this.#score;
+    const score = this.#draft.score;
     const block = this.block();
     if (!pb || !score || !block) return;
     this.#host.stopSong();
@@ -477,9 +390,4 @@ export class Editor {
       this.#host.say(`Кусок не играет: ${message(error)}`);
     }
   }
-}
-
-function refusal(error: unknown): string {
-  if (error instanceof Refused && error.errors.length) return error.errors.slice(0, 3).join("; ");
-  return message(error);
 }

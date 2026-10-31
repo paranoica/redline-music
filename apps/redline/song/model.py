@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,9 @@ FORMAT = 1
 ALLOWED = ("input", "private", "work", "output")
 ROOT = Path(__file__).resolve().parents[3]
 TAKE_FILE = re.compile(r"take-\d+\.wav", re.IGNORECASE)
+MAX_NAME = 64
+MAX_NAME_BYTES = 255
+BIDI_CONTROLS = frozenset(map(chr, (*range(0x202A, 0x202F), *range(0x2066, 0x206A))))
 
 
 class SongError(ValueError):
@@ -39,10 +43,19 @@ def check_name(name: object) -> str:
         or name in (".", "..")
         or "/" in name
         or "\\" in name
-        or any(ord(ch) < 32 for ch in name)
         or name.startswith(".")
     ):
         raise SongError(f"name: {name!r} is not a folder name")
+    if len(name) > MAX_NAME:
+        raise SongError(f"name: at most {MAX_NAME} characters, not {len(name)}")
+    if any(unicodedata.category(ch) == "Cs" for ch in name):
+        raise SongError(f"name: {name!r} has a lone surrogate")
+    if len(name.encode()) > MAX_NAME_BYTES:
+        raise SongError(f"name: at most {MAX_NAME_BYTES} bytes in UTF-8, a folder name's limit")
+    if any(unicodedata.category(ch) == "Cc" for ch in name):
+        raise SongError(f"name: {name!r} has control characters")
+    if any(ch in BIDI_CONTROLS for ch in name):
+        raise SongError(f"name: {name!r} has text direction characters (U+202A-E, U+2066-9)")
     return name
 
 

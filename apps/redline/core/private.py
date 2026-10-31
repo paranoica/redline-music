@@ -1,17 +1,23 @@
 """Files only the owner may read: scores, renders and reports of their own music."""
 
 import os
+import tempfile
 from pathlib import Path
 
 
 def write_private(path: Path, text: str) -> None:
-    """Write text readable by the owner only, replacing the file whatever its old mode."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.unlink(missing_ok=True)
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    """Write text readable by the owner only, replacing the file whatever its old mode.
+
+    Each write has a temporary file of its own, so writers of the same file never collide;
+    the last replace wins and a reader sees one whole text.
+    """
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp = Path(name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(text)
+            out.flush()
+            os.fsync(out.fileno())
         tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)

@@ -47,6 +47,35 @@ def test_round_trip_keeps_every_field():
     assert song.rev == 4
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["n" * 64, "ж" * 64, "\U0001f3b5" * 63, "трек", "a\u2029b", "a\u202fb", "a\u2065b", "a\u206ab"],
+)
+def test_a_name_up_to_64_characters_and_next_to_the_refused_ones_is_taken(name):
+    assert model.check_name(name) == name
+
+
+@pytest.mark.parametrize(
+    ("name", "rule"),
+    [
+        ("n" * 65, "64 characters"),
+        ("\U0001f3b5" * 64, "255 bytes"),
+        ("a\ud800b", "surrogate"),
+        ("a\x00b", "control"),
+        ("a\x1fb", "control"),
+        ("a\x7fb", "control"),
+        ("a\x9fb", "control"),
+        *(
+            (f"a{chr(code)}b", "direction")
+            for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))
+        ),
+    ],
+)
+def test_a_name_too_long_or_with_control_or_direction_characters_is_refused(name, rule):
+    with pytest.raises(model.SongError, match=rule):
+        model.check_name(name)
+
+
 def test_new_song_defaults_to_the_takes_folder_of_its_name():
     song = sample("night")
     assert song.voice == {"takes": "input/takes/night", "chosen": None}

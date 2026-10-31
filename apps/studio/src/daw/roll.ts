@@ -90,6 +90,21 @@ export function rollRange(midis: readonly number[]): { lo: number; hi: number } 
   return { lo: Math.max(0, lo), hi: Math.min(127, hi) };
 }
 
+// The scroll that brings the notes into a view `viewPx` tall: their span centred, or, when it is
+// taller than the view, its lowest notes at the view's bottom.
+export function rollScrollTop(l: Pick<RollLayout, "rowPx" | "hi" | "lo">, midis: readonly number[], viewPx: number): number {
+  const height = (l.hi - l.lo + 1) * l.rowPx;
+  const most = Math.max(0, height - viewPx);
+  let top: number;
+  if (!midis.length) top = height / 2 - viewPx / 2;
+  else {
+    const spanTop = (l.hi - Math.max(...midis)) * l.rowPx;
+    const spanBottom = (l.hi - Math.min(...midis) + 1) * l.rowPx;
+    top = spanBottom - spanTop <= viewPx ? (spanTop + spanBottom) / 2 - viewPx / 2 : spanBottom - viewPx;
+  }
+  return Math.round(Math.min(most, Math.max(0, top)));
+}
+
 // ---------- the view ----------
 
 const STEP_PX = 18;
@@ -97,6 +112,8 @@ const ROW_PX = 14;
 const MAX_VIEW_BARS = 16;
 const NEW_LEN = 2;
 const SVG = "http://www.w3.org/2000/svg";
+// frames to wait for the pane to be laid out before the first scroll
+const SCROLL_TRIES = 10;
 
 export class RollView {
   readonly root: HTMLElement;
@@ -107,6 +124,7 @@ export class RollView {
   #where: { section: number; pattern: string; sound: string } | null = null;
   #blockKey = "";
   #dragging = false;
+  #scrollSeq = 0;
 
   constructor(host: BeatEditing) {
     this.#host = host;
@@ -222,11 +240,24 @@ export class RollView {
       this.#scroller.scrollLeft = keep.left;
       this.#scroller.scrollTop = keep.top;
     } else {
-      // the notes in view: the middle of their range
-      const mid = notes.length ? (Math.min(...notes.map((n) => n.midi)) + Math.max(...notes.map((n) => n.midi))) / 2 : (hi + lo) / 2;
-      this.#scroller.scrollTop = Math.max(0, (hi - mid) * ROW_PX - 100);
       this.#scroller.scrollLeft = 0;
+      this.#scrollTo(l, notes.map((n) => n.midi));
     }
+  }
+
+  // the pane is drawn before the editor puts it on the page, where it has no height to scroll yet
+  #scrollTo(l: RollLayout, midis: number[], tries = SCROLL_TRIES): void {
+    const seq = ++this.#scrollSeq;
+    const run = (left: number): void => {
+      if (seq !== this.#scrollSeq) return;
+      const view = this.#scroller.clientHeight;
+      if ((!this.#scroller.isConnected || view <= 0) && left > 0) {
+        requestAnimationFrame(() => run(left - 1));
+        return;
+      }
+      this.#scroller.scrollTop = rollScrollTop(l, midis, view);
+    };
+    run(tries);
   }
 
   #press(e: PointerEvent, area: HTMLElement, l: RollLayout, notes: NoteView[], row: { pattern: string; sound: string }): void {

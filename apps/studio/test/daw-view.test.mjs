@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { beatKindOf, capTakes, chipText, factsOf, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
+import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, playbackKey, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
 
 const stations = (over = {}) => ({
   beat: { kind: "file", file: "input/beats/b.mp3", bpm: 120 },
@@ -264,4 +264,27 @@ test("the editor shows only the tabs of the selected lane", () => {
   assert.deepEqual(editorTabs("voice", "file"), ["fx"]);
   assert.deepEqual(editorTabs("takes", "own"), ["fx"]);
   assert.deepEqual(editorTabs("text", "own"), ["text"]);
+});
+
+test("an own beat renders to the same file: a new render alone makes the player load the beat again", () => {
+  const f = { chosen: "take-01.wav", studioReady: false, hasBeatAudio: true };
+  const first = playbackKey(f, null, 1);
+  assert.equal(playbackKey(f, null, 1), first);
+  assert.notEqual(playbackKey(f, null, 2), first);
+  // the other reasons stay reasons
+  assert.notEqual(playbackKey({ ...f, chosen: "take-02.wav" }, null, 1), first);
+  assert.notEqual(playbackKey({ ...f, studioReady: true }, null, 1), first);
+  assert.notEqual(playbackKey({ ...f, hasBeatAudio: false }, null, 1), first);
+  assert.notEqual(playbackKey(f, "input/beats/b.mp3", 1), first);
+});
+
+test("selecting a lane opens the editor; picking the open lane again keeps what the user chose", () => {
+  // the first selection opens the collapsed editor
+  assert.equal(editorOpenAfter(false, null, "beat"), true);
+  // another lane opens it again after the user collapsed it
+  assert.equal(editorOpenAfter(false, "beat", "voice"), true);
+  assert.equal(editorOpenAfter(true, "beat", "voice"), true);
+  // the same lane: collapsed stays collapsed, open stays open
+  assert.equal(editorOpenAfter(false, "beat", "beat"), false);
+  assert.equal(editorOpenAfter(true, "beat", "beat"), true);
 });

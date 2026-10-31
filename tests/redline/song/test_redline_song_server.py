@@ -328,6 +328,17 @@ def test_a_text_save_without_the_index_is_422_with_the_command(made, root):
     assert status == 200 and data["text"] == "a line\n" and data["seed"] == 3
 
 
+def test_a_title_that_is_not_utf8_is_read_with_replacement_characters(made, root):
+    seed = root / "private" / "lyrics" / "generated" / "3"
+    seed.mkdir(parents=True)
+    (seed / "text.txt").write_text("a line\n", encoding="utf-8")
+    (seed / "title.txt").write_bytes(b"Ab\xffc\n")
+    rev = model.load(NAME).rev
+    api(made, "POST", "/api/song", {"rev": rev, "set": {"text": {"seed": 3, "version": 1}}})
+    status, data = api(made, "GET", "/api/text")
+    assert status == 200 and data["title"] == "Ab\ufffdc" and data["text"] == "a line\n"
+
+
 def test_the_mix_is_409_no_voice_until_a_voice_is_chosen_and_separated(made, root):
     for path in ("/api/mix/session", "/api/mix/schema"):
         status, data = api(made, "GET", path)

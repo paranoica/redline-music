@@ -17,6 +17,8 @@ const EVENTS = {
   stop: { type: "stop" },
   record: { type: "record", render: false },
   recordR: { type: "record", render: true },
+  // the recorder holds a take the screen does not show (a stop that failed or timed out)
+  recordHeld: { type: "record", render: false, held: true },
   export: { type: "export", render: false },
   exportR: { type: "export", render: true },
   openedCal: { type: "opened", calibrate: true },
@@ -34,7 +36,9 @@ const MOVES = [
   ["idle", idle, "play", playing, ["play"]],
   ["idle", idle, "playR", rendering("play"), ["commit"]],
   ["idle", idle, "stop", idle, ["stop"]],
-  ["idle", idle, "record", rec("opening"), ["open-engine"]],
+  // "stop" also ends a block audition, which must not play into the take
+  ["idle", idle, "record", rec("opening"), ["stop", "open-engine"]],
+  ["idle", idle, "recordHeld", rec("stopping"), ["stop-record"]],
   ["idle", idle, "recordR", rendering("record"), ["commit"]],
   ["idle", idle, "export", idle, ["export"]],
   ["idle", idle, "exportR", rendering("export"), ["commit"]],
@@ -44,7 +48,8 @@ const MOVES = [
   ["failed", failed, "play", playing, ["play"]],
   ["failed", failed, "playR", rendering("play"), ["commit"]],
   ["failed", failed, "stop", idle, ["stop"]],
-  ["failed", failed, "record", rec("opening"), ["open-engine"]],
+  ["failed", failed, "record", rec("opening"), ["stop", "open-engine"]],
+  ["failed", failed, "recordHeld", rec("stopping"), ["stop-record"]],
   ["failed", failed, "recordR", rendering("record"), ["commit"]],
   ["failed", failed, "export", idle, ["export"]],
   ["failed", failed, "exportR", rendering("export"), ["commit"]],
@@ -55,6 +60,7 @@ const MOVES = [
   ["playing", playing, "stop", idle, ["stop"]],
   ["playing", playing, "record", rec("opening"), ["stop", "open-engine"]],
   ["playing", playing, "recordR", rendering("record"), ["stop", "commit"]],
+  ["playing", playing, "recordHeld", rec("stopping"), ["stop", "stop-record"]],
   ["playing", playing, "export", playing, ["export"]],
   ["playing", playing, "exportR", rendering("export"), ["stop", "commit"]],
   ["playing", playing, "error", failed, ["stop"]],
@@ -67,11 +73,12 @@ const MOVES = [
       [name, s, "playR", rendering("play"), []],
       [name, s, "record", rendering("record"), []],
       [name, s, "recordR", rendering("record"), []],
+      [name, s, "recordHeld", rendering("record"), []],
       [name, s, "export", rendering("export"), []],
       [name, s, "exportR", rendering("export"), []],
       [name, s, "stop", idle, ["stop"]],
       ...(then === "play" ? [[name, s, "pause", rendering(null), []]] : []),
-      [name, s, "renderDone", ...{ null: [idle, []], play: [playing, ["play"]], record: [rec("opening"), ["open-engine"]], export: [idle, ["export"]] }[then]],
+      [name, s, "renderDone", ...{ null: [idle, []], play: [playing, ["play"]], record: [rec("opening"), ["stop", "open-engine"]], export: [idle, ["export"]] }[then]],
       [name, s, "error", failed, []],
     ];
   }),
@@ -88,14 +95,15 @@ const MOVES = [
   ["counting", rec("counting"), "recordStarted", rec("recording"), []],
   ["counting", rec("counting"), "stop", rec("stopping"), ["stop-record"]],
   ["counting", rec("counting"), "recordStopped", idle, []],
-  ["counting", rec("counting"), "error", failed, []],
+  // a take may have started or still be finishing: the recorder is watched until it lets go
+  ["counting", rec("counting"), "error", failed, ["watch-take"]],
 
   ["recording", rec("recording"), "stop", rec("stopping"), ["stop-record"]],
   ["recording", rec("recording"), "recordStopped", idle, []],
-  ["recording", rec("recording"), "error", failed, []],
+  ["recording", rec("recording"), "error", failed, ["watch-take"]],
 
   ["stopping", rec("stopping"), "recordStopped", idle, []],
-  ["stopping", rec("stopping"), "error", failed, []],
+  ["stopping", rec("stopping"), "error", failed, ["watch-take"]],
 ];
 
 const STATES = [
@@ -136,7 +144,7 @@ test("a whole take: record over a stale beat, wait for the render, calibrate, re
     effects.push(...out.effects);
   }
   assert.deepEqual(s, IDLE);
-  assert.deepEqual(effects, ["commit", "open-engine", "start-record", "stop-record"]);
+  assert.deepEqual(effects, ["commit", "stop", "open-engine", "start-record", "stop-record"]);
 });
 
 test("record pressed while a background render runs waits for it, then opens the engine", () => {
@@ -144,7 +152,22 @@ test("record pressed while a background render runs waits for it, then opens the
   const pressed = step(s, EVENTS.record);
   assert.deepEqual(pressed, { state: rendering("record"), effects: [] });
   s = pressed.state;
-  assert.deepEqual(step(s, EVENTS.renderDone), { state: rec("opening"), effects: ["open-engine"] });
+  assert.deepEqual(step(s, EVENTS.renderDone), { state: rec("opening"), effects: ["stop", "open-engine"] });
+});
+
+test("a stop that failed leaves the take watched; the next record press stops it instead of opening", () => {
+  let s = rec("recording");
+  let out = step(s, EVENTS.stop);
+  assert.deepEqual(out, { state: rec("stopping"), effects: ["stop-record"] });
+  out = step(out.state, EVENTS.error);
+  assert.deepEqual(out, { state: failed, effects: ["watch-take"] });
+  out = step(out.state, EVENTS.recordHeld);
+  assert.deepEqual(out, { state: rec("stopping"), effects: ["stop-record"] });
+  // while it is not held any more, record opens the engine for a new take
+  assert.deepEqual(step(failed, EVENTS.record).effects, ["stop", "open-engine"]);
+  // an engine that failed to open holds no take: nothing to watch
+  assert.deepEqual(step(rec("opening"), EVENTS.error).effects, []);
+  assert.deepEqual(step(rec("calibrate"), EVENTS.error).effects, []);
 });
 
 const DONE = {

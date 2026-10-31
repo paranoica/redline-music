@@ -74,6 +74,7 @@ LAST_BAR = 511
 BARS_PER_LINE = (1, 2)
 LAYOUT = ("start_bar", "bars_per_line")
 STEP_TICK_S = 0.05
+MIX_CLOSE_TIMEOUT_S = 10.0
 
 REC_ERRORS = (
     (rec.OutOfSync, HTTPStatus.CONFLICT, "out_of_sync"),
@@ -313,6 +314,7 @@ class SongApp:
         self._rec_used = False
         self._closed = False
         self._mix: MixChain | None = None
+        self._mix_thread: threading.Thread | None = None
         self._mix_lock = threading.Lock()
         self._hashes: dict[tuple[str, int, int], str] = {}
         self._peaks_lock = threading.Lock()
@@ -740,7 +742,11 @@ class SongApp:
         if version not in have:
             raise ApiError(HTTPStatus.NOT_FOUND, f"no version {version}", "no_text")
         title_file = folder / ("title.txt" if version == 1 else f"title-{version}.txt")
-        title = title_file.read_text(encoding="utf-8").strip() if title_file.is_file() else ""
+        title = (
+            title_file.read_text(encoding="utf-8", errors="replace").strip()
+            if title_file.is_file()
+            else ""
+        )
         text = have[version].read_text(encoding="utf-8")
         return reply_json(
             HTTPStatus.OK,
@@ -1043,7 +1049,6 @@ class SongApp:
             digest = self._hash(path)
         except OSError as error:
             raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
-        # write_private's temporary name is per process: one writer at a time
         with self._peaks_lock:
             cache = (
                 make_private_dir(self._state_dir() / "peaks", self.root) / f"{digest}-{points}.json"
@@ -1147,7 +1152,10 @@ class SongApp:
                 raise ApiError(HTTPStatus.CONFLICT, "a mix step is already running", "busy")
             steps = ("auto", "keep") if self._stems_ready(song) else ("separate", "auto", "keep")
             chain = self._mix = MixChain(seed)
-        threading.Thread(target=self._run_mix, args=(chain, steps), daemon=True).start()
+            self._mix_thread = threading.Thread(
+                target=self._run_mix, args=(chain, steps), daemon=True
+            )
+            self._mix_thread.start()
         return self._mix_info(chain)
 
     def _run_mix(self, chain: MixChain, steps: tuple[str, ...]) -> None:
@@ -1176,14 +1184,20 @@ class SongApp:
                 if done["state"] != DONE:
                     chain.end(FAILED, done.get("reason") or f"{step} did not finish")
                     return
-        try:
-            self._keep_auto()
-        except (ApiError, model.SongError, OSError) as error:
-            reason = str(error)
-        else:
-            reason = None
+        self._finish_mix(chain)
+
+    def _finish_mix(self, chain: MixChain) -> None:
+        # under the lock a cancel or a close waits for the keep instead of racing its writes
         with self._mix_lock:
-            chain.end(DONE if reason is None else FAILED, reason)
+            if chain.cancelled or self._closed:
+                chain.end(CANCELLED)
+                return
+            try:
+                self._keep_auto()
+            except (ApiError, model.SongError, OSError) as error:
+                chain.end(FAILED, str(error))
+            else:
+                chain.end(DONE)
 
     def _wait_step(self) -> dict[str, Any]:
         while True:
@@ -1253,13 +1267,15 @@ class SongApp:
             raise ApiError(HTTPStatus.BAD_REQUEST, "seed is too large")
         if kind == "mix":
             return reply_json(HTTPStatus.ACCEPTED, {"kind": kind, **self._start_mix(seed)})
-        # the chain writes the same stems marker and variants
-        if kind in ("separate", "auto") and self._mix_running():
-            raise ApiError(HTTPStatus.CONFLICT, "the mix job is running", "busy")
-        try:
-            info = self._start(kind, seed)
-        except Busy as error:
-            raise ApiError(HTTPStatus.CONFLICT, str(error), "busy") from None
+        # the chain writes the same stems marker and variants: its check and this start are one
+        mixing = kind in ("separate", "auto")
+        with self._mix_lock if mixing else contextlib.nullcontext():
+            if mixing and self._mix_running():
+                raise ApiError(HTTPStatus.CONFLICT, "the mix job is running", "busy")
+            try:
+                info = self._start(kind, seed)
+            except Busy as error:
+                raise ApiError(HTTPStatus.CONFLICT, str(error), "busy") from None
         return reply_json(HTTPStatus.ACCEPTED, {"kind": kind, **info})
 
     def cancel_job(self, body: dict) -> Reply:
@@ -1433,7 +1449,10 @@ class SongApp:
     # closing
 
     def close(self) -> None:
-        """Let the song go: its recording session, its jobs, its studios, then its lock.
+        """Let the song go: its recording session, its jobs and mix chain, its studios, its lock.
+
+        A mix chain writes nothing once this returns; it is waited for at most
+        MIX_CLOSE_TIMEOUT_S.
 
         Raises:
             rec.RecError: The recording session did not close; nothing was let go.
@@ -1448,7 +1467,10 @@ class SongApp:
         with self._mix_lock:
             if self._mix is not None:
                 self._mix.cancelled = True
+            chain_thread = self._mix_thread
         self.jobs.cancel_song(self.name)
+        if chain_thread is not None and chain_thread is not threading.current_thread():
+            chain_thread.join(MIX_CLOSE_TIMEOUT_S)
         with self._studio_lock:
             self._studio = self._studio_key = None
         with self._beat_lock:

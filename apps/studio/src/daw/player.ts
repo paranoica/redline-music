@@ -231,6 +231,8 @@ export class Playback {
 
   stop(): void {
     this.#player?.stop();
+    // also cancels an audition still starting
+    void this.#deps.audition.stop().catch(() => {});
   }
 
   seek(seconds: number): void {
