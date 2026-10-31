@@ -391,8 +391,8 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
         The path of the wav.
 
     Raises:
-        PipelineError: The flip or the analysis is missing or unusable, or the score refuses it.
-        ValueError: The arrangement leaves the source.
+        PipelineError: The flip or the analysis is missing or unusable, the arrangement leaves the
+            source, or the score refuses it.
     """
     path = inside(folder, f"flip-{n}.json")
     if not path.is_file():
