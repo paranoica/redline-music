@@ -114,17 +114,20 @@ the terminal. More in [docs/song.md](docs/song.md).
 
 ## Flipping a type beat
 
-When the song's beat is a file, the beat station opens the flip. One click splits the beat into
-stems and reads its bar grid and its 808 notes. Then:
+When the song's beat is a file, its lane on the song screen is a flip. One click splits the beat
+into stems and reads its bar grid and its 808 notes. Then, right on the timeline:
 
-- the 808: the original, ours on the same notes (tuned to the source's detune), or off;
-- the hats: the original, removed, or programmed again per block;
-- the bars: moved, repeated, split or cut, or proposed from the song's text (one bar per line,
-  the hook on the most repeated run of bars);
-- effects on chosen bars: reverse, tape stop and start, stutter, granular.
+- blocks of bars: drag to move, Ctrl+drag to copy, split, delete, or proposed from the song's text
+  (one bar per line, the hook on the most repeated run of bars);
+- the 808: the original, ours on the same notes (tuned to the source's detune), or off; the piano
+  roll edits a block's notes;
+- the hats: the original, removed, or programmed again per block; a drum grid adds our kick,
+  snare, clap, hats and perc over the source;
+- effects on a block: reverse, tape stop and start, stutter, granular.
 
-Each render is a new version, brought toward the source's loudness under a -1 dBFS ceiling, and
-can become the song's beat (the page counts the takes recorded over the old one first). Editing a
+The edits render on their own when you press play, record or export: each render is a new version,
+brought toward the source's loudness under a -1 dBFS ceiling, and becomes the song's beat (the
+first edit asks once when takes were recorded over the old one). Editing a
 beat does not change its licence. More in [docs/flip.md](docs/flip.md).
 
 ## The studio
