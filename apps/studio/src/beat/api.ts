@@ -121,6 +121,9 @@ export function createApi({ base, token }: BeatApiOptions) {
     session: () => json<BeatSession>(call("GET", "/session")),
     check: (score: Score) => json<{ errors: string[]; warnings: Caution[] }>(call("POST", "/check", { score })),
     save: (score: Score, base: string) => json<{ file: string; warnings: Caution[] }>(call("POST", "/save", { score, base })),
+    // the song page's working copy over the newest score
+    draft: () => json<{ score: Score; base: string }>(call("GET", "/draft")),
+    saveDraft: (score: Score, base: string) => json<{ ok: true }>(call("POST", "/draft", { score, base })),
     mark: (bar: number, verdict: "good" | "bad", note: string, base: string) =>
       json<Mark>(call("POST", "/mark", { bar, verdict, note, base })),
     render: (scoreFile: string) => json<RenderStatus>(call("POST", "/render", { score_file: scoreFile })),
