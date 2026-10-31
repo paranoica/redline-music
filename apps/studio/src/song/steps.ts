@@ -43,6 +43,7 @@ export const JOB_NAMES: Record<JobKind, string> = {
   beat_render: "рендер бита",
   flip_stems: "разбор на стемы",
   flip_render: "сборка флипа",
+  mix: "сведение",
 };
 
 export const JOB_STATE: Record<Job["state"], string> = {

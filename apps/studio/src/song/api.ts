@@ -55,6 +55,8 @@ export interface Stations {
 export interface SongReply {
   song: SongFile;
   stations: Stations;
+  // the screen's facts, when the server sends them beside the stations
+  facts?: Record<string, unknown>;
 }
 
 export type SongChange =
@@ -138,7 +140,7 @@ export interface Ranking {
   skipped: SkippedTake[];
 }
 
-export type JobKind = "separate" | "rank" | "auto" | "result" | "beat_render" | "flip_stems" | "flip_render";
+export type JobKind = "separate" | "rank" | "auto" | "result" | "beat_render" | "flip_stems" | "flip_render" | "mix";
 // the kinds the page starts through /jobs/start
 export type StartKind = Exclude<JobKind, "beat_render" | "flip_render">;
 export type JobState = "queued" | "running" | "cancelling" | "done" | "failed" | "cancelled";
@@ -149,6 +151,28 @@ export interface Job {
   reason: string | null;
   started: number | null;
   finished: number | null;
+  // the chained mix job's current part
+  step?: "separate" | "auto" | "keep";
+}
+
+export interface PeaksReply {
+  duration_s: number;
+  rate: number;
+  peaks: [number, number][];
+}
+
+export interface LayoutReply {
+  start_bar: number | null;
+  bars_per_line: 1 | 2 | null;
+}
+
+export interface SongListItem {
+  name: string;
+  beat: "own" | "file" | "flip";
+  beat_label: string;
+  takes: number;
+  text: unknown;
+  modified: string;
 }
 
 export interface VariantsReply {
@@ -214,6 +238,17 @@ export function createSongApi({ base, token }: SongApiOptions) {
     beatBase: apiPath(root, "/beat"),
     flipBase: apiPath(root, "/flip"),
     close: (): void => lifetime.abort(),
+    songs: () => json<{ songs: SongListItem[]; active: string | null }>(call("GET", "/songs")),
+    sources: () => json<{ beats: string[]; seeds: number[]; texts: { seed: number; title: string }[] }>(call("GET", "/songs/sources")),
+    openSong: (name: string) => json<{ active: string }>(call("POST", "/songs/open", { name })),
+    peaks: (of: "beat" | "take", name?: string, n?: number) => {
+      const q = new URLSearchParams({ of });
+      if (name !== undefined) q.set("name", name);
+      if (n !== undefined) q.set("n", String(n));
+      return json<PeaksReply>(call("GET", `/peaks?${q.toString()}`));
+    },
+    layout: () => json<LayoutReply>(call("GET", "/song/layout")),
+    setLayout: (layout: LayoutReply) => json<LayoutReply>(call("POST", "/song/layout", layout)),
     song: () => json<SongReply>(call("GET", "/song")),
     setSong: (rev: number, set: SongChange) => json<SongReply>(call("POST", "/song", { rev, set })),
     text: (version: number) => json<TextReply>(call("GET", `/text?version=${version}`)),

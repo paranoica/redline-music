@@ -34,6 +34,8 @@ export interface SongPlayer {
   readonly playing: boolean;
   readonly duration: number;
   setLaneGain(lane: LaneId, gain: number): void;
+  // the master's linear peak heard lately, 0 while stopped
+  meter(): number;
   dispose(): Promise<void>;
 }
 
@@ -168,6 +170,10 @@ export class Playback {
 
   position(): number {
     return this.#player?.position() ?? 0;
+  }
+
+  meter(): number {
+    return this.#player?.meter() ?? 0;
   }
 
   // asks whether the studio is ready and swaps to the backend that fits, unless the song plays;
@@ -312,6 +318,8 @@ export class SimplePlayer implements SongPlayer {
   #ctx: AudioContext | null = null;
   #buffers: { beat: AudioBuffer | null; voice: AudioBuffer | null } = { beat: null, voice: null };
   #nodes: Record<LaneId, GainNode> | null = null;
+  #analyser: AnalyserNode | null = null;
+  #scratch: Float32Array<ArrayBuffer> = new Float32Array(0);
   readonly #gains: Record<LaneId, number> = { beat: 1, voice: 1 };
   #sources: AudioBufferSourceNode[] = [];
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -344,10 +352,15 @@ export class SimplePlayer implements SongPlayer {
     const [beat, voice] = await Promise.all([get("/song/beat-audio"), take === null ? null : get(`/takes/audio?name=${encodeURIComponent(take)}`)]);
     this.#buffers = { beat, voice };
     this.#duration = Math.max(beat.duration, voice ? TAKE_LEAD + voice.duration : 0);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.connect(ctx.destination);
+    this.#analyser = analyser;
+    this.#scratch = new Float32Array(analyser.fftSize);
     const node = (lane: LaneId): GainNode => {
       const g = ctx.createGain();
       g.gain.value = this.#gains[lane];
-      g.connect(ctx.destination);
+      g.connect(analyser);
       return g;
     };
     this.#nodes = { beat: node("beat"), voice: node("voice") };
@@ -394,6 +407,15 @@ export class SimplePlayer implements SongPlayer {
     if (!this.#playing || !ctx) return this.#anchor.position;
     const elapsed = ctx.currentTime - this.#anchor.at - (ctx.outputLatency || 0);
     return positionAt(this.#anchor.position, elapsed, this.#loop, this.#duration);
+  }
+
+  meter(): number {
+    const a = this.#analyser;
+    if (!a || !this.#playing) return 0;
+    a.getFloatTimeDomainData(this.#scratch);
+    let peak = 0;
+    for (const v of this.#scratch) peak = Math.max(peak, Math.abs(v));
+    return peak;
   }
 
   setLaneGain(lane: LaneId, gain: number): void {
@@ -503,6 +525,7 @@ export class StudioPlayer implements SongPlayer {
   #analysing: AbortController | null = null;
   #analysisTimer: ReturnType<typeof setTimeout> | null = null;
   #ready = false;
+  #peak = 0;
 
   constructor(options: StudioOptions) {
     this.#api = createMixApi({ base: apiPath(apiRoot(options.base, "/api"), "/mix"), token: options.token });
@@ -654,6 +677,10 @@ export class StudioPlayer implements SongPlayer {
     if (this.#host) this.#push();
   }
 
+  meter(): number {
+    return this.#playing ? this.#peak : 0;
+  }
+
   async dispose(): Promise<void> {
     this.#ready = false;
     this.#analysing?.abort();
@@ -687,6 +714,7 @@ export class StudioPlayer implements SongPlayer {
   }
 
   #levels(host: Host, l: Levels): void {
+    this.#peak = l.master.peak;
     this.#anchor = { frame: l.frame, at: host.ctx.currentTime };
     if (l.playing) this.#held = l.held;
     if (this.#playing && !l.playing && performance.now() - this.#toggledAt > SETTLE_MS) this.#playing = false;
