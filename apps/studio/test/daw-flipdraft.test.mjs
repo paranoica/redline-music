@@ -53,7 +53,7 @@ function setup({ takes = 0, answers = {}, recording = () => false, confirm = tru
   let songReads = 0;
   let saved = null;
   const api = {
-    state: async () => state(answers.serverDoc ?? saved ?? doc("server"), rev),
+    state: async () => state(answers.serverDoc ?? saved ?? doc("server"), answers.stateRev ?? rev),
     saveDraft: async (d, base) => {
       log.push(["draft", base, d.arrangement[0].label]);
       if (answers.draft) await answers.draft(base);
@@ -365,4 +365,20 @@ test("an answer read before the page's own save returned does not roll the revis
   draft.adopt(state(doc("server"), 3), false);
   assert.equal(draft.rev, 4);
   assert.equal(draft.doc.arrangement[0].label, "b");
+});
+
+test("a server whose revision went back while it holds the page's own draft is rendered on its revision", async () => {
+  const { draft, log, seen } = setup({
+    answers: {
+      stateRev: 1,
+      render: async (base) => {
+        if (base !== 1) throw err(409, "stale_base");
+      },
+    },
+  });
+  draft.apply(rename("b"));
+  await draft.commit();
+  assert.deepEqual(log.filter((l) => l[0] === "render").at(-1), ["render", 1]);
+  assert.equal(log.some((l) => l[0] === "use"), true);
+  assert.deepEqual(seen.says, []);
 });

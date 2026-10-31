@@ -28,7 +28,7 @@ import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } 
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
 import { BLOCKER_TEXT, commitPlan, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Pending, type Transport, type TransportEvent } from "./transport.ts";
-import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, keyedBlock, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
+import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, keyedBlock, pickAfterUndo, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
 
@@ -865,7 +865,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   async function undo(redo: boolean): Promise<void> {
     if (facts.beatKind === "flip" && (redo ? flipDraft.canRedo : flipDraft.canUndo)) {
-      if (flipDraft.undo(redo)) picked = null;
+      if (flipDraft.undo(redo)) picked = pickAfterUndo(picked, bottom.block()?.section ?? null);
       return;
     }
     if (bottom.undo(redo)) return;

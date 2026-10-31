@@ -599,3 +599,20 @@ def test_a_score_the_synth_refuses_is_a_pipeline_error(analysed, monkeypatch):
     monkeypatch.setattr(pipeline, "flip_score", refuse)
     with pytest.raises(pipeline.PipelineError, match="no preset"):
         pipeline.render(folder, n)
+
+
+def test_a_second_analysis_moves_an_untouched_draft_to_its_new_default(tmp_path):
+    root = tmp_path / "repo"
+    for top in song_model.ALLOWED:
+        (root / top).mkdir(parents=True)
+    path = root / "input" / "demo.wav"
+    sf.write(path, sum(make_stems().values()), RATE)
+    fake = FakeFour()
+    first = pipeline.analyse(path, root / "work", separator=fake, root=root)
+    folder = root / "work" / "flips" / first["sha8"]
+    again = pipeline.analyse(path, root / "work", separator=fake, root=root, half=True)
+    bars = len(again["bar_starts_s"])
+    assert bars != len(first["bar_starts_s"])
+    draft = model.load(folder / "draft.json")
+    assert [(b.from_bar, b.to_bar) for b in draft.arrangement] == [(0, bars)]
+    assert draft.bpm == pytest.approx(again["bpm"])

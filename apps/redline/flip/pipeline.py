@@ -303,11 +303,24 @@ def analyse(
             "low_confidence": sum(s.confidence < LOW_CONFIDENCE for s in steps),
         },
     }
+    untouched = _untouched_draft(folder, source)
     _store_stems(folder, stems48)
     write_private(folder / ANALYSIS, json.dumps(analysis, ensure_ascii=False))
-    if not (folder / model.DRAFT).exists():
+    if untouched or not (folder / model.DRAFT).exists():
         model.save_draft(folder, _default_draft(source, analysis))
     return analysis
+
+
+def _untouched_draft(folder: Path, source: str) -> bool:
+    # a draft nobody edited follows a new analysis; an edited one is kept
+    try:
+        before = read_analysis(folder)
+        if before is None:
+            return False
+        draft = model.load(inside(folder, model.DRAFT))
+        return draft.to_json() == _default_draft(source, before).to_json()
+    except (PipelineError, model.FlipError, KeyError):
+        return False
 
 
 def _bass_params(values: Mapping[str, float]) -> Bass808Params:

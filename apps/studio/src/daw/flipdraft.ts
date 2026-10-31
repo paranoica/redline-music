@@ -356,7 +356,8 @@ export class FlipDraft {
       const state = await this.#host.api.state();
       if (!this.#doc || !state.draft || this.#queue.pending) return false;
       if (keyOf(normalisePatterns(state.draft)) !== keyOf(this.#doc)) return false;
-      this.#rev = Math.max(this.#rev, state.draft_rev);
+      // the same content: the server's revision is the one to render on, even a lower one
+      this.#rev = state.draft_rev;
       return true;
     } catch {
       return false;

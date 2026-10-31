@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, keyedBlock, playbackKey, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
+import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, keyedBlock, pickAfterUndo, playbackKey, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
 
 const stations = (over = {}) => ({
   beat: { kind: "file", file: "input/beats/b.mp3", bpm: 120 },
@@ -315,4 +315,11 @@ test("Delete and Ctrl+D act on the picked block only while a beat lane is select
   assert.equal(keyedBlock("beat", null, 3), null);
   assert.equal(keyedBlock("beat", 3, 3), null);
   assert.equal(keyedBlock("beat", 0, 0), null);
+});
+
+test("after an undo the picked block is the one the editor shows; nothing picked stays so", () => {
+  assert.equal(pickAfterUndo(2, 1), 1);
+  assert.equal(pickAfterUndo(0, 0), 0);
+  assert.equal(pickAfterUndo(2, null), null);
+  assert.equal(pickAfterUndo(null, 1), null);
 });

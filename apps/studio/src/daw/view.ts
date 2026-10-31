@@ -202,6 +202,12 @@ export function keyedBlock(selected: LaneKind | null, picked: number | null, blo
   return picked !== null && picked >= 0 && picked < blocks ? picked : null;
 }
 
+// an undo can put another block where the picked one was: the pick follows the block the editor
+// shows, so the bar on the lane and the editor agree
+export function pickAfterUndo(picked: number | null, editorBlock: number | null): number | null {
+  return picked === null ? null : editorBlock;
+}
+
 export type DawKey = "play" | "record" | "loop" | "home" | "undo" | "redo" | "duplicate" | "delete";
 
 export interface KeyLike {
