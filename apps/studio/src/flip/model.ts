@@ -403,7 +403,7 @@ const MAX_PLAY_S = 15 * 60;
 export function draftProblem(d: FlipDoc): string | null {
   const bpm = d.grid.bpm;
   const own = d.bass808.mode === "ours" || d.hats.mode === "ours";
-  const layers = d.arrangement.some((b) => b.drums !== undefined || (b.notes?.length ?? 0) > 0);
+  const layers = d.arrangement.some((b) => Object.keys(b.drums ?? {}).length > 0 || (b.notes?.length ?? 0) > 0);
   if ((own || layers) && !(bpm >= OURS_BPM[0] && bpm <= OURS_BPM[1])) {
     const what = own ? "Наши 808 и хэты" : "Наши ноты и барабаны";
     return `${what} играют только на ${OURS_BPM[0]}–${OURS_BPM[1]} BPM, а в сетке ${bpm}.`;

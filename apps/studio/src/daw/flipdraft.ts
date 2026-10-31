@@ -59,7 +59,18 @@ export function withBlocks(doc: FlipDoc, edit: BlockEdit): FlipDoc {
 
 export type FlipOp = (doc: FlipDoc) => FlipDoc | Refusal | null;
 
-const keyOf = (doc: FlipDoc): string => JSON.stringify(doc);
+// the same content gives the same key whatever the order of the fields
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => [k, canonical(v)]),
+  );
+};
+
+export const keyOf = (doc: FlipDoc): string => JSON.stringify(canonical(doc));
 
 export class FlipDraft {
   readonly #host: FlipDraftHost;
@@ -134,6 +145,8 @@ export class FlipDraft {
     const draft = state.draft;
     if (!draft || this.#closed) return;
     if (this.#doc && this.#queue.pending) return;
+    // an answer read before the save that this page has since made says less than the page knows
+    if (this.#doc && state.draft_rev < this.#rev) return;
     const incoming = normalisePatterns(draft);
     const key = keyOf(incoming);
     const changed = this.#doc === null || keyOf(this.#doc) !== key;
@@ -309,18 +322,19 @@ export class FlipDraft {
   async #version(): Promise<{ n: number; key: string }> {
     for (let tries = 0; tries < BUSY_TRIES; tries++) {
       const epoch = this.#epoch;
+      const stamp = await this.#stamp();
       await this.#saved();
       const doc = this.#doc;
       if (this.#epoch !== epoch || !doc) throw new StaleDraft();
       const key = keyOf(doc);
       if (this.#made?.key === key && this.#made.done) return this.#made;
-      const stamp = await this.#stamp();
       let made: { n: number; key: string; done: boolean };
       try {
         made = { n: await this.#host.api.render(this.#rev), key, done: false };
         this.#made = made;
       } catch (error) {
         if (isStale(error)) {
+          if (await this.#ownRevision()) continue;
           await this.#stale();
           throw new StaleDraft();
         }
@@ -333,6 +347,20 @@ export class FlipDraft {
       return made;
     }
     throw new Error("сборка флипа занята другой задачей");
+  }
+
+  // the server's draft is this page's own newest save, only its revision was read too early
+  async #ownRevision(): Promise<boolean> {
+    try {
+      await this.#saved();
+      const state = await this.#host.api.state();
+      if (!this.#doc || !state.draft || this.#queue.pending) return false;
+      if (keyOf(normalisePatterns(state.draft)) !== keyOf(this.#doc)) return false;
+      this.#rev = Math.max(this.#rev, state.draft_rev);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async #saved(): Promise<void> {

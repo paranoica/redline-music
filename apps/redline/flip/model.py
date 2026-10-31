@@ -212,11 +212,15 @@ def _whole(value: object, where: str, low: int, high: int) -> int:
 def _block_notes(value: object, where: str, bars: int) -> tuple[BlockNote, ...]:
     size = bars * STEPS
     out = []
+    per_bar = [0] * bars
     for i, raw in enumerate(_list(value, where, MAX_NOTES_PER_BAR * bars)):
         at = f"{where}[{i}]"
         raw = _fields(raw, at, ("step", "len", "note", "vel"))
         step = _whole(raw["step"], f"{at}.step", 0, size - 1)
         length = _whole(raw["len"], f"{at}.len", 1, size + STEPS - step)
+        per_bar[step // STEPS] += 1
+        if per_bar[step // STEPS] > MAX_NOTES_PER_BAR:
+            raise FlipError(f"{where}: at most {MAX_NOTES_PER_BAR} notes in a bar")
         out.append(
             BlockNote(
                 step,

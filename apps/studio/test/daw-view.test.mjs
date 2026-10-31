@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, playbackKey, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
+import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, keyedBlock, playbackKey, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
 
 const stations = (over = {}) => ({
   beat: { kind: "file", file: "input/beats/b.mp3", bpm: 120 },
@@ -304,4 +304,15 @@ test("a beat file read into a flip is edited as a flip before its first render",
   assert.equal(factsOf(reply(), [], { flipAnalysed: true }).beatKind, "flip");
   assert.equal(factsOf(reply(), [], { flipAnalysed: false }).beatKind, "file");
   assert.equal(factsOf(reply(), [], { flipAnalysed: null }).beatKind, "file");
+});
+
+test("Delete and Ctrl+D act on the picked block only while a beat lane is selected", () => {
+  for (const lane of ["beat", "bass", "drums"]) assert.equal(keyedBlock(lane, 1, 3), 1);
+  for (const lane of ["text", "voice", "takes", null]) assert.equal(keyedBlock(lane, 1, 3), null);
+  // first and last block; nothing picked; a pick past the blocks left
+  assert.equal(keyedBlock("beat", 0, 3), 0);
+  assert.equal(keyedBlock("beat", 2, 3), 2);
+  assert.equal(keyedBlock("beat", null, 3), null);
+  assert.equal(keyedBlock("beat", 3, 3), null);
+  assert.equal(keyedBlock("beat", 0, 0), null);
 });

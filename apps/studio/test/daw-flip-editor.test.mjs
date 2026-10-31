@@ -331,7 +331,7 @@ function fakeDom() {
       append(...n) { this.children.push(...n); },
       replaceChildren(...n) { this.children = n; },
       setAttribute() {},
-      addEventListener() {},
+      addEventListener(type, fn) { (this.handlers ??= {})[type] = fn; },
       removeEventListener() {},
       querySelectorAll: () => [],
       focus() {},
@@ -343,7 +343,7 @@ function fakeDom() {
   globalThis.removeEventListener = () => {};
 }
 
-async function editorSetup({ load = true } = {}) {
+async function editorSetup({ load = true, over = {}, flipDoc } = {}) {
   fakeDom();
   const { Editor } = await import("../src/daw/editor.ts");
   const base = "score-1.json";
@@ -356,7 +356,7 @@ async function editorSetup({ load = true } = {}) {
     render: async () => ({ state: "running", score_file: null, error: null }),
     renderStatus: async () => ({ state: "idle", score_file: null, error: null }),
   };
-  const { draft } = setup();
+  const { draft } = setup(flipDoc);
   const editor = new Editor({
     base: undefined,
     token: "t",
@@ -385,12 +385,13 @@ async function editorSetup({ load = true } = {}) {
     repaint() {},
     say() {},
     overlay: {},
+    ...over,
   });
   if (load) {
     editor.prepare();
     await settle();
   }
-  return { editor, changes };
+  return { editor, changes, draft };
 }
 
 test("a section op goes through the editor's draft; undo and redo work with no tab open", async () => {
@@ -429,4 +430,44 @@ test("a score that is not loaded takes no edit", async () => {
   assert.equal(editor.score, null);
   assert.equal(editor.editScore(score()), false);
   assert.equal(editor.undo(false), false);
+});
+
+test("an audition asks for the layer again only when the edited block's content changed", async () => {
+  let asked = 0;
+  let swapped = 0;
+  const playback = { audition: async () => {}, updateAudition: () => void swapped++, stopAudition: async () => {} };
+  const { editor, draft } = await editorSetup({
+    load: false,
+    over: {
+      facts: () => ({ beatKind: "flip", beatDirty: false, hasBeatAudio: true }),
+      flipApi: { blockScore: async () => (asked++, score()) },
+      clips: () => [
+        { index: 0, fromBar: 0, bars: 2, label: "a" },
+        { index: 1, fromBar: 2, bars: 2, label: "b" },
+      ],
+      playback: () => playback,
+    },
+  });
+  editor.mount({ replaceChildren() {} }, "beat", "roll", ["roll", "drums", "fx"], true);
+  await editor.audition.handlers.click();
+  await settle();
+  assert.equal(asked, 1);
+  const label = (at, text) => draft.apply((d) => ({ ...d, arrangement: d.arrangement.map((b, i) => (i === at ? { ...b, label: text } : b)) }));
+  // the other block, and a change that is no edit at all
+  label(1, "z");
+  editor.flipEdited();
+  editor.flipEdited();
+  await settle();
+  assert.equal(asked, 1);
+  assert.equal(swapped, 0);
+  // the audited block
+  label(0, "y");
+  editor.flipEdited();
+  await settle();
+  assert.equal(asked, 2);
+  assert.equal(swapped, 1);
+  // the same content again is not asked for twice
+  editor.flipEdited();
+  await settle();
+  assert.equal(asked, 2);
 });

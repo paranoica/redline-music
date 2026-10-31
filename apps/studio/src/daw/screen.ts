@@ -28,7 +28,7 @@ import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } 
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
 import { BLOCKER_TEXT, commitPlan, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Pending, type Transport, type TransportEvent } from "./transport.ts";
-import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
+import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, keyedBlock, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
 
@@ -865,7 +865,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   async function undo(redo: boolean): Promise<void> {
     if (facts.beatKind === "flip" && (redo ? flipDraft.canRedo : flipDraft.canUndo)) {
-      flipDraft.undo(redo);
+      if (flipDraft.undo(redo)) picked = null;
       return;
     }
     if (bottom.undo(redo)) return;
@@ -1100,7 +1100,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       picked = Number(target.dataset["clip"]);
       bottom.selectBlock(picked);
       editorOpen = true;
-      select(kind);
+      select(kind, true);
       render();
     });
     return el;
@@ -1444,7 +1444,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     void commitBeat();
   }
 
-  function select(kind: LaneKind): void {
+  function select(kind: LaneKind, keepPick = false): void {
+    if (selected !== kind && !keepPick) picked = null;
     if (selected !== null && BEAT_LANES.includes(selected) && !BEAT_LANES.includes(kind)) leaveBeat();
     editorOpen = editorOpenAfter(editorOpen, selected, kind);
     selected = kind;
@@ -1760,11 +1761,17 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         void undo(true);
         return;
       case "duplicate":
-        if (picked !== null) duplicateBlock(picked);
+        {
+          const at = keyedBlock(selected, picked, clips.length);
+          if (at !== null) duplicateBlock(at);
+        }
         return;
       case "delete":
         // a Delete inside the editor belongs to what is edited there, a roll note
-        if (picked !== null && !editor.contains(e.target as Node | null) && !bottom.notePicked) removeBlock(picked);
+        {
+          const at = keyedBlock(selected, picked, clips.length);
+          if (at !== null && !editor.contains(e.target as Node | null) && !bottom.notePicked) removeBlock(at);
+        }
         return;
     }
   });

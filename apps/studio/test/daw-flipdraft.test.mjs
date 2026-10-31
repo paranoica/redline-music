@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ApiError } from "../src/song/api.ts";
-import { FlipDraft, flipLayout, withBlocks } from "../src/daw/flipdraft.ts";
+import { FlipDraft, flipLayout, keyOf, withBlocks } from "../src/daw/flipdraft.ts";
 import { copyBlockTo } from "../src/flip/model.ts";
 
 const settle = async () => {
@@ -51,22 +51,26 @@ function setup({ takes = 0, answers = {}, recording = () => false, confirm = tru
   let job = { kind: "flip_render", state: "done", reason: null, started: 1, finished: 10 };
   let renders = 0;
   let songReads = 0;
+  let saved = null;
   const api = {
-    state: async () => state(doc("server"), rev),
+    state: async () => state(answers.serverDoc ?? saved ?? doc("server"), rev),
     saveDraft: async (d, base) => {
       log.push(["draft", base, d.arrangement[0].label]);
       if (answers.draft) await answers.draft(base);
       rev += 1;
+      saved = d;
       return rev;
     },
     render: async (base) => {
       log.push(["render", base]);
       if (answers.render) await answers.render(base);
+      if (answers.strict && base !== rev) throw err(409, "stale_base");
       renders += 1;
       job = { ...job, state: "running", finished: null };
       return 10 + renders;
     },
     jobs: async () => {
+      if (answers.jobs) await answers.jobs();
       const now = job;
       if (job.state === "running") job = { ...job, state: answers.fail ? "failed" : "done", reason: answers.fail ? "boom" : null, finished: 20 + renders };
       return [now];
@@ -224,7 +228,7 @@ test("a render refused as busy waits for the running one, then renders the newes
 });
 
 test("a stale render reloads and ends the commit without a use", async () => {
-  const { draft, log, seen } = setup({ answers: { render: async () => { throw err(409, "stale_base"); } } });
+  const { draft, log, seen } = setup({ answers: { serverDoc: doc("other"), render: async () => { throw err(409, "stale_base"); } } });
   draft.apply(rename("b"));
   await assert.rejects(draft.commit(), /другой вкладке/);
   assert.equal(log.some((l) => l[0] === "use"), false);
@@ -293,4 +297,72 @@ test("a flip the server calls dirty is committed even with no edit here, then it
   await s.draft.commit();
   assert.deepEqual(s.log.map((l) => l[0]), ["render", "use"]);
   assert.equal(s.draft.wantsCommit, false);
+});
+
+test("a save made while the commit starts is rendered over its own revision", async () => {
+  let ctx;
+  let fired = false;
+  ctx = setup({
+    answers: {
+      strict: true,
+      jobs: async () => {
+        if (fired) return;
+        fired = true;
+        ctx.draft.apply(rename("c"));
+        ctx.timer.fire();
+      },
+    },
+  });
+  ctx.draft.apply(rename("b"));
+  await ctx.draft.commit();
+  assert.deepEqual(ctx.log.filter((l) => l[0] !== "use"), [["draft", 3, "c"], ["render", 4]]);
+  assert.deepEqual(ctx.seen.says, []);
+  assert.equal(ctx.seen.reloads, 1);
+  assert.equal(ctx.draft.doc.arrangement[0].label, "c");
+});
+
+test("a render refused as stale while the server holds the page's own draft renders again", async () => {
+  let first = true;
+  const { draft, log, seen } = setup({
+    answers: {
+      render: async () => {
+        if (!first) return;
+        first = false;
+        throw err(409, "stale_base");
+      },
+    },
+  });
+  draft.apply(rename("b"));
+  await draft.commit();
+  assert.deepEqual(log.filter((l) => l[0] === "render"), [["render", 4], ["render", 4]]);
+  assert.equal(log.some((l) => l[0] === "use"), true);
+  assert.deepEqual(seen.says, []);
+  assert.equal(draft.doc.arrangement[0].label, "b");
+});
+
+test("the same content in another key order is the same doc: a reload keeps the history", async () => {
+  const block = (extra) => ({ label: "a", from_bar: 0, to_bar: 4, ...extra });
+  const note = { step: 0, len: 1, note: 36, vel: 100 };
+  const withBlock = (b) => ({ ...doc(), arrangement: [b] });
+  assert.equal(keyOf(withBlock(block({ drums: { kick: "x" }, notes: [note] }))), keyOf(withBlock(block({ notes: [note], drums: { kick: "x" } }))));
+  assert.notEqual(keyOf(withBlock(block({ notes: [note] }))), keyOf(withBlock(block({ notes: [{ ...note, vel: 90 }] }))));
+  const { draft, timer } = setup();
+  draft.apply((d) => ({ ...d, arrangement: [block({ drums: { kick: "x" }, notes: [note] })] }));
+  timer.fire();
+  await settle();
+  assert.equal(draft.canUndo, true);
+  draft.adopt(state(withBlock(block({ notes: [note], drums: { kick: "x" } })), draft.rev), false);
+  assert.equal(draft.canUndo, true);
+  assert.equal(draft.dirty, false);
+});
+
+test("an answer read before the page's own save returned does not roll the revision back", async () => {
+  const { draft, timer } = setup();
+  draft.apply(rename("b"));
+  timer.fire();
+  await settle();
+  assert.equal(draft.rev, 4);
+  draft.adopt(state(doc("server"), 3), false);
+  assert.equal(draft.rev, 4);
+  assert.equal(draft.doc.arrangement[0].label, "b");
 });

@@ -575,6 +575,8 @@ test("draftProblem also guards a block with drums or notes at a tempo the synth 
   assert.match(fast(rich("a", 0, 4, { drums: { kick: "x".repeat(64) } })), /250/);
   assert.match(fast(rich("a", 0, 4, { notes: [note(0)] })), /250/);
   assert.equal(fast(rich("a", 0, 4, { notes: [] })), null);
+  assert.equal(fast(rich("a", 0, 4, { drums: {} })), null);
+  assert.equal(fast(rich("a", 0, 4, { drums: {}, notes: [] })), null);
   assert.equal(fast(block("a", 0, 4)), null);
   const slow = mkdoc("original", [rich("a", 0, 4, { drums: { kick: "x".repeat(64) } })], []);
   assert.equal(draftProblem(slow), null);

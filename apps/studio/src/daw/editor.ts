@@ -94,6 +94,7 @@ export class Editor {
   #block: number | null = null;
   #auditioning = false;
   #auditionSeq = 0;
+  #scoreKey: string | null = null;
   #lane: LaneKind | null = null;
   #tab: EditorTab | null = null;
   #closed = false;
@@ -438,12 +439,20 @@ export class Editor {
     await this.#startAudition();
   }
 
+  #flipKey(): string | null {
+    const doc = this.#host.flipDraft.doc;
+    const at = this.block();
+    const block = doc && at ? doc.arrangement[at.section] : undefined;
+    return doc && block ? JSON.stringify([block, doc.grid.bpm, doc.grid.swing]) : null;
+  }
+
   // the block's ours layer as a beat score: the server builds it from the block being edited
   async #flipScore(): Promise<{ score: Score; bars: number } | null> {
     const doc = this.#host.flipDraft.doc;
     const at = this.block();
     const block = doc && at ? doc.arrangement[at.section] : undefined;
     if (!doc || !block) return null;
+    this.#scoreKey = this.#flipKey();
     const score = await this.#host.flipApi.blockScore(block, { bpm: doc.grid.bpm, swing: doc.grid.swing });
     return { score, bars: block.to_bar - block.from_bar };
   }
@@ -451,6 +460,7 @@ export class Editor {
   // a flip edit while the block plays: the layer is asked for again and swapped in
   flipEdited(): void {
     if (!this.#auditioning || this.#host.facts().beatKind !== "flip") return;
+    if (this.#flipKey() === this.#scoreKey) return;
     const seq = ++this.#auditionSeq;
     void this.#flipScore().then(
       (made) => {

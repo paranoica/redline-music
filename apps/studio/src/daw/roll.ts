@@ -207,7 +207,7 @@ export function flipRollNotes(block: Pick<FlipBlock, "from_bar" | "to_bar">, bar
 
 // why the synth refuses our notes and drums at this grid, null when it does not
 export function layerProblem(doc: FlipDoc): string | null {
-  const probe: FlipDoc = { ...doc, arrangement: doc.arrangement.map((b) => ({ ...b, drums: b.drums ?? {} })) };
+  const probe: FlipDoc = { ...doc, arrangement: doc.arrangement.map((b) => ({ ...b, drums: { kick: "", ...b.drums } })) };
   const problem = draftProblem(probe);
   return problem !== null && problem.includes("BPM, а в сетке") ? problem : null;
 }

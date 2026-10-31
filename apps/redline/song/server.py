@@ -599,7 +599,7 @@ class SongApp:
 
         found = pipeline.FLIP_RENDER.fullmatch(song.beat.get("file", ""))
         if found is None:
-            return False
+            return self._source_flip_dirty(song)
         try:
             folder = pipeline.flip_dir(self.root, found.group(1))
             draft = flip_model.load(pipeline.inside(folder, flip_model.DRAFT))
@@ -607,6 +607,27 @@ class SongApp:
         except (flip_model.FlipError, pipeline.PipelineError):
             return False
         return draft.to_json() != used.to_json()
+
+    def _source_flip_dirty(self, song: model.Song) -> bool:
+        """An analysed source file whose draft differs from the one the analysis wrote."""
+        from redline.flip import model as flip_model
+        from redline.flip import pipeline
+
+        beat = song.beat.get("file")
+        if not isinstance(beat, str):
+            return False
+        try:
+            path = model.resolve_inside(beat, self.root)
+            folder = pipeline.flip_dir(self.root, pipeline.source_sha8(path))
+            analysis = pipeline.read_analysis(folder)
+            if analysis is None:
+                return False
+            draft = flip_model.load(pipeline.inside(folder, flip_model.DRAFT)).to_json()
+            default = pipeline._default_draft(analysis["source"], analysis).to_json()
+        except (model.SongError, flip_model.FlipError, pipeline.PipelineError, KeyError):
+            return False
+        # the grid is the analysis's own and does not change the sound of the source
+        return {**draft, "grid": None} != {**default, "grid": None}
 
     def get_song(self) -> Reply:
         """The song and its stations."""

@@ -800,6 +800,43 @@ def test_facts_beat_dirty_for_a_flip_is_a_draft_that_differs_from_the_version_in
     assert facts(daw)["beat_dirty"] is False
 
 
+def test_facts_beat_dirty_for_an_analysed_source_is_a_draft_that_differs_from_the_default(
+    daw, root
+):
+    from redline.flip import model as flip_model
+    from redline.flip import pipeline
+
+    path = root / "input" / "beat.wav"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(path, tone(0.25), 8000)
+    set_beat(daw, {"file": "input/beat.wav"})
+    folder = root / "work" / "flips" / pipeline.source_sha8(path)
+    folder.mkdir(parents=True)
+    assert facts(daw)["beat_dirty"] is False
+    analysis = {
+        "format": pipeline.FORMAT,
+        "bpm": 120.0,
+        "downbeat_s": 0.0,
+        "detune_cents": 0.0,
+        "bar_starts_s": [0.0, 2.0],
+        "source": "input/beat.wav",
+    }
+    (folder / "analysis.json").write_text(json.dumps(analysis), encoding="utf-8")
+    default = pipeline._default_draft("input/beat.wav", analysis).to_json()
+    draft = folder / "draft.json"
+    draft.write_text(json.dumps(default), encoding="utf-8")
+    assert facts(daw)["beat_dirty"] is False
+    edited = json.loads(json.dumps(default))
+    edited["arrangement"][0]["drums"] = {"kick": "x" * 16 * 2}
+    flip_model.parse(edited)
+    draft.write_text(json.dumps(edited), encoding="utf-8")
+    assert facts(daw)["beat_dirty"] is True
+    draft.write_text(json.dumps(default), encoding="utf-8")
+    assert facts(daw)["beat_dirty"] is False
+    draft.write_text("{", encoding="utf-8")
+    assert facts(daw)["beat_dirty"] is False
+
+
 # knob saves reach the export
 
 

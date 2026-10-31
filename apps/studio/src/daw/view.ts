@@ -194,6 +194,14 @@ export function scoreMarks(score: Score): { bass: BassMark[]; drums: HitMark[] }
 
 // ---------- keys and the editor's tabs ----------
 
+const BEAT_LANE_KINDS: readonly LaneKind[] = ["beat", "bass", "drums"];
+
+// the block a Delete or Ctrl+D acts on: the picked one, while a beat lane is selected and it exists
+export function keyedBlock(selected: LaneKind | null, picked: number | null, blocks: number): number | null {
+  if (selected === null || !BEAT_LANE_KINDS.includes(selected)) return null;
+  return picked !== null && picked >= 0 && picked < blocks ? picked : null;
+}
+
 export type DawKey = "play" | "record" | "loop" | "home" | "undo" | "redo" | "duplicate" | "delete";
 
 export interface KeyLike {

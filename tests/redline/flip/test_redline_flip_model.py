@@ -302,17 +302,20 @@ def test_block_fields_refused(change, where):
         model.parse(with_block(**change))
 
 
-def test_block_note_limits_hold_at_the_edge_and_scale_with_the_bars():
-    model.parse(with_block(notes=[note(step=i % 64) for i in range(256)]))
+def test_block_note_limit_is_per_bar():
+    crowded = [note(step=i % 16) for i in range(64)]
+    model.parse(with_block(notes=crowded))
     with pytest.raises(model.FlipError, match="notes"):
-        model.parse(with_block(notes=[note(step=i % 64) for i in range(257)]))
-    data = with_block(notes=[note(step=i % 48) for i in range(192)])
-    data["arrangement"][0]["to_bar"] = 3
-    data["effects"] = []
-    model.parse(data)
-    data["arrangement"][0]["notes"].append(note())
+        model.parse(with_block(notes=[*crowded, note(step=0)]))
+    spread = [note(step=i % 64) for i in range(256)]
+    model.parse(with_block(notes=spread))
     with pytest.raises(model.FlipError, match="notes"):
-        model.parse(data)
+        model.parse(with_block(notes=[*spread, note(step=63)]))
+    lopsided = [note(step=16 + i % 16) for i in range(65)]
+    with pytest.raises(model.FlipError, match="notes"):
+        model.parse(with_block(notes=lopsided))
+    with pytest.raises(model.FlipError, match="notes"):
+        model.parse(with_block(notes=[note(step=i % 16) for i in range(257)]))
 
 
 def test_ours_gain_is_bounded():
