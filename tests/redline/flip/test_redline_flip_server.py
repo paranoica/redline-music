@@ -787,3 +787,33 @@ def test_a_block_score_needs_an_analysis(made, root):
 def test_a_block_score_refuses_unknown_fields(made, root, body):
     analyse_by_hand(root)
     assert score_of(made, body)[0] == 400
+
+
+def test_a_long_draft_with_notes_and_drums_is_saved_past_the_plain_body_limit(made, root):
+    analyse_by_hand(root)
+    rows = {r: "x..." * 16 for r in ("kick", "snare", "clap", "hat", "hat_open", "perc")}
+    notes = [{"step": s, "len": 2, "note": 36, "vel": 100} for s in range(0, 64, 4)]
+    blocks = [
+        {"label": "b", "from_bar": 0, "to_bar": BARS, "notes": notes, "drums": rows}
+        for _ in range(100)
+    ]
+    body = {"flip": draft_json(arrangement=blocks), "base": rev(made)}
+    assert len(json.dumps(body)) > 64 * 1024
+    assert api(made, "POST", "/api/flip/draft", body)[0] == 200
+
+
+def test_a_render_reads_the_revision_and_the_draft_under_the_draft_lock(made, root):
+    folder = analyse_by_hand(root)
+    base = rev(made)
+    answers = []
+    with flip_model.draft_lock(folder):
+        asked = threading.Thread(
+            target=lambda: answers.append(api(made, "POST", "/api/flip/render", {"base": base}))
+        )
+        asked.start()
+        time.sleep(0.3)
+        # another song's page on the same source saves while the render waits for the lock
+        (folder / flip_model.DRAFT_REV).write_text(f"{base + 1}\n")
+    asked.join(10)
+    assert answers[0][1]["code"] == "stale_base"
+    assert not list(folder.glob("flip-*.json"))

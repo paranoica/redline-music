@@ -1635,8 +1635,9 @@ class Handler(LocalHandler):
         self._guarded(super().do_POST)
 
     def _body(self) -> dict:
-        beat = urlsplit(self.path).path.startswith("/api/beat/")
-        self.max_body = BEAT_MAX_BODY if beat else MAX_BODY
+        # a score or a long flip with its notes and drum rows outgrows the plain limit
+        big = urlsplit(self.path).path.startswith(("/api/beat/", "/api/flip/"))
+        self.max_body = BEAT_MAX_BODY if big else MAX_BODY
         return super()._body()
 
     def api_get(self, path: str, query: dict[str, list[str]]) -> None:

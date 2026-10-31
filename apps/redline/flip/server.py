@@ -375,15 +375,19 @@ class FlipRoutes:
         with self._lock:
             ctx = self.context()
             self._analysis(ctx)
-            if base != model.draft_rev(ctx.folder):
-                raise _stale()
             running = self.app.jobs.state(self.app.name).get("flip_render")
             if running is not None and running["state"] in ACTIVE:
                 raise ApiError(HTTPStatus.CONFLICT, "a flip render is running", "busy")
-            try:
-                flip = model.load(pipeline.inside(ctx.folder, model.DRAFT))
-            except (model.FlipError, pipeline.PipelineError):
-                raise ApiError(HTTPStatus.CONFLICT, "the draft is missing", "no_draft") from None
+            # another song's page on the same source may save between the check and the read
+            with model.draft_lock(ctx.folder):
+                if base != model.draft_rev(ctx.folder):
+                    raise _stale()
+                try:
+                    flip = model.load(pipeline.inside(ctx.folder, model.DRAFT))
+                except (model.FlipError, pipeline.PipelineError):
+                    raise ApiError(
+                        HTTPStatus.CONFLICT, "the draft is missing", "no_draft"
+                    ) from None
             n = model.save_new(ctx.folder, flip)
             try:
                 self.app._start("flip_render", 0, flip=n)

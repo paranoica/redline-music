@@ -1,10 +1,12 @@
 """Flip format 1: what a flip holds, how it is parsed, and where its versions are saved."""
 
+import contextlib
 import fcntl
 import json
 import math
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -446,6 +448,18 @@ def draft_rev(folder: Path) -> int:
         return 0
 
 
+@contextlib.contextmanager
+def draft_lock(folder: Path) -> Iterator[None]:
+    """Held across processes by whoever reads the revision and then the draft, or writes both."""
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = os.open(folder / ".draft.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(lock)
+
+
 def save_draft(folder: Path, flip: Flip, base: int | None = None) -> int | None:
     """Replace draft.json atomically, readable by the owner only, and count the save.
 
@@ -457,15 +471,10 @@ def save_draft(folder: Path, flip: Flip, base: int | None = None) -> int | None:
     Returns:
         The new revision, or None when `base` is stale.
     """
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock = os.open(folder / ".draft.lock", os.O_WRONLY | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with draft_lock(folder):
         current = draft_rev(folder)
         if base is not None and base != current:
             return None
         write_private(folder / DRAFT, _text(flip))
         write_private(folder / DRAFT_REV, f"{current + 1}\n")
         return current + 1
-    finally:
-        os.close(lock)
