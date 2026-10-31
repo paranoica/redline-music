@@ -181,7 +181,7 @@ def flip_for(**changes):
         "source": "input/beats/x.wav",
         "grid": {"bpm": 240.0, "downbeat_s": 0.0, "swing": 50},
         "bass808": {"mode": "original", "params": {}},
-        "hats": {"mode": "original", "remove": ["hh"], "patterns": ["eighths"]},
+        "hats": {"mode": "original", "remove": ["hh"], "patterns": ["8ths"]},
         "gains": {"drums": 0, "other": 0, "bass": 0},
         "arrangement": [{"label": "a", "from_bar": 0, "to_bar": 4}],
         "effects": [],

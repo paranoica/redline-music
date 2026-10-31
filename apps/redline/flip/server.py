@@ -65,6 +65,10 @@ def effect_ranges() -> dict[str, dict[str, dict[str, Any]]]:
     return out
 
 
+def _stale() -> ApiError:
+    return ApiError(HTTPStatus.CONFLICT, "the draft was changed elsewhere: reload it", "stale_base")
+
+
 class FlipRoutes:
     """The flip calls of one song app."""
 
@@ -161,6 +165,7 @@ class FlipRoutes:
                 "sha8": ctx.line.sha8,
                 "analysis": None if analysis is None else pipeline.summary(analysis),
                 "draft": self._draft(ctx),
+                "draft_rev": model.draft_rev(ctx.folder),
                 "versions": pipeline.versions(ctx.folder),
                 "renders": renders,
                 "used": ctx.line.used,
@@ -223,7 +228,8 @@ class FlipRoutes:
 
     def draft(self, body: dict) -> Reply:
         """Replace the page's working copy after the flip parses and fits the beat."""
-        only(body, "flip")
+        only(body, "flip", "base")
+        base = _int(body.get("base"), "base")
         ctx = self.context()
         try:
             flip = model.parse(body.get("flip"))
@@ -248,8 +254,11 @@ class FlipRoutes:
                 errors=[str(error)],
             ) from None
         make_private_dir(ctx.folder, self.app.root)
-        model.save_draft(ctx.folder, flip)
-        return reply_json(HTTPStatus.OK, {"ok": True})
+        with self._lock:
+            rev = model.save_draft(ctx.folder, flip, base)
+        if rev is None:
+            raise _stale()
+        return reply_json(HTTPStatus.OK, {"ok": True, "draft_rev": rev})
 
     def propose(self, body: dict) -> Reply:
         """An arrangement for the song's chosen text."""
@@ -276,10 +285,13 @@ class FlipRoutes:
 
     def render(self, body: dict) -> Reply:
         """Save the draft as the next version and start its render."""
-        only(body)
+        only(body, "base")
+        base = _int(body.get("base"), "base")
         with self._lock:
             ctx = self.context()
             self._analysis(ctx)
+            if base != model.draft_rev(ctx.folder):
+                raise _stale()
             running = self.app.jobs.state(self.app.name).get("flip_render")
             if running is not None and running["state"] in ACTIVE:
                 raise ApiError(HTTPStatus.CONFLICT, "a flip render is running", "busy")

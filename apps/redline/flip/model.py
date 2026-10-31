@@ -1,5 +1,6 @@
 """Flip format 1: what a flip holds, how it is parsed, and where its versions are saved."""
 
+import fcntl
 import json
 import math
 import os
@@ -37,6 +38,10 @@ WHOLE = ("repeats", "seed")
 PATTERN_NAME = re.compile(r"[a-z0-9_]{1,32}")
 FLIP_FILE = re.compile(r"flip-(\d+)\.json")
 DRAFT = "draft.json"
+DRAFT_REV = "draft.rev"
+DRUM_ROWS = ("kick", "snare", "clap", "hat", "hat_open", "perc")
+STEPS = 16
+MAX_NOTES_PER_BAR = 64
 
 
 class FlipError(ValueError):
@@ -44,12 +49,43 @@ class FlipError(ValueError):
 
 
 @dataclass(frozen=True)
+class BlockNote:
+    """An 808 note of a block: `step` counts sixteenths from the block's start."""
+
+    step: int
+    length: int
+    note: int
+    vel: int
+
+
+@dataclass(frozen=True)
 class Block:
-    """Source bars [from_bar, to_bar) under a label; blocks are listed in play order."""
+    """Source bars [from_bar, to_bar) under a label; blocks are listed in play order.
+
+    `notes` None plays the source's notes, an empty tuple is silence; `drums` None has no drums,
+    else maps a row to bars*16 characters of "x" (hit) and "." (rest).
+    """
 
     label: str
     from_bar: int
     to_bar: int
+    notes: tuple[BlockNote, ...] | None = None
+    drums: dict[str, str] | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """The block's content; absent fields are left out."""
+        out: dict[str, Any] = {
+            "label": self.label,
+            "from_bar": self.from_bar,
+            "to_bar": self.to_bar,
+        }
+        if self.notes is not None:
+            out["notes"] = [
+                {"step": n.step, "len": n.length, "note": n.note, "vel": n.vel} for n in self.notes
+            ]
+        if self.drums is not None:
+            out["drums"] = dict(self.drums)
+        return out
 
 
 @dataclass(frozen=True)
@@ -78,6 +114,7 @@ class Flip:
     gains: dict[str, float]
     arrangement: tuple[Block, ...]
     effects: tuple[Effect, ...]
+    ours_gain: float | None = None
 
     @property
     def play_bars(self) -> int:
@@ -96,11 +133,8 @@ class Flip:
                 "remove": list(self.hats_remove),
                 "patterns": list(self.hats_patterns),
             },
-            "gains": dict(self.gains),
-            "arrangement": [
-                {"label": b.label, "from_bar": b.from_bar, "to_bar": b.to_bar}
-                for b in self.arrangement
-            ],
+            "gains": {**self.gains, **({} if self.ours_gain is None else {"ours": self.ours_gain})},
+            "arrangement": [b.to_json() for b in self.arrangement],
             "effects": [
                 {"effect": e.effect, "from_bar": e.from_bar, "to_bar": e.to_bar, "params": e.params}
                 for e in self.effects
@@ -165,11 +199,51 @@ def _bass_params(value: object) -> dict[str, float]:
     }
 
 
+def _whole(value: object, where: str, low: int, high: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise FlipError(f"{where}: must be a whole number")
+    if not low <= value <= high:
+        raise FlipError(f"{where}: {value} is outside {low}..{high}")
+    return value
+
+
+def _block_notes(value: object, where: str, bars: int) -> tuple[BlockNote, ...]:
+    size = bars * STEPS
+    out = []
+    for i, raw in enumerate(_list(value, where, MAX_NOTES_PER_BAR * bars)):
+        at = f"{where}[{i}]"
+        raw = _fields(raw, at, ("step", "len", "note", "vel"))
+        step = _whole(raw["step"], f"{at}.step", 0, size - 1)
+        length = _whole(raw["len"], f"{at}.len", 1, size + STEPS - step)
+        out.append(
+            BlockNote(
+                step,
+                length,
+                _whole(raw["note"], f"{at}.note", 0, 127),
+                _whole(raw["vel"], f"{at}.vel", 1, 127),
+            )
+        )
+    return tuple(out)
+
+
+def _block_drums(value: object, where: str, bars: int) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise FlipError(f"{where}: must be an object")
+    out = {}
+    for row, text in value.items():
+        if row not in DRUM_ROWS:
+            raise FlipError(f"{where}.{row}: unknown row; one of {', '.join(DRUM_ROWS)}")
+        if not isinstance(text, str) or len(text) != bars * STEPS or text.strip("x.") != "":
+            raise FlipError(f'{where}.{row}: must be {bars * STEPS} characters of "x" and "."')
+        out[row] = text
+    return out
+
+
 def _arrangement(value: object) -> tuple[Block, ...]:
     blocks = []
     for i, raw in enumerate(_list(value, "arrangement", MAX_BARS)):
         where = f"arrangement[{i}]"
-        raw = _fields(raw, where, ("label", "from_bar", "to_bar"))
+        raw = _fields(raw, where, ("label", "from_bar", "to_bar"), ("notes", "drums"))
         label = raw["label"]
         if not isinstance(label, str) or not 1 <= len(label) <= 64 or not label.isprintable():
             raise FlipError(f"{where}.label: must be a short printable text")
@@ -178,7 +252,12 @@ def _arrangement(value: object) -> tuple[Block, ...]:
         )
         if end <= start:
             raise FlipError(f"{where}.to_bar: must be after from_bar")
-        blocks.append(Block(label, start, end))
+        notes = drums = None
+        if "notes" in raw:
+            notes = _block_notes(raw["notes"], f"{where}.notes", end - start)
+        if "drums" in raw:
+            drums = _block_drums(raw["drums"], f"{where}.drums", end - start)
+        blocks.append(Block(label, start, end, notes, drums))
     if not blocks:
         raise FlipError("arrangement: needs at least one block")
     total = sum(b.to_bar - b.from_bar for b in blocks)
@@ -240,14 +319,21 @@ def _effects(value: object, bpm: float, total: int) -> tuple[Effect, ...]:
     return tuple(out)
 
 
+def _presets() -> tuple[str, ...]:
+    from redline.flip.score import HATS
+
+    return tuple(HATS)
+
+
 def synth_tempo_problem(flip: "Flip") -> str | None:
     """Why the synth cannot play this flip's own parts at its tempo; None when it can."""
-    if "ours" not in (flip.bass_mode, flip.hats_mode):
+    own_layer = any(b.drums or b.notes for b in flip.arrangement)
+    if "ours" not in (flip.bass_mode, flip.hats_mode) and not own_layer:
         return None
     low, high = SYNTH_BPM
     if low <= flip.bpm <= high:
         return None
-    return f"grid.bpm: {flip.bpm:g}; our 808 and hats play at {low}..{high} BPM"
+    return f"grid.bpm: {flip.bpm:g}; our 808, hats and drums play at {low}..{high} BPM"
 
 
 def parse(data: object) -> Flip:
@@ -281,8 +367,13 @@ def parse(data: object) -> Flip:
     for i, item in enumerate(patterns):
         if not isinstance(item, str) or not PATTERN_NAME.fullmatch(item):
             raise FlipError(f"hats.patterns[{i}]: must be a pattern name")
-    gains = _fields(top["gains"], "gains", ("drums", "other", "bass"))
+        if item not in _presets():
+            raise FlipError(
+                f"hats.patterns[{i}]: no preset {item!r}; one of {', '.join(_presets())}"
+            )
+    gains = _fields(top["gains"], "gains", ("drums", "other", "bass"), ("ours",))
     gain_db = {k: _number(gains[k], f"gains.{k}", -60, 24) for k in ("drums", "other", "bass")}
+    ours_gain = _number(gains["ours"], "gains.ours", -60, 24) if "ours" in gains else None
     arrangement = _arrangement(top["arrangement"])
     if hats_mode == "ours" and len(patterns) != len(arrangement):
         raise FlipError("hats.patterns: needs one pattern per arrangement block")
@@ -305,6 +396,7 @@ def parse(data: object) -> Flip:
         gain_db,
         arrangement,
         effects,
+        ours_gain,
     )
 
 
@@ -346,7 +438,34 @@ def save_new(folder: Path, flip: Flip) -> int:
         tmp.unlink(missing_ok=True)
 
 
-def save_draft(folder: Path, flip: Flip) -> None:
-    """Replace draft.json atomically, readable by the owner only."""
+def draft_rev(folder: Path) -> int:
+    """How many times the draft was saved; 0 for a folder that never had one."""
+    try:
+        return int((folder / DRAFT_REV).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def save_draft(folder: Path, flip: Flip, base: int | None = None) -> int | None:
+    """Replace draft.json atomically, readable by the owner only, and count the save.
+
+    Args:
+        folder: The flip folder of the source.
+        flip: The new draft.
+        base: The revision the writer last saw; when it is not the current one nothing is written.
+
+    Returns:
+        The new revision, or None when `base` is stale.
+    """
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    write_private(folder / DRAFT, _text(flip))
+    lock = os.open(folder / ".draft.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        current = draft_rev(folder)
+        if base is not None and base != current:
+            return None
+        write_private(folder / DRAFT, _text(flip))
+        write_private(folder / DRAFT_REV, f"{current + 1}\n")
+        return current + 1
+    finally:
+        os.close(lock)

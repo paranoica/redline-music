@@ -225,6 +225,10 @@ def api(server, method, path, body=None):
     return status, json.loads(data)
 
 
+def rev(server):
+    return api(server, "GET", "/api/flip/state")[1]["draft_rev"]
+
+
 def until(check, seconds=10.0):
     end = time.monotonic() + seconds
     while time.monotonic() < end:
@@ -289,7 +293,10 @@ def test_an_own_beat_has_no_flip_routes(made):
     for path in ("/api/flip/state", "/api/flip/peaks"):
         status, data = api(made, "GET", path)
         assert status == 409 and data["code"] == "own_beat"
-    assert api(made, "POST", "/api/flip/draft", {"flip": draft_json()})[1]["code"] == "own_beat"
+    assert (
+        api(made, "POST", "/api/flip/draft", {"flip": draft_json(), "base": 0})[1]["code"]
+        == "own_beat"
+    )
     assert api(made, "POST", "/api/jobs/start", {"kind": "flip_stems"})[1]["code"] == "own_beat"
 
 
@@ -335,7 +342,10 @@ def test_a_stem_before_the_analysis_is_409(made):
 def test_a_draft_is_saved_privately_and_read_back(made, root):
     folder = analyse_by_hand(root)
     edit = draft_json(arrangement=[{"label": "mine", "from_bar": 1, "to_bar": 3}])
-    assert api(made, "POST", "/api/flip/draft", {"flip": edit}) == (200, {"ok": True})
+    assert api(made, "POST", "/api/flip/draft", {"flip": edit, "base": rev(made)}) == (
+        200,
+        {"ok": True, "draft_rev": 2},
+    )
     assert stat.S_IMODE((folder / "draft.json").stat().st_mode) == 0o600
     assert api(made, "GET", "/api/flip/state")[1]["draft"]["arrangement"][0]["label"] == "mine"
 
@@ -354,15 +364,17 @@ def test_a_draft_is_saved_privately_and_read_back(made, root):
 def test_a_bad_flip_is_422_and_keeps_the_draft(made, root, change):
     folder = analyse_by_hand(root)
     before = (folder / "draft.json").read_bytes()
-    status, data = api(made, "POST", "/api/flip/draft", {"flip": draft_json(**change)})
+    status, data = api(
+        made, "POST", "/api/flip/draft", {"flip": draft_json(**change), "base": rev(made)}
+    )
     assert status == 422 and data["code"] == "invalid_flip" and data["errors"]
     assert (folder / "draft.json").read_bytes() == before
 
 
 def test_a_draft_that_is_no_flip_or_has_other_keys_is_refused(made, root):
     analyse_by_hand(root)
-    assert api(made, "POST", "/api/flip/draft", {"flip": "x"})[0] == 422
-    assert api(made, "POST", "/api/flip/draft", {"flip": None})[0] == 422
+    assert api(made, "POST", "/api/flip/draft", {"flip": "x", "base": rev(made)})[0] == 422
+    assert api(made, "POST", "/api/flip/draft", {"flip": None, "base": rev(made)})[0] == 422
     assert api(made, "POST", "/api/flip/draft", {"flip": draft_json(), "x": 1})[0] == 400
 
 
@@ -388,7 +400,7 @@ def test_propose_needs_a_text_and_an_analysis(made, root):
 
 def test_a_render_saves_the_next_version_and_runs_the_job_with_its_number(made, root):
     folder = analyse_by_hand(root)
-    status, data = api(made, "POST", "/api/flip/render", {})
+    status, data = api(made, "POST", "/api/flip/render", {"base": rev(made)})
     assert status == 202 and data == {"n": 1}
     path = folder / "flip-1.json"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
@@ -397,23 +409,23 @@ def test_a_render_saves_the_next_version_and_runs_the_job_with_its_number(made, 
     job = api(made, "GET", "/api/jobs")[1]["jobs"][0]
     assert job["kind"] == "flip_render"
     assert json.loads(Path(job["result"]).read_text()) == {"kind": "flip_render", "flip": "1"}
-    assert api(made, "POST", "/api/flip/render", {})[1] == {"n": 2}
+    assert api(made, "POST", "/api/flip/render", {"base": rev(made)})[1] == {"n": 2}
 
 
 def test_a_second_render_while_one_runs_is_409_busy_and_saves_nothing(made, root):
     folder = analyse_by_hand(root)
     (root / "slow").write_text("")
-    assert api(made, "POST", "/api/flip/render", {})[0] == 202
-    status, data = api(made, "POST", "/api/flip/render", {})
+    assert api(made, "POST", "/api/flip/render", {"base": rev(made)})[0] == 202
+    status, data = api(made, "POST", "/api/flip/render", {"base": rev(made)})
     assert status == 409 and data["code"] == "busy"
     assert flip_model.FLIP_FILE.fullmatch("flip-1.json") and not (folder / "flip-2.json").exists()
 
 
 def test_a_render_needs_an_analysis_and_a_draft(made, root):
-    assert api(made, "POST", "/api/flip/render", {})[1]["code"] == "no_analysis"
+    assert api(made, "POST", "/api/flip/render", {"base": rev(made)})[1]["code"] == "no_analysis"
     folder = analyse_by_hand(root)
     (folder / "draft.json").unlink()
-    assert api(made, "POST", "/api/flip/render", {})[1]["code"] == "no_draft"
+    assert api(made, "POST", "/api/flip/render", {"base": rev(made)})[1]["code"] == "no_draft"
     assert not list(folder.glob("flip-*.json"))
 
 
@@ -584,7 +596,7 @@ def test_a_refused_render_job_leaves_no_version_behind(made, root, monkeypatch):
         raise Busy("held")
 
     monkeypatch.setattr(made.app, "_start", refuse)
-    assert api(made, "POST", "/api/flip/render", {})[0] == 409
+    assert api(made, "POST", "/api/flip/render", {"base": rev(made)})[0] == 409
     assert sorted(p.name for p in folder.glob("flip-*.json")) == before
 
 
@@ -592,5 +604,36 @@ def test_a_draft_whose_own_parts_cannot_play_at_its_tempo_is_422(made, root):
     analyse_by_hand(root)
     flip = draft_json(bass808={"mode": "ours", "params": {}})
     flip["grid"]["bpm"] = 260
-    status, data = api(made, "POST", "/api/flip/draft", {"flip": flip})
+    status, data = api(made, "POST", "/api/flip/draft", {"flip": flip, "base": rev(made)})
     assert status == 422 and "40..220" in data["error"]
+
+
+def test_a_draft_saved_on_a_stale_base_is_409_and_keeps_the_other_writers_draft(made, root):
+    folder = analyse_by_hand(root)
+    seen = rev(made)
+    first = draft_json(arrangement=[{"label": "one", "from_bar": 0, "to_bar": 2}])
+    second = draft_json(arrangement=[{"label": "two", "from_bar": 0, "to_bar": 3}])
+    assert api(made, "POST", "/api/flip/draft", {"flip": first, "base": seen})[0] == 200
+    before = (folder / "draft.json").read_bytes()
+    status, data = api(made, "POST", "/api/flip/draft", {"flip": second, "base": seen})
+    assert status == 409 and data["code"] == "stale_base"
+    assert (folder / "draft.json").read_bytes() == before and rev(made) == seen + 1
+    assert api(made, "POST", "/api/flip/draft", {"flip": second, "base": rev(made)})[0] == 200
+    assert rev(made) == seen + 2
+
+
+def test_a_draft_needs_a_whole_base(made, root):
+    analyse_by_hand(root)
+    for body in ({"flip": draft_json()}, {"flip": draft_json(), "base": "1"}):
+        assert api(made, "POST", "/api/flip/draft", body)[0] == 400
+
+
+def test_a_render_on_a_stale_base_is_409_and_saves_no_version(made, root):
+    folder = analyse_by_hand(root)
+    seen = rev(made)
+    assert api(made, "POST", "/api/flip/draft", {"flip": draft_json(), "base": seen})[0] == 200
+    status, data = api(made, "POST", "/api/flip/render", {"base": seen})
+    assert status == 409 and data["code"] == "stale_base"
+    assert not list(folder.glob("flip-*.json"))
+    assert api(made, "POST", "/api/flip/render", {"base": seen + 1})[0] == 202
+    assert api(made, "POST", "/api/flip/render", {})[0] == 400
