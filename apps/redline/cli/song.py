@@ -1,4 +1,4 @@
-"""`redline song`: new, list, show, the page (studio) and its jobs."""
+"""`redline song`: new, list, show, the page (studio) and its jobs; `redline app`: every song."""
 
 import argparse
 import json
@@ -43,28 +43,9 @@ def _new(args: argparse.Namespace) -> int:
     beat = {"own": args.beat_seed} if own else {"file": _stored(args.beat)}
     suno = None if args.suno is None else _stored(args.suno)
     refs = tuple(_stored(p) for p in args.ref or ())
-    song = model.new_song(args.name, beat, suno, refs)
-    if args.text_seed is not None:
-        song = replace(song, text=_latest_text(args.text_seed))
-    for stored in (beat.get("file"), suno, *refs):
-        if stored is not None:
-            model.resolve_inside(stored)
-    try:
-        saved = model.save(song, 0)
-    except model.StaleRev:
-        raise model.SongError(f"{args.name}: the song exists already") from None
+    saved = model.create(args.name, beat, suno, refs, args.text_seed)
     print(f"song {saved.name}: {model.song_dir(saved.name) / 'song.json'}", flush=True)
     return 0
-
-
-def _latest_text(seed: int) -> dict[str, int]:
-    from redline.lyrics.write.generate import versions
-
-    folder = model.resolve_inside(f"private/lyrics/generated/{seed}", where="--text-seed")
-    have = versions(folder) if folder.is_dir() else {}
-    if not have:
-        raise model.SongError(f"--text-seed: seed {seed} has no text")
-    return {"seed": seed, "version": max(have)}
 
 
 def _refs(args: argparse.Namespace) -> int:
@@ -88,20 +69,38 @@ def _show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _app(args: argparse.Namespace) -> int:
+    """`redline app`: the songs' page with no song open."""
+    return _serve(None, args.port, args.no_browser)
+
+
 def _studio(args: argparse.Namespace) -> int:
+    return _serve(args.name, args.port, args.no_browser)
+
+
+def _serve(name: str | None, port: int, no_browser: bool) -> int:
     import secrets
     import signal
     import webbrowser
 
     from redline.song import server
+    from redline.song.app import AppHost
     from redline.web.local import browser_file
 
-    model.load(args.name)
+    if name is not None:
+        model.load(name)
+    host = AppHost()
+    try:
+        if name is not None:
+            host.open(name)
+    except BaseException:
+        host.rec.shutdown()
+        host.jobs.close()
+        raise
     token = secrets.token_urlsafe(32)
-    app = server.SongApp(args.name)
-    httpd = server.make_server(app, token, args.port)
+    httpd = server.make_server(host, token, port)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/?t={token}"
-    print(f"song {args.name}: {url}", flush=True)
+    print(f"song {name}: {url}" if name is not None else f"songs: {url}", flush=True)
     print("Ctrl+C stops it", flush=True)
 
     class Stop(Exception):
@@ -113,7 +112,7 @@ def _studio(args: argparse.Namespace) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, stop)
     try:
-        if not args.no_browser:
+        if not no_browser:
             webbrowser.open(browser_file(url, model.resolve_inside("work") / "studio").as_uri())
         httpd.serve_forever()
     except Stop:
@@ -121,7 +120,7 @@ def _studio(args: argparse.Namespace) -> int:
     finally:
         for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(sig, signal.SIG_IGN)
-        server.close_all(httpd, app.rec, app.jobs)
+        server.close_all(httpd, host.rec, host.jobs)
     return 0
 
 

@@ -1,4 +1,4 @@
-"""The song page's server: one song, its recording, jobs, text, mix and beat on one origin.
+"""The song page's server: the active song, its recording, jobs, text, mix and beat on one origin.
 
 The guards are `redline.web.local`'s. The studio and beat routes are the functions of
 `redline.studio.server` and `redline.beat.server`, called with the Studio or BeatStudio the
@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
@@ -47,6 +47,9 @@ from redline.studio.server import (
     wav_bytes,
 )
 from redline.web.local import MAX_BODY, BadRequest, LocalHandler, LocalServer, only
+
+if TYPE_CHECKING:
+    from redline.song.app import AppHost
 
 PAGE = "song.html"
 NOT_BUILT = "the song page is not built: run `npm --prefix apps/studio run build`"
@@ -212,15 +215,19 @@ class SongApp:
     def __init__(
         self,
         name: str,
+        rec: RecOwner,
+        jobs: JobRunner,
         root: Path | None = None,
-        make_rec: Callable[[Callable[[Path], None], Path], RecOwner] | None = None,
         argv: Callable[..., list[str]] = job_argv,
         build_studio: Callable[[model.MixInputs, Path, str], Studio] = default_studio,
         make_beat: Callable[..., BeatStudio] = BeatStudio,
         assets: AssetsLoader | None = None,
-        kill_after: float = 5.0,
     ) -> None:
-        """Serve the song `name`; the services default to the real ones."""
+        """Serve the song `name` over the process's recorder and job runner.
+
+        The recorder and the runner stay the caller's: `close` lets go of what this song holds
+        in them, never ends them. The other services default to the real ones.
+        """
         self.name = name
         self.root = (root or model.repo_root()).resolve()
         self.work = model.resolve_inside("work", self.root)
@@ -246,10 +253,11 @@ class SongApp:
         self._grids: dict[tuple[str, int, int], float | None] = {}
         self._snap: tuple[float, dict[str, Any]] | None = None
         self._snap_lock = threading.Lock()
-        make = make_rec or (lambda logged, work: RecOwner(on_take_logged=logged, work=work))
-        self.rec = make(self.take_logged, self.work)
+        self.rec = rec
+        self.jobs = jobs
+        self._rec_used = False
+        self._closed = False
         self._server_lock = self._claim_song()
-        self.jobs = JobRunner(hold=self.rec.taking, kill_after=kill_after)
         reap_orphans(self._jobs_dir())
         from redline.flip.server import FlipRoutes
 
@@ -685,6 +693,7 @@ class SongApp:
     def _launch_engine(self, song: model.Song) -> None:
         request = self._open_request(song)
         sig = self._beat_sig(song)
+        self._rec_used = True
         self.rec.open(request)
         self._engine_sig = sig
 
@@ -999,6 +1008,28 @@ class SongApp:
             self._snap = None
         return reply
 
+    # closing
+
+    def close(self) -> None:
+        """Let the song go: its recording session, its jobs, its studios, then its lock.
+
+        Raises:
+            rec.RecError: The recording session did not close; nothing was let go.
+        """
+        if self._closed:
+            return
+        if self._rec_used:
+            with contextlib.suppress(rec.RecClosed):
+                self.rec.close()
+            self._engine_sig = None
+        self._closed = True
+        self.jobs.cancel_song(self.name)
+        with self._studio_lock:
+            self._studio = self._studio_key = None
+        with self._beat_lock:
+            self._beat = None
+        self._server_lock.close()
+
     # dispatch
 
     def _area_get(self, path: str, query: dict[str, list[str]]) -> Reply:
@@ -1131,26 +1162,31 @@ class Handler(LocalHandler):
 
     def api_get(self, path: str, query: dict[str, list[str]]) -> None:
         """Every GET of the page."""
-        send_reply(self, self.server.app.get(path, query))
+        send_reply(self, self.server.host.get(path, query))
 
     def api_post(self, path: str, body: dict) -> None:
         """Every POST of the page."""
-        send_reply(self, self.server.app.post(path, body))
+        send_reply(self, self.server.host.post(path, body))
 
 
 class SongServer(LocalServer):
-    """The HTTP server with the song app and its token."""
+    """The HTTP server with the songs' host and its token."""
 
-    def __init__(self, address: tuple[str, int], app: SongApp, token: str, site: Path) -> None:
-        """Bind and keep the app and where its page is built."""
+    def __init__(self, address: tuple[str, int], host: "AppHost", token: str, site: Path) -> None:
+        """Bind and keep the host and where its page is built."""
         super().__init__(address, Handler, token, song_files(site))
-        self.app = app
+        self.host = host
         self.site = site
 
+    @property
+    def app(self) -> SongApp | None:
+        """The active song's app, None while no song is open."""
+        return self.host.active
 
-def make_server(app: SongApp, token: str, port: int = 0, site: Path | None = None) -> SongServer:
+
+def make_server(host: "AppHost", token: str, port: int = 0, site: Path | None = None) -> SongServer:
     """A server on 127.0.0.1 only; port 0 takes a free one, site defaults to the studio's build."""
-    return SongServer(("127.0.0.1", port), app, token, SITE if site is None else site)
+    return SongServer(("127.0.0.1", port), host, token, SITE if site is None else site)
 
 
 def close_all(httpd: Any, owner: Any, jobs: Any) -> None:

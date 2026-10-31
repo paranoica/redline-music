@@ -17,7 +17,7 @@ from redline.cli.lyrics import (
 )
 from redline.cli.parser import build_parser, check_record, check_studio
 from redline.cli.record import _record
-from redline.cli.song import _song
+from redline.cli.song import _app, _song
 from redline.cli.sound import (
     _effects,
     _master,
@@ -70,7 +70,7 @@ def main(argv: Sequence[str] | None = None, separator: "Separator | None" = None
         done = _beat(args, separator)
         if done is not None:
             return done
-    own = {"song": _song, "flip": _flip}
+    own = {"song": _song, "flip": _flip, "app": _app}
     if args.command in own:
         done = own[args.command](args)
         if done is not None:

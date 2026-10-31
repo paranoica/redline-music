@@ -203,6 +203,18 @@ class JobRunner:
                 threading.Thread(target=self._reap, args=(job,), daemon=True).start()
             return job.info()
 
+    def cancel_song(self, song: str, timeout: float = 15.0) -> None:
+        """Cancel every job of the song and wait for their processes to exit."""
+        with self._lock:
+            kinds = [k for s, k in self._jobs if s == song]
+        for kind in kinds:
+            self.cancel(song, kind)
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            threads = [j.thread for (s, _), j in self._jobs.items() if s == song and j.thread]
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+
     def state(self, song: str) -> dict[str, dict[str, Any]]:
         """A snapshot of the song's jobs by kind."""
         with self._lock:

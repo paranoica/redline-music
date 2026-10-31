@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     _record(commands)
     _beat(commands)
     _song(commands)
+    _app(commands)
     _flip(commands)
     effects = commands.add_parser(
         "effects", help="the effects of the rack, with their params, ranges and defaults"
@@ -350,6 +351,13 @@ def _flip(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     propose.add_argument("--version", type=int, help="the text's version (default: latest)")
 
 
+def _app(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """Register `redline app`: the songs' page."""
+    app = commands.add_parser("app", help="the songs' page: list, new song, open one")
+    app.add_argument("--port", type=int, default=0, help="port to listen on (default: free)")
+    app.add_argument("--no-browser", action="store_true", help="only print the address")
+
+
 def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     """Register `redline song` and its subcommands."""
     song = commands.add_parser("song", help="songs: one folder of choices per track")
@@ -369,7 +377,7 @@ def _song(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     show = song_commands.add_parser("show", help="print a song's file")
     show.add_argument("name", help="the song's name")
     studio = song_commands.add_parser("studio", help="open the song's page")
-    studio.add_argument("name", help="the song's name")
+    studio.add_argument("name", nargs="?", help="the song's name (default: the list of songs)")
     studio.add_argument("--port", type=int, default=0, help="port to listen on (default: free)")
     studio.add_argument("--no-browser", action="store_true", help="only print the address")
     job = song_commands.add_parser("job", help="one long piece of work of the page (internal)")

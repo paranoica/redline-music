@@ -224,6 +224,47 @@ def new_song(
     )
 
 
+class SongExists(SongError):
+    """A song of that name is already saved."""
+
+
+def latest_text(seed: int, root: Path | None = None) -> dict[str, int]:
+    """The text of a written seed at its latest version; SongError when it has none."""
+    from redline.lyrics.write.generate import versions
+
+    folder = resolve_inside(f"private/lyrics/generated/{seed}", root, "text seed")
+    have = versions(folder) if folder.is_dir() else {}
+    if not have:
+        raise SongError(f"text seed: seed {seed} has no text")
+    return {"seed": seed, "version": max(have)}
+
+
+def create(
+    name: str,
+    beat: dict[str, Any],
+    suno: str | None = None,
+    references: tuple[str, ...] = (),
+    text_seed: int | None = None,
+    root: Path | None = None,
+) -> Song:
+    """Save a new song at rev 1 after checking its name, its paths and its text.
+
+    Raises:
+        SongExists: The name is taken.
+        SongError: A name, a path or the text seed is refused.
+    """
+    song = new_song(name, beat, suno, references)
+    if text_seed is not None:
+        song = replace(song, text=latest_text(text_seed, root))
+    for stored in (song.beat.get("file"), suno, *song.references):
+        if stored is not None:
+            resolve_inside(stored, root)
+    try:
+        return save(song, 0, root)
+    except StaleRev:
+        raise SongExists(f"{name}: the song exists already") from None
+
+
 def songs_dir(root: Path | None = None) -> Path:
     """The folder of all songs, checked to be inside the root."""
     return resolve_inside("private/songs", root, "songs")

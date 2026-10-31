@@ -1,3 +1,4 @@
+import functools
 import http.client
 import io
 import json
@@ -14,6 +15,8 @@ from redline.cli import main
 from redline.engine.render import Engine
 from redline.record.session import Outcome
 from redline.song import model, rec
+from redline.song.app import AppHost
+from redline.song.jobs import JobRunner
 from redline.song.rec import NotReady, TakeRunning
 from redline.song.server import SongApp, close_all, job_argv, make_server
 from redline.studio.server import Studio
@@ -142,20 +145,20 @@ def made(root, tmp_path):
     dist.mkdir()
     (dist / "song.html").write_bytes(b"<!doctype html><title>song</title>")
     (dist / "song.js").write_text("1", encoding="utf-8")
-    app = SongApp(
-        NAME,
+    host = AppHost(
         make_rec=FakeRec,
-        argv=argv,
-        build_studio=studio,
-        assets=lambda: (None, None, str),
+        make_app=functools.partial(
+            SongApp, argv=argv, build_studio=studio, assets=lambda: (None, None, str)
+        ),
         kill_after=0.3,
     )
+    app = host.open(NAME)
     app.built = built
-    httpd = make_server(app, TOKEN, port=0, site=dist)
+    httpd = make_server(host, TOKEN, port=0, site=dist)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield httpd
     httpd.shutdown()
-    app.jobs.close(timeout=5)
+    host.jobs.close(timeout=5)
     httpd.server_close()
 
 
@@ -805,11 +808,13 @@ def test_a_new_server_reaps_the_jobs_its_dead_predecessor_left(root, monkeypatch
     model.save(model.new_song(NAME, {"file": "input/beat.wav"}, None, ("input/ref.wav",)), 0)
     reaped = []
     monkeypatch.setattr("redline.song.server.reap_orphans", lambda folder: reaped.append(folder))
-    app = SongApp(NAME, make_rec=FakeRec, assets=lambda: (None, None, str))
+    jobs = JobRunner()
+    app = SongApp(NAME, FakeRec(None, None), jobs, assets=lambda: (None, None, str))
     try:
         assert reaped == [root / "work" / "songs" / NAME / "jobs"]
     finally:
-        app.jobs.close(timeout=5)
+        app.close()
+        jobs.close(timeout=5)
 
 
 def test_a_poll_reads_the_peaks_once_so_a_clip_between_polls_is_kept(made, root):
@@ -824,7 +829,7 @@ def test_a_second_server_for_the_same_song_is_refused_and_reaps_nothing(made, ro
     reaped = []
     monkeypatch.setattr("redline.song.server.reap_orphans", lambda folder: reaped.append(folder))
     with pytest.raises(model.SongError, match="already open"):
-        SongApp(NAME, make_rec=FakeRec, assets=lambda: (None, None, str))
+        SongApp(NAME, FakeRec(None, None), JobRunner(), assets=lambda: (None, None, str))
     assert reaped == []
 
 
