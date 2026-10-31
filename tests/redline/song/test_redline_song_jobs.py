@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import signal
@@ -323,6 +324,7 @@ def test_cancelling_a_paused_job_lets_it_exit(tmp_path):
         "print('up', flush=True)\n"
         "time.sleep(60)\n"
     )
+    pid = None
     try:
         result = tmp_path / "r.json"
         runner.start("s", "sep", job(graceful, result), result, heavy=True)
@@ -339,6 +341,10 @@ def test_cancelling_a_paused_job_lets_it_exit(tmp_path):
         assert not Path(f"/proc/{pid}").exists()
     finally:
         runner.close(timeout=5)
+        # a failed run would leave the job stopped for good: the runner's SIGKILL is 30 s away
+        if pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(pid, signal.SIGKILL)
 
 
 def test_a_job_left_paused_by_a_dead_server_is_reaped_at_the_next_start(tmp_path):
