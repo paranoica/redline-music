@@ -7,8 +7,9 @@ content repeats so a long arrangement stays under the format's 64 patterns.
 """
 
 import json
-from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -29,6 +30,16 @@ HATS = {
     "16ths": "xxxxxxxxxxxxxxxx",
     "trip_roll": "xxxxxxxxxxxxxx33",
     "roll32": "xxxxxxxxxxxx2222",
+}
+
+# a drum row of a block: its sound in the score and the instrument that plays it
+DRUM_SOUNDS = {
+    "kick": ("drum_kick", "kick"),
+    "snare": ("drum_snare", "snare"),
+    "clap": ("drum_clap", "clap"),
+    "hat": ("drum_hat", "hat_closed"),
+    "hat_open": ("drum_hat_open", "hat_open"),
+    "perc": ("drum_perc", "rim"),
 }
 
 
@@ -57,11 +68,15 @@ class PlayBar:
         source: Index of the source bar it was taken from.
         notes: The 808 notes starting in it.
         hat: Name of a hat preset, or None for no hats.
+        drums: Our drum rows in it: row name to 16 characters of "x" and ".".
+        own: The notes are the block's own, so the last ones may ring on into the next bar.
     """
 
     source: int
     notes: tuple[FlipNote, ...] = ()
     hat: str | None = None
+    drums: Mapping[str, str] = field(default_factory=dict)
+    own: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,12 +115,21 @@ def chunk_sizes(bars: int) -> list[int]:
     return sizes
 
 
+def _check_drums(i: int, drums: Mapping[str, str]) -> None:
+    for row, text in drums.items():
+        if row not in DRUM_SOUNDS:
+            raise ValueError(f"bars[{i}].drums: no row {row!r}; one of {', '.join(DRUM_SOUNDS)}")
+        if len(text) != STEPS or set(text) - {"x", "."}:
+            raise ValueError(f"bars[{i}].drums.{row}: {STEPS} characters of x and . expected")
+
+
 def _check_bars(bars: Sequence[PlayBar]) -> None:
     if not 1 <= len(bars) <= MAX_BARS:
         raise ValueError(f"{len(bars)} bars in play order, a flip takes 1 to {MAX_BARS}")
     for i, bar in enumerate(bars):
         if bar.hat is not None and bar.hat not in HATS:
             raise ValueError(f"bars[{i}].hat: no preset {bar.hat!r}; one of {', '.join(HATS)}")
+        _check_drums(i, bar.drums)
         for j, n in enumerate(bar.notes):
             path = f"bars[{i}].notes[{j}]"
             if not 0 <= n.step < STEPS:
@@ -122,7 +146,7 @@ def _bass_notes(bars: Sequence[PlayBar], sizes: list[int], compromises: list[str
     """The 808 notes at play-order steps with their ends cut where the score cannot hold them."""
     run_end = [0] * len(bars)
     for i in range(len(bars) - 1, -1, -1):
-        joined = i + 1 < len(bars) and bars[i + 1].source == bars[i].source + 1
+        joined = i + 1 < len(bars) and (bars[i].own or bars[i + 1].source == bars[i].source + 1)
         run_end[i] = run_end[i + 1] if joined else i
     notes = []
     for i, bar in enumerate(bars):
@@ -162,7 +186,7 @@ def flip_score(
     hat: HatParams | None = None,
     compromises: list[str] | None = None,
 ) -> dict[str, Any]:
-    """A valid beat score playing the flip's 808 and hats bar by bar in play order.
+    """A valid beat score playing the flip's 808, hats and drum rows bar by bar in play order.
 
     Args:
         bars: The play order.
@@ -173,7 +197,7 @@ def flip_score(
         compromises: When given, a line is appended for each note the score had to shorten.
 
     Returns:
-        The score, with sounds `bass` and `hat`.
+        The score, with sounds `bass` and `hat`, and `drum_<row>` for each drum row in use.
 
     Raises:
         ValueError: A bar or a setting the format refuses.
@@ -187,18 +211,19 @@ def flip_score(
 
     patterns: dict[str, dict[str, Any]] = {}
     keys: dict[str, str] = {}
-    counts = {"bass": 0, "hat": 0}
+    counts: dict[str, int] = {}
 
     def pattern(prefix: str, size: int, row: Any) -> str:
         key = json.dumps([prefix, size, row], sort_keys=True)
         if key not in keys:
-            name = f"{prefix}_{counts[prefix]}"
-            counts[prefix] += 1
+            name = f"{prefix}_{counts.get(prefix, 0)}"
+            counts[prefix] = counts.get(prefix, 0) + 1
             keys[key] = name
             patterns[name] = {"bars": size, "rows": {prefix: row}}
         return keys[key]
 
     sections = []
+    used: set[str] = set()
     first = 0
     for k, size in enumerate(sizes):
         play = []
@@ -210,9 +235,19 @@ def flip_score(
         if any(presets):
             text = "".join(HATS[p] if p else "." * STEPS for p in presets)
             play.append(pattern("hat", size, text))
+        for row, (sound, _) in DRUM_SOUNDS.items():
+            text = "".join(bars[b].drums.get(row, "." * STEPS) for b in range(first, first + size))
+            if "x" in text:
+                play.append(pattern(sound, size, text))
+                used.add(row)
         sections.append({"name": f"s{k}", "bars": size, "play": play})
         first += size
 
+    drum_sounds = {
+        DRUM_SOUNDS[row][0]: {"instrument": DRUM_SOUNDS[row][1]}
+        for row in DRUM_SOUNDS
+        if row in used
+    }
     score = {
         "version": 1,
         "bpm": bpm,
@@ -222,6 +257,7 @@ def flip_score(
         "sounds": {
             "bass": {"instrument": "bass808", "params": asdict(bass or Bass808Params())},
             "hat": {"instrument": "hat_closed", "params": asdict(hat or HatParams())},
+            **drum_sounds,
         },
         "patterns": patterns,
         "sections": sections,
@@ -259,3 +295,47 @@ def render_flip_parts(
         got += stems.shape[1]
     stems = np.concatenate(parts, axis=1)[:, skip : skip + frames]
     return {name: np.ascontiguousarray(stems[i]) for i, name in enumerate(names)}
+
+
+def render_drum_rows(
+    bars: Sequence[PlayBar], bpm: float, swing: float = 50.0
+) -> dict[str, npt.NDArray[np.float32]]:
+    """The drum rows in use, each rendered from a score of its own.
+
+    The synth seeds a hit's noise from its place among all the hits of the score, so rows in one
+    score would change each other's samples; apart, a row sounds the same whatever else is filled.
+
+    Returns:
+        Row name to a float32 array of shape (frames, 2), the play order's length.
+
+    Raises:
+        ValueError: A bar or a setting the format refuses.
+    """
+    out = {}
+    for row, (sound, _) in DRUM_SOUNDS.items():
+        if not any("x" in bar.drums.get(row, "") for bar in bars):
+            continue
+        alone = [
+            PlayBar(bar.source, drums={k: v for k, v in bar.drums.items() if k == row})
+            for bar in bars
+        ]
+        out[row] = render_flip_parts(flip_score(alone, bpm, swing))[sound]
+    return out
+
+
+# one bar of every row, a fixed groove the drum layer is levelled against
+_REFERENCE = {
+    "kick": "x.......x.x.....",
+    "snare": "....x.......x...",
+    "clap": "....x.......x...",
+    "hat": "x.x.x.x.x.x.x.x.",
+    "hat_open": "..x.......x.....",
+    "perc": "......x.....x...",
+}
+REFERENCE_BPM = 120.0
+
+
+@lru_cache(maxsize=1)
+def reference_drums() -> dict[str, npt.NDArray[np.float32]]:
+    """The drum rows' fixed groove rendered one stem per row, for levelling the drum layer."""
+    return render_drum_rows([PlayBar(i, drums=_REFERENCE) for i in range(2)], REFERENCE_BPM)

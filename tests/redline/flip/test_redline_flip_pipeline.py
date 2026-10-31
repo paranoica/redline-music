@@ -1,3 +1,4 @@
+import itertools
 import json
 import os
 import stat
@@ -441,3 +442,160 @@ def test_a_flip_render_over_a_source_that_changed_since_is_refused(analysed):
     finally:
         source.write_bytes(kept)
         os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+
+QUIET = {"drums": -60, "other": -60, "bass": -60}
+
+
+def own_flip(folder, blocks, **changes):
+    data = flip_data(folder, **changes)
+    data["grid"] = {"bpm": BPM, "downbeat_s": DOWNBEAT, "swing": 50}
+    data["arrangement"] = blocks
+    return model.save_new(folder, model.parse(data))
+
+
+def onsets(x, rate, floor=0.2, gap=0.04):
+    """Seconds of the first loud frame of each sound (frames within `gap` s are one sound)."""
+    loud = np.flatnonzero(np.abs(x).max(axis=1) > floor * np.abs(x).max())
+    firsts = [loud[0], *(b for a, b in itertools.pairwise(loud) if b - a > gap * rate)]
+    return [float(f) / rate for f in firsts]
+
+
+def block(label, a, b, **fields):
+    return {"label": label, "from_bar": a, "to_bar": b, **fields}
+
+
+def test_a_moved_note_renders_at_its_new_step(analysed):
+    folder = folder_of(analysed)
+    bass_only = {"drums": -60, "other": -60, "bass": 0}
+    heard = []
+    for step in (0, 5):
+        note = {"step": step, "len": 2, "note": 48, "vel": 100}
+        n = own_flip(
+            folder,
+            [block("a", 0, 1, notes=[note])],
+            gains=bass_only,
+            bass808={"mode": "ours", "params": {}},
+        )
+        out, rate = sf.read(pipeline.render(folder, n), dtype="float32")
+        heard.append(onsets(out, rate)[0])
+    assert heard[1] - heard[0] == pytest.approx(5 * STEP_S, abs=0.005)
+
+
+def test_a_second_block_plays_its_notes_from_its_own_start(analysed):
+    folder = folder_of(analysed)
+    note = {"step": 19, "len": 2, "note": 48, "vel": 100}
+    n = own_flip(
+        folder,
+        [block("a", 0, 1, notes=[]), block("b", 1, 3, notes=[note])],
+        gains={"drums": -60, "other": -60, "bass": 0},
+        bass808={"mode": "ours", "params": {}},
+    )
+    out, rate = sf.read(pipeline.render(folder, n), dtype="float32")
+    assert onsets(out, rate)[0] == pytest.approx(BAR_S + 19 * STEP_S, abs=0.005)
+
+
+def test_empty_notes_silence_the_808_of_their_block(analysed):
+    folder = folder_of(analysed)
+    loud = {"drums": -60, "other": -60, "bass": 0}
+    mode = {"mode": "ours", "params": {}}
+    # source bar 2 holds a note at step 0
+    kept = own_flip(folder, [block("a", 2, 3)], gains=loud, bass808=mode)
+    silent = own_flip(folder, [block("a", 2, 3, notes=[])], gains=loud, bass808=mode)
+    heard, rate = sf.read(pipeline.render(folder, kept), dtype="float32")
+    quiet, _ = sf.read(pipeline.render(folder, silent), dtype="float32")
+    assert energy(heard[: int(BAR_S * rate)]) > 0.05
+    assert energy(quiet[: int(BAR_S * rate)]) < 0.002
+
+
+def test_our_kick_row_renders_on_its_steps(analysed):
+    folder = folder_of(analysed)
+    row = "x.......x...x..." + "." + "x" + "." * 14
+    n = own_flip(folder, [block("a", 0, 2, drums={"kick": row})], gains=QUIET)
+    out, rate = sf.read(pipeline.render(folder, n), dtype="float32")
+    expected = [0, 8, 12, 17]
+    assert len(onsets(out, rate)) == 4
+    for found, step in zip(onsets(out, rate), expected, strict=True):
+        assert found == pytest.approx(step * STEP_S, abs=0.005)
+
+
+def test_a_drum_row_plays_whatever_the_hats_mode(analysed):
+    folder = folder_of(analysed)
+    kick = {"kick": "x" + "." * 15}
+    originals = own_flip(folder, [block("a", 0, 1)], gains=QUIET)
+    layered = own_flip(folder, [block("a", 0, 1, drums=kick)], gains=QUIET)
+    base, rate = sf.read(pipeline.render(folder, originals), dtype="float32")
+    out, _ = sf.read(pipeline.render(folder, layered), dtype="float32")
+    assert not np.array_equal(base, out)
+    assert onsets(out, rate)[0] == pytest.approx(0.0, abs=0.005)
+
+
+def capture_ours(monkeypatch):
+    seen = {}
+    real = pipeline.mixer.mix_flip
+
+    def spy(stems, ours, flip):
+        seen.update(ours)
+        return real(stems, ours, flip)
+
+    monkeypatch.setattr(pipeline.mixer, "mix_flip", spy)
+    return seen
+
+
+def test_adding_a_snare_row_leaves_the_kick_rows_samples_unchanged(analysed, monkeypatch):
+    folder = folder_of(analysed)
+    seen = capture_ours(monkeypatch)
+    kick = "x.......x......."
+    only = own_flip(folder, [block("a", 0, 1, drums={"kick": kick})])
+    pipeline.render(folder, only)
+    alone = {k: v.copy() for k, v in seen.items()}
+    both = own_flip(folder, [block("a", 0, 1, drums={"kick": kick, "snare": "....x.......x..."})])
+    pipeline.render(folder, both)
+    np.testing.assert_array_equal(seen["drum_kick"], alone["drum_kick"])
+    assert "drum_snare" in seen and "drum_snare" not in alone
+
+
+def test_the_drum_layer_level_follows_the_source_drums_not_the_rows(analysed, monkeypatch):
+    folder = folder_of(analysed)
+    seen = capture_ours(monkeypatch)
+    n = own_flip(folder, [block("a", 0, 1, drums={"kick": "x" + "." * 15})])
+    pipeline.render(folder, n)
+    stems = pipeline.load_stems(folder)
+    gain = pipeline.mixer.drum_layer_gain(stems["drums"], pipeline.reference_drums())
+    raw = pipeline.render_drum_rows([pipeline.PlayBar(0, drums={"kick": "x" + "." * 15})], BPM)[
+        "kick"
+    ]
+    np.testing.assert_allclose(seen["drum_kick"], raw * np.float32(gain), atol=1e-7)
+
+
+def test_gains_ours_scales_the_drum_layer(analysed):
+    folder = folder_of(analysed)
+    kick = {"kick": "x" + "." * 15}
+    loud = own_flip(folder, [block("a", 0, 1, drums=kick)], gains=QUIET)
+    soft = own_flip(folder, [block("a", 0, 1, drums=kick)], gains={**QUIET, "ours": -12})
+    a, _ = sf.read(pipeline.render(folder, loud), dtype="float32")
+    b, _ = sf.read(pipeline.render(folder, soft), dtype="float32")
+    # mastered to the source loudness, the layer is the same sound; only the stems' share moves
+    assert not np.array_equal(a, b)
+
+
+def test_a_synth_tempo_with_drums_is_refused_before_rendering(analysed):
+    folder = folder_of(analysed)
+    data = flip_data(folder)
+    data["grid"] = {"bpm": 250.0, "downbeat_s": DOWNBEAT, "swing": 50}
+    data["arrangement"] = [block("a", 0, 1, drums={"kick": "x" + "." * 15})]
+    n = model.save_new(folder, model.parse(data))
+    with pytest.raises(pipeline.PipelineError, match="250"):
+        pipeline.render(folder, n)
+
+
+def test_a_score_the_synth_refuses_is_a_pipeline_error(analysed, monkeypatch):
+    folder = folder_of(analysed)
+    n = own_flip(folder, [block("a", 0, 1, drums={"kick": "x" + "." * 15})])
+
+    def refuse(*args, **kwargs):
+        raise ValueError("bars[0].hat: no preset 'nope'")
+
+    monkeypatch.setattr(pipeline, "flip_score", refuse)
+    with pytest.raises(pipeline.PipelineError, match="no preset"):
+        pipeline.render(folder, n)

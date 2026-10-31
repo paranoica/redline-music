@@ -12,7 +12,7 @@ import re
 import shutil
 import tempfile
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,8 @@ from redline.flip.score import (
     FlipNote,
     PlayBar,
     flip_score,
+    reference_drums,
+    render_drum_rows,
     render_flip_parts,
 )
 from redline.flip.stems import (
@@ -329,16 +331,29 @@ def _play_bars(flip: model.Flip, analysis: dict[str, Any], frames: int) -> list[
     play = []
     for index, block in enumerate(flip.arrangement):
         hat = flip.hats_patterns[index] if flip.hats_mode == "ours" else None
-        for bar in range(block.from_bar, block.to_bar):
-            play.append(PlayBar(bar, tuple(notes_of.get(bar, ())), hat))
+        own = flip.bass_mode == "ours" and block.notes is not None
+        for k, bar in enumerate(range(block.from_bar, block.to_bar)):
+            if own:
+                notes = tuple(
+                    FlipNote(n.step - k * STEPS_PER_BAR, n.length, n.note, n.vel / 127.0)
+                    for n in block.notes or ()
+                    if n.step // STEPS_PER_BAR == k
+                )
+            else:
+                notes = tuple(notes_of.get(bar, ()))
+            drums = {
+                row: text[k * STEPS_PER_BAR : (k + 1) * STEPS_PER_BAR]
+                for row, text in (block.drums or {}).items()
+            }
+            play.append(PlayBar(bar, notes, hat, drums, own))
     return play
 
 
 def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
     """Render flip-<n>.json of the folder to flip-<n>.wav with its report.
 
-    The flip's grid replaces the analysis grid; our 808 and hats come from a generated score
-    in play order; DrumSep runs only when the hats are removed or replaced.
+    The flip's grid replaces the analysis grid; our 808, hats and drum rows come from a generated
+    score in play order; DrumSep runs only when the hats are removed or replaced.
 
     Args:
         folder: `work/flips/<sha8>`.
@@ -349,8 +364,8 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
         The path of the wav.
 
     Raises:
-        PipelineError: The flip or the analysis is missing or unusable.
-        ValueError: The arrangement leaves the source, or a score setting is refused.
+        PipelineError: The flip or the analysis is missing or unusable, or the score refuses it.
+        ValueError: The arrangement leaves the source.
     """
     path = inside(folder, f"flip-{n}.json")
     if not path.is_file():
@@ -370,16 +385,30 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
 
     notes: list[str] = []
     ours: dict[str, Samples] = {}
-    if "ours" in (flip.bass_mode, flip.hats_mode):
-        score = flip_score(
-            _play_bars(flip, analysis, frames),
-            flip.bpm,
-            flip.swing,
-            _bass_params(flip.bass_params),
-            compromises=notes,
-        )
-        parts = render_flip_parts(score)
+    if "ours" in (flip.bass_mode, flip.hats_mode) or any(
+        b.drums or b.notes for b in flip.arrangement
+    ):
+        try:
+            play = _play_bars(flip, analysis, frames)
+            score = flip_score(
+                [replace(bar, drums={}) for bar in play],
+                flip.bpm,
+                flip.swing,
+                _bass_params(flip.bass_params),
+                compromises=notes,
+            )
+            parts = render_flip_parts(score)
+            rows = render_drum_rows(play, flip.bpm, flip.swing)
+        except ValueError as error:
+            raise PipelineError(str(error)) from None
         ours = {"bass808": parts["bass"], "hats": parts["hat"]}
+        level = (
+            mixer.drum_layer_gain(stems["drums"], reference_drums())
+            if any(b.drums for b in flip.arrangement)
+            else 1.0
+        )
+        for row, stem in rows.items():
+            ours[f"drum_{row}"] = stem * np.float32(level)
     # the stems add up to the source: its loudness is what the flip is mastered to
     whole = sum(stems[k] for k in ("drums", "bass", "other", "vocals") if k in stems)
     target = integrated_lufs(np.asarray(whole, dtype=np.float32), FLIP_RATE)

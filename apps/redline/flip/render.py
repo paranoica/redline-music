@@ -15,7 +15,7 @@ import soundfile as sf
 from redline.core import native
 from redline.core.loudness import integrated_lufs
 from redline.core.private import write_private
-from redline.flip.model import BEATS_PER_BAR, Block, Effect, Flip
+from redline.flip.model import BEATS_PER_BAR, DRUM_ROWS, Block, Effect, Flip
 
 Samples = npt.NDArray[np.float32]
 
@@ -245,7 +245,9 @@ def mix_flip(stems48: Mapping[str, Samples], ours48: Mapping[str, Samples], flip
     Args:
         stems48: source stems, (frames, 2): drums, bass, other, optionally vocals (kept with
             other) and the DrumSep stems by name (hh, ride, crash) for removed hats.
-        ours48: our renders in play order: `bass808` for the ours 808, `hats` for ours hats.
+        ours48: our renders in play order: `bass808` for the ours 808, `hats` for ours hats, and
+            `drum_<row>` for the drum rows, already at their level (see `drum_layer_gain`); they
+            are added over the mix after `gains.ours`.
         flip: the flip.
 
     Raises:
@@ -284,6 +286,10 @@ def mix_flip(stems48: Mapping[str, Samples], ours48: Mapping[str, Samples], flip
         return np.float32(10.0 ** (flip.gains[name] / 20.0))
 
     mixed = drums * gain("drums") + other * gain("other") + bass * gain("bass")
+    layer = [_fit(ours48[k], total) for k in map("drum_{}".format, DRUM_ROWS) if k in ours48]
+    if layer:
+        ours_gain = np.float32(10.0 ** ((flip.ours_gain or 0.0) / 20.0))
+        mixed = mixed + sum(layer[1:], layer[0]) * ours_gain
     return apply_effects(mixed.astype(np.float32), starts, flip.effects, RATE)
 
 
@@ -312,6 +318,20 @@ def _at_level_of(ours: Samples, replaced: Samples) -> Samples:
     if have <= 0.0 or want <= 0.0:
         return ours
     return (ours * np.float32(want / have)).astype(np.float32)
+
+
+def drum_layer_gain(source_drums: Samples, reference: Mapping[str, Samples]) -> float:
+    """The one gain that puts our drum rows at the source drums' level.
+
+    The reference is the rows' fixed groove played together; they sit at the source stem's playing
+    loudness as a kit, keeping the synth's balance between them. It does not depend on which rows
+    a flip fills, so adding a row leaves the others as they were.
+    """
+    kit = sum(reference.values(), np.zeros_like(next(iter(reference.values()))))
+    have, want = _playing_rms(kit), _playing_rms(source_drums)
+    if have <= 0.0 or want <= 0.0:
+        return 1.0
+    return want / have
 
 
 def fit_ceiling(mix: Samples, ceiling_db: float = CEILING_DB) -> tuple[Samples, float]:

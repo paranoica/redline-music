@@ -377,3 +377,40 @@ def test_a_first_bar_that_starts_before_the_file_is_padded_not_wrapped():
     # bar 0 starts 2 frames before the file, bar 1 at frame 3
     out = render.splice(stem, [-2, 3, 8], [Block("a", 0, 1)], RATE)
     assert out[:, 0].tolist() == [0.0, 0.0, 1.0, 2.0, 3.0]
+
+
+def test_the_drum_layer_is_added_over_the_mix_and_follows_gains_ours():
+    base = render.mix_flip(stems(), ours(), flip_for())
+    layer = {"drum_kick": np.full((4 * RATE, 2), 0.05, np.float32)}
+    plain = render.mix_flip(stems(), {**ours(), **layer}, flip_for())
+    assert np.allclose(plain, base + 0.05, atol=1e-5)
+    half = render.mix_flip(stems(), {**ours(), **layer}, flip_for(gains__ours=-6.0206))
+    assert np.allclose(half, base + 0.025, atol=1e-5)
+    two = {**layer, "drum_snare": np.full((4 * RATE, 2), 0.01, np.float32)}
+    assert np.allclose(
+        render.mix_flip(stems(), {**ours(), **two}, flip_for()), base + 0.06, atol=1e-5
+    )
+
+
+def test_the_drum_layer_is_not_scaled_by_the_drums_gain_and_pads_a_short_render():
+    layer = {"drum_hat": np.full((4 * RATE - 10, 2), 0.05, np.float32)}
+    out = render.mix_flip(stems(), {**ours(), **layer}, flip_for(gains__drums=-60))
+    assert np.allclose(out[: 4 * RATE - 20], 0.0001 + 0.2 + 0.41 + 0.05, atol=1e-4)
+    assert out.shape == (4 * RATE, 2)
+
+
+def test_a_flip_without_a_drum_layer_mixes_as_the_modes_say():
+    expected = 0.1 + 0.2 + 0.41
+    assert np.allclose(render.mix_flip(stems(), ours(), flip_for()), expected, atol=1e-5)
+
+
+def test_the_drum_layer_gain_comes_from_the_source_drums_and_the_reference_only():
+    reference = {"kick": white(RATE, 1, 0.3), "snare": white(RATE, 2, 0.1)}
+    kit = reference["kick"] + reference["snare"]
+    for source_level in (0.05, 0.2):
+        drums = white(RATE, 3, source_level)
+        gain = render.drum_layer_gain(drums, reference)
+        assert render._playing_rms(kit * np.float32(gain)) == pytest.approx(
+            render._playing_rms(drums), rel=1e-4
+        )
+    assert render.drum_layer_gain(np.zeros((RATE, 2), np.float32), reference) == 1.0

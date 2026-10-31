@@ -12,6 +12,7 @@ from redline.flip.score import (
     chunk_sizes,
     flip_score,
     note_name,
+    render_drum_rows,
     render_flip_parts,
 )
 
@@ -226,3 +227,99 @@ def test_808_pitch_matches_the_midi():
         freq = np.argmax(spectrum) * RATE / (1 << 18)
         want = 440 * 2 ** ((midi - 69) / 12)
         assert abs(1200 * np.log2(freq / want)) < 25
+
+
+def kit(n: int, **rows: str) -> list[PlayBar]:
+    return [PlayBar(i, drums=rows) for i in range(n)]
+
+
+def test_each_drum_row_has_its_own_sound_apart_from_the_ours_hats():
+    rows = {
+        "kick": "x" + "." * 15,
+        "snare": "." * 4 + "x" + "." * 11,
+        "clap": "." * 8 + "x" + "." * 7,
+        "hat": "x" * 16,
+        "hat_open": "." * 2 + "x" + "." * 13,
+        "perc": "." * 15 + "x",
+    }
+    score = flip_score([PlayBar(0, hat="8ths", drums=rows)], 140)
+    sounds = {n: s["instrument"] for n, s in score["sounds"].items()}
+    assert sounds == {
+        "bass": "bass808",
+        "hat": "hat_closed",
+        "drum_kick": "kick",
+        "drum_snare": "snare",
+        "drum_clap": "clap",
+        "drum_hat": "hat_closed",
+        "drum_hat_open": "hat_open",
+        "drum_perc": "rim",
+    }
+    assert len(events(score, "hat")) == 8
+    assert len(events(score, "drum_hat")) == 16
+    assert [e["step"] for e in events(score, "drum_snare")] == [4]
+    assert redline_dsp.beat_check(json.dumps(score)) == []
+
+
+def test_a_score_without_drum_rows_has_only_bass_and_hat_sounds():
+    score = flip_score(kit(2, kick="." * 16), 140)
+    assert set(score["sounds"]) == {"bass", "hat"}
+
+
+def test_drum_rows_follow_the_8_4_1_chunking():
+    bars = kit(13, kick="x...x...x...x...")
+    score = flip_score(bars, 140)
+    assert [s["bars"] for s in score["sections"]] == [8, 4, 1]
+    assert len(events(score, "drum_kick")) == 13 * 4
+    assert len({k for k in score["patterns"] if k.startswith("drum_kick")}) == 3
+
+
+def test_a_drum_row_that_is_empty_in_a_chunk_adds_no_pattern_there():
+    bars = kit(8, kick="." * 16) + kit(4, kick="x" + "." * 15)
+    score = flip_score(bars, 140)
+    assert [len(s["play"]) for s in score["sections"]] == [0, 1]
+
+
+def test_a_bad_drum_row_is_refused_with_its_place():
+    with pytest.raises(ValueError, match=r"bars\[1\].drums: no row 'tom'"):
+        flip_score([PlayBar(0), PlayBar(1, drums={"tom": "." * 16})], 140)
+    with pytest.raises(ValueError, match=r"bars\[0\].drums.kick"):
+        flip_score([PlayBar(0, drums={"kick": "x" * 15})], 140)
+    with pytest.raises(ValueError, match=r"bars\[0\].drums.kick"):
+        flip_score([PlayBar(0, drums={"kick": "x" * 15 + "y"})], 140)
+
+
+def test_a_block_note_may_ring_into_the_next_bar_and_a_source_note_may_not():
+    notes = (FlipNote(12, 8, 36),)
+    own = [PlayBar(0, notes, own=True), PlayBar(5)]
+    found: list[str] = []
+    table = events(flip_score(own, 140, compromises=found), "bass")
+    assert table[0]["off"] - table[0]["start"] == pytest.approx(8 * RATE * 60 / 140 / 4, abs=2)
+    assert found == []
+    cut: list[str] = []
+    flip_score([PlayBar(0, notes), PlayBar(5)], 140, compromises=cut)
+    assert len(cut) == 1
+
+
+def test_drum_stems_have_the_play_orders_length_and_the_row_does_not_leak():
+    score = flip_score(kit(2, kick="x" + "." * 15), 140)
+    parts = render_flip_parts(score)
+    assert set(parts) == {"bass", "hat", "drum_kick"}
+    assert parts["drum_kick"].shape == (round(2 * 4 * 60 / 140 * RATE), 2)
+    assert np.abs(parts["drum_kick"]).max() > 0.05
+
+
+def test_a_row_added_leaves_the_other_rows_samples_unchanged():
+    kick = "x......." * 2
+    alone = render_drum_rows(kit(2, kick=kick), 140)
+    both = render_drum_rows(kit(2, kick=kick, snare="....x..." * 2), 140)
+    assert set(alone) == {"kick"} and set(both) == {"kick", "snare"}
+    np.testing.assert_array_equal(alone["kick"], both["kick"])
+    assert np.abs(both["snare"]).max() > 0.05
+
+
+def test_in_one_score_a_second_row_shifts_the_noise_of_the_first():
+    # why the rows are rendered apart
+    kick = "x......." * 2
+    alone = render_flip_parts(flip_score(kit(2, kick=kick), 140))["drum_kick"]
+    both = render_flip_parts(flip_score(kit(2, kick=kick, snare="....x..." * 2), 140))["drum_kick"]
+    assert not np.array_equal(alone, both)
