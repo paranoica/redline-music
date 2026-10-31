@@ -14,7 +14,7 @@ from redline.core import native
 from redline.core.private import make_private_dir
 from redline.flip import model, pipeline
 from redline.flip import render as mixer
-from redline.flip.score import HATS
+from redline.flip.score import HATS, flip_score
 from redline.record.takes import file_sha256
 from redline.song import model as song_model
 from redline.song.jobs import ACTIVE, Busy
@@ -63,6 +63,13 @@ def effect_ranges() -> dict[str, dict[str, dict[str, Any]]]:
             if p["name"] in wanted
         }
     return out
+
+
+def _source_bars(flip: model.Flip, analysis: dict[str, Any]) -> int:
+    bars = len(mixer.source_bar_starts(flip, analysis["frames"], analysis["rate"])) - 1
+    if bars < 1:
+        raise ApiError(HTTPStatus.CONFLICT, "the grid leaves no whole bar", "no_analysis")
+    return bars
 
 
 def _stale() -> ApiError:
@@ -224,7 +231,85 @@ class FlipRoutes:
             HTTPStatus.OK, wav_bytes(np.asarray(samples, dtype=np.float32), rate), "audio/wav"
         )
 
+    def _draft_flip(self, ctx: Context) -> model.Flip:
+        try:
+            return model.load(pipeline.inside(ctx.folder, model.DRAFT))
+        except (model.FlipError, pipeline.PipelineError):
+            raise ApiError(HTTPStatus.CONFLICT, "the draft is missing", "no_draft") from None
+
+    def source_notes(self, query: dict[str, list[str]]) -> Reply:
+        """The source's 808 notes per source bar, snapped to the draft's grid."""
+        ctx = self.context()
+        analysis = self._analysis(ctx)
+        assert analysis is not None
+        base = self._draft_flip(ctx)
+        bars = _source_bars(base, analysis)
+        whole = replace(
+            base,
+            bass_mode="ours",
+            hats_mode="original",
+            hats_remove=(),
+            hats_patterns=(),
+            arrangement=(model.Block("source", 0, bars),),
+        )
+        play = pipeline._play_bars(whole, analysis, analysis["frames"])
+        return reply_json(
+            HTTPStatus.OK,
+            {
+                "bars": [
+                    [
+                        {"step": n.step, "len": n.len, "note": n.midi, "vel": round(n.vel * 127)}
+                        for n in bar.notes
+                    ]
+                    for bar in play
+                ]
+            },
+        )
+
     # writes
+
+    def block_score(self, body: dict) -> Reply:
+        """A beat score of one block's ours layer: its 808 and drum rows, for the editor's audition.
+
+        The block is the one the page is editing; a block without notes plays the source notes.
+        """
+        only(body, "block", "grid")
+        grid = body.get("grid")
+        if grid is not None:
+            if not isinstance(grid, dict):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "grid is an object")
+            only(grid, "bpm", "swing")
+        ctx = self.context()
+        analysis = self._analysis(ctx)
+        assert analysis is not None
+        data = self._draft_flip(ctx).to_json()
+        data["grid"].update(grid or {})
+        data["bass808"]["mode"] = "ours"
+        data["hats"] = {"mode": "original", "remove": [], "patterns": []}
+        data["arrangement"] = [body.get("block")]
+        data["effects"] = []
+        try:
+            flip = model.parse(data)
+            bars = _source_bars(flip, analysis)
+            if flip.arrangement[0].to_bar > bars:
+                raise model.FlipError(
+                    f"block.to_bar: {flip.arrangement[0].to_bar} is past the {bars} bars"
+                )
+        except model.FlipError as error:
+            raise ApiError(
+                HTTPStatus.UNPROCESSABLE_ENTITY, str(error), "invalid_flip", errors=[str(error)]
+            ) from None
+        problem = model.synth_tempo_problem(flip)
+        if problem is not None:
+            raise ApiError(HTTPStatus.CONFLICT, problem, "tempo")
+        try:
+            play = pipeline._play_bars(flip, analysis, analysis["frames"])
+            score = flip_score(play, flip.bpm, flip.swing, pipeline._bass_params(flip.bass_params))
+        except (ValueError, pipeline.PipelineError) as error:
+            raise ApiError(
+                HTTPStatus.UNPROCESSABLE_ENTITY, str(error), "invalid_flip", errors=[str(error)]
+            ) from None
+        return reply_json(HTTPStatus.OK, {"score": score})
 
     def draft(self, body: dict) -> Reply:
         """Replace the page's working copy after the flip parses and fits the beat."""
@@ -326,6 +411,7 @@ class FlipRoutes:
             "/api/flip/state": self.state,
             "/api/flip/peaks": self.peaks,
             "/api/flip/audio": self.audio,
+            "/api/flip/source-notes": self.source_notes,
         }
         if path in routes:
             return routes[path](query)
@@ -336,6 +422,7 @@ class FlipRoutes:
         routes = {
             "/api/flip/draft": self.draft,
             "/api/flip/propose": self.propose,
+            "/api/flip/block-score": self.block_score,
             "/api/flip/render": self.render,
             "/api/flip/use": self.use,
         }

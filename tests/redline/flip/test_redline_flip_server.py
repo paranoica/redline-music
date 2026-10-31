@@ -238,8 +238,19 @@ def until(check, seconds=10.0):
     return False
 
 
-GETS = ["/api/flip/state", "/api/flip/peaks", "/api/flip/audio?n=1"]
-POSTS = ["/api/flip/draft", "/api/flip/propose", "/api/flip/render", "/api/flip/use"]
+GETS = [
+    "/api/flip/state",
+    "/api/flip/peaks",
+    "/api/flip/audio?n=1",
+    "/api/flip/source-notes",
+]
+POSTS = [
+    "/api/flip/draft",
+    "/api/flip/propose",
+    "/api/flip/render",
+    "/api/flip/use",
+    "/api/flip/block-score",
+]
 
 
 @pytest.mark.parametrize("path", GETS)
@@ -637,3 +648,142 @@ def test_a_render_on_a_stale_base_is_409_and_saves_no_version(made, root):
     assert not list(folder.glob("flip-*.json"))
     assert api(made, "POST", "/api/flip/render", {"base": seen + 1})[0] == 202
     assert api(made, "POST", "/api/flip/render", {})[0] == 400
+
+
+def with_notes(folder):
+    path = folder / "analysis.json"
+    data = json.loads(path.read_text())
+    data["note_times"] = [
+        {"start_s": 0.0, "end_s": 0.5, "midi": 36, "confidence": 0.9, "glide_into_next": False},
+        {"start_s": 2.25, "end_s": 2.75, "midi": 41, "confidence": 0.9, "glide_into_next": False},
+    ]
+    path.write_text(json.dumps(data))
+
+
+def block(**changes):
+    data = {"label": "b", "from_bar": 1, "to_bar": 2}
+    data.update(changes)
+    return data
+
+
+def score_of(server, body):
+    status, data = api(server, "POST", "/api/flip/block-score", body)
+    return status, data
+
+
+def played(score, sound):
+    """(step, note) of every event of a sound across the score's sections, in play order."""
+    out = []
+    first = 0
+    for section in score["sections"]:
+        for name in section["play"]:
+            rows = score["patterns"][name]["rows"]
+            if sound in rows:
+                row = rows[sound]
+                if isinstance(row, list):
+                    out += [(first + n["step"], n["note"]) for n in row]
+                else:
+                    out += [(first + i, None) for i, c in enumerate(row) if c == "x"]
+        first += section["bars"] * 16
+    return sorted(out)
+
+
+def test_source_notes_are_the_analysis_notes_snapped_per_source_bar(made, root):
+    with_notes(analyse_by_hand(root))
+    status, data = api(made, "GET", "/api/flip/source-notes")
+    assert status == 200
+    assert len(data["bars"]) == BARS
+    assert data["bars"][0] == [{"step": 0, "len": 4, "note": 36, "vel": 127}]
+    assert data["bars"][1] == [{"step": 2, "len": 4, "note": 41, "vel": 127}]
+    assert data["bars"][2] == data["bars"][3] == []
+
+
+def test_source_notes_need_an_analysis(made, root):
+    status, data = api(made, "GET", "/api/flip/source-notes")
+    assert status == 409 and data["code"] == "no_analysis"
+
+
+def test_a_block_with_notes_scores_its_notes_even_when_the_808_is_not_ours(made, root):
+    with_notes(analyse_by_hand(root))
+    notes = [{"step": 3, "len": 2, "note": 40, "vel": 100}]
+    status, data = score_of(made, {"block": block(notes=notes)})
+    assert status == 200
+    assert played(data["score"], "bass") == [(3, "E2")]
+    assert data["score"]["bpm"] == BPM
+
+
+def test_a_block_without_notes_scores_the_source_notes_of_its_bars(made, root):
+    with_notes(analyse_by_hand(root))
+    status, data = score_of(made, {"block": block()})
+    assert status == 200
+    assert played(data["score"], "bass") == [(2, "F2")]
+
+
+def test_a_block_with_notes_set_empty_is_silent(made, root):
+    with_notes(analyse_by_hand(root))
+    status, data = score_of(made, {"block": block(notes=[])})
+    assert status == 200 and played(data["score"], "bass") == []
+
+
+def test_a_blocks_drum_rows_sound_together_in_one_score(made, root):
+    with_notes(analyse_by_hand(root))
+    drums = {"kick": "x" + "." * 15, "snare": "." * 4 + "x" + "." * 11}
+    status, data = score_of(made, {"block": block(drums=drums)})
+    assert status == 200
+    score = data["score"]
+    assert played(score, "drum_kick") == [(0, None)]
+    assert played(score, "drum_snare") == [(4, None)]
+    assert score["sounds"]["drum_kick"]["instrument"] == "kick"
+    assert score["sounds"]["drum_snare"]["instrument"] == "snare"
+    assert "drum_clap" not in score["sounds"]
+
+
+def test_a_block_score_takes_the_pages_grid(made, root):
+    analyse_by_hand(root)
+    status, data = score_of(made, {"block": block(), "grid": {"bpm": 90, "swing": 60}})
+    assert status == 200
+    assert data["score"]["bpm"] == 90 and data["score"]["swing"] == 60
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        block(notes=[{"step": 16, "len": 1, "note": 36, "vel": 100}]),
+        block(notes=[{"step": 0, "len": 0, "note": 36, "vel": 100}]),
+        block(drums={"kick": "x"}),
+        block(drums={"cowbell": "." * 16}),
+        block(from_bar=2, to_bar=2),
+        block(from_bar=3, to_bar=5),
+        block(extra=1),
+        "block",
+        None,
+    ],
+)
+def test_a_bad_block_is_422(made, root, bad):
+    analyse_by_hand(root)
+    status, data = score_of(made, {"block": bad})
+    assert status == 422 and data["code"] == "invalid_flip"
+
+
+def test_a_block_score_at_a_tempo_the_synth_refuses_is_409(made, root):
+    analyse_by_hand(root)
+    status, data = score_of(made, {"block": block(), "grid": {"bpm": 250, "swing": 50}})
+    assert status == 409 and "40..220" in data["error"]
+
+
+def test_a_block_score_needs_an_analysis(made, root):
+    status, data = score_of(made, {"block": block()})
+    assert status == 409 and data["code"] == "no_analysis"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"block": block(), "extra": 1},
+        {"block": block(), "grid": {"bpm": 120, "downbeat_s": 1}},
+        {"block": block(), "grid": 5},
+    ],
+)
+def test_a_block_score_refuses_unknown_fields(made, root, body):
+    analyse_by_hand(root)
+    assert score_of(made, body)[0] == 400
