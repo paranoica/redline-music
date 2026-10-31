@@ -583,3 +583,20 @@ def test_reading_the_stage_leaves_the_peaks_for_the_snapshot(ready):
         ready._state.peaks = (0.999, 0.5)
     assert ready.stage() == "ready"
     assert ready.snapshot().mic_peak == 0.999
+
+
+def test_a_stop_for_a_take_that_already_ended_starts_nothing(ready, fix):
+    take = ready.toggle().values["take"]
+    assert ready.toggle(expect=take).code == "kept"
+    engine_calls = [c for c in fix.engine.calls if c in ("start", "stop")]
+    late = ready.toggle(expect=take)
+    assert late.code == "not_running" and late.values == {"take": take}
+    assert [c for c in fix.engine.calls if c in ("start", "stop")] == engine_calls
+    assert ready.toggle().code == "recording"
+
+
+def test_a_stop_for_another_take_leaves_the_running_one(ready, fix):
+    ready.toggle()
+    assert ready.toggle(expect="take-99").code == "not_running"
+    assert ready.snapshot().take is not None
+    assert "stop" not in fix.engine.calls

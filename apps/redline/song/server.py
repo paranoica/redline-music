@@ -917,11 +917,18 @@ class SongApp:
                 "notices": [{"code": n.code, "values": n.values} for n in done.notices],
             }
             return reply_json(HTTPStatus.OK, {"code": "calibrated", "values": values})
+        if name == "toggle":
+            only(body, "take")
+            take = body.get("take")
+            if "take" in body and (not isinstance(take, str) or not take):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "take is a take's name")
+            outcome = self.rec.toggle() if take is None else self.rec.toggle(expect=take)
+            return reply_json(HTTPStatus.OK, {"code": outcome.code, "values": outcome.values})
         only(body)
         if name == "close":
             self.rec.close()
             return reply_json(HTTPStatus.OK, {"code": "closed", "values": {}})
-        outcome = self.rec.toggle() if name == "toggle" else self.rec.discard_last()
+        outcome = self.rec.discard_last()
         return reply_json(HTTPStatus.OK, {"code": outcome.code, "values": outcome.values})
 
     # takes and jobs

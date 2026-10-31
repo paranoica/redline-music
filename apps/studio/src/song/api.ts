@@ -263,7 +263,8 @@ export function createSongApi({ base, token }: SongApiOptions) {
       json<{ version: number }>(call("POST", "/text/save", { seed, base, text })),
     recState: () => json<RecSnapshot>(call("GET", "/rec/state")),
     recOpen: () => json<RecReply>(call("POST", "/rec/open", {})),
-    recToggle: () => json<RecReply>(call("POST", "/rec/toggle", {})),
+    // a stop names its take: the engine then refuses it when that take is no longer running
+    recToggle: (take?: string) => json<RecReply>(call("POST", "/rec/toggle", take === undefined ? {} : { take })),
     recDiscard: () => json<RecReply>(call("POST", "/rec/discard", {})),
     recCalibrate: (mode: "cup" | "loopback" | "speakers") => json<RecReply>(call("POST", "/rec/calibrate", { mode })),
     recClose: () => json<RecReply>(call("POST", "/rec/close", {})),

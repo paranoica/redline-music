@@ -94,7 +94,6 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   let flip: FlipState | null = null;
   let score: Score | null = null;
   let beatLibraries: Library[] = [];
-  let studioPlayer: StudioPlayer | null = null;
   let lyric: LyricPart[] = [];
   let layout: LayoutReply = { start_bar: null, bars_per_line: null };
   let facts: ScreenFacts;
@@ -183,7 +182,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     clips: () => clips,
     playheadBar: () => toBars(g, position()),
     playback: () => playback,
-    studio: () => (studioPlayer?.ready && playback?.kind === "studio" ? studioPlayer : null),
+    studio: () => {
+      const p = playback?.current;
+      return p instanceof StudioPlayer && p.ready ? p : null;
+    },
     stopSong: () => {
       takePlayer.stop();
       if (transport.mode === "playing") dispatch({ type: "pause" });
@@ -274,7 +276,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     const studioReady = facts.studioReady;
     const make: BackendMakers = {
       simple: () => new SimplePlayer({ base: options.base, token: options.token }, chosen),
-      studio: () => (studioPlayer = new StudioPlayer({ base: options.base, token: options.token, onError: say })),
+      studio: () => new StudioPlayer({ base: options.base, token: options.token, onError: say }),
       ready: async () => studioReady && (await api.mixReady()) === "ready",
     };
     // a new render, the studio built or another take while the song plays: it goes on from there
@@ -635,10 +637,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   async function stopRecord(): Promise<void> {
     try {
       if (starting) await starting;
-      // the take may have been stopped from another tab: a toggle with no take would start one
+      // the take may have been stopped from another tab: a toggle with no take would start one, and
+      // the take's name makes the engine refuse a stop that another tab's stop got to first
       const s = await api.recState();
       applySnapshot(s);
-      if (stopAction(s) === "toggle") await api.recToggle();
+      if (stopAction(s) === "toggle" && s.take !== null) await api.recToggle(s.take);
       await waitRec((x) => (!x.recording && !x.stopping) || x.out_of_sync);
       dispatch({ type: "recordStopped" });
       await reload();

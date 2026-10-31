@@ -250,15 +250,18 @@ class RecOwner:
         """
         self._submit("open", lambda cmd: self._open(cmd, request), False, timeout, opening=True)
 
-    def toggle(self, timeout: float | None = None) -> Outcome:
+    def toggle(self, timeout: float | None = None, expect: str | None = None) -> Outcome:
         """Start the next take, or finish the one running.
+
+        With expect, only the take of that name is finished: when it is not the one running the
+        outcome is not_running and nothing starts, so a stop sent from a stale view stays a stop.
 
         Raises:
             NotReady: Not ready for takes; OutOfSync when a reply was late.
             EngineError: The engine refused or failed.
             CommandTimeout: No answer in time.
         """
-        return self._submit("toggle", self._toggle, True, timeout)
+        return self._submit("toggle", lambda cmd: self._toggle(cmd, expect), True, timeout)
 
     def discard_last(self, timeout: float | None = None) -> Outcome:
         """Throw away the take running, else the last one kept in this session."""
@@ -521,8 +524,11 @@ class RecOwner:
         assert self._ready is not None
         return self._ready.session
 
-    def _toggle(self, command: _Command) -> Outcome:
+    def _toggle(self, command: _Command, expect: str | None = None) -> Outcome:
         session = self._session()
+        held = session.current or session.pending
+        if expect is not None and (held is None or held.stem != expect):
+            return Outcome("not_running", {"take": expect})
         self._set(stopping=session.current is not None or session.pending is not None)
         try:
             outcome = session.toggle()

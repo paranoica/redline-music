@@ -92,10 +92,10 @@ class FakeRec:
         self.ready = True
         self.reason = None
 
-    def toggle(self):
+    def toggle(self, expect=None):
         if not self.ready:
             raise NotReady("the engine is not ready (idle)")
-        self.calls.append(("toggle",))
+        self.calls.append(("toggle",) if expect is None else ("toggle", expect))
         return Outcome("recording", {"take": "take-02"})
 
     def discard_last(self):
@@ -444,6 +444,16 @@ def test_recording_goes_through_the_owner(made, root):
     state = api(made, "GET", "/api/rec/state")[1]
     assert state["stage"] == "ready" and state["round_trip"]["source"] == "calibrated"
     assert api(made, "POST", "/api/rec/calibrate", {"mode": "air"})[0] == 400
+
+
+def test_a_stop_names_the_take_it_stops(made):
+    api(made, "POST", "/api/rec/open", {})
+    status, _ = api(made, "POST", "/api/rec/toggle", {"take": "take-02"})
+    assert status == 200 and made.app.rec.calls[-1] == ("toggle", "take-02")
+    assert api(made, "POST", "/api/rec/toggle", {})[0] == 200
+    assert made.app.rec.calls[-1] == ("toggle",)
+    for bad in (7, "", None, ["take-02"]):
+        assert api(made, "POST", "/api/rec/toggle", {"take": bad})[0] == 400
 
 
 def test_a_beat_change_while_a_take_runs_is_409(made):

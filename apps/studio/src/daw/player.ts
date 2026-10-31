@@ -155,8 +155,8 @@ export class Playback {
   #player: SongPlayer | null = null;
   // a renewed backend is starting where the old one played
   #handing = false;
-  // the last pause or stop, and how many there were, for one asked during a hand-over
-  #halted: { count: number; how: "pause" | "stop" } = { count: 0, how: "pause" };
+  // the last play, pause or stop and how many there were, for one asked during a hand-over
+  #asked: { count: number; how: "play" | "pause" | "stop" } = { count: 0, how: "play" };
   #loop: Loop | null = null;
   readonly #lanes: Record<LaneId, LaneState> = {
     beat: { gain: 1, mute: false, solo: false },
@@ -171,6 +171,11 @@ export class Playback {
 
   get kind(): BackendKind | null {
     return this.#player?.kind ?? null;
+  }
+
+  // the backend that plays now; a renewed one only once it took over
+  get current(): SongPlayer | null {
+    return this.#player;
   }
 
   get playing(): boolean {
@@ -241,26 +246,30 @@ export class Playback {
     this.#applyLoop();
     this.#applyLanes();
     const from = startPoint(at, this.#loop && fitLoop(this.#loop, next.duration), next.duration);
-    if (playing) await this.#handOver(next, from);
-    else next.seek(from);
-    if (old) await old.dispose();
+    try {
+      if (playing) await this.#handOver(next, from);
+      else next.seek(from);
+    } finally {
+      if (old) await old.dispose();
+    }
   }
 
   async #handOver(next: SongPlayer, from: number): Promise<void> {
-    const halts = this.#halted.count;
+    const asked = this.#asked.count;
     this.#handing = true;
     try {
       await next.play(from);
     } finally {
       this.#handing = false;
     }
-    if (this.#halted.count === halts) return;
-    if (this.#halted.how === "stop") next.stop();
-    else next.pause();
+    if (this.#asked.count === asked) return;
+    if (this.#asked.how === "stop") next.stop();
+    else if (this.#asked.how === "pause") next.pause();
   }
 
   async play(from?: number): Promise<void> {
     if (this.#closed) return;
+    this.#asked = { count: this.#asked.count + 1, how: "play" };
     // also cancels an audition still starting
     await this.#deps.audition.stop();
     if (!this.#player) await this.sync();
@@ -268,12 +277,12 @@ export class Playback {
   }
 
   pause(): void {
-    this.#halted = { count: this.#halted.count + 1, how: "pause" };
+    this.#asked = { count: this.#asked.count + 1, how: "pause" };
     this.#player?.pause();
   }
 
   stop(): void {
-    this.#halted = { count: this.#halted.count + 1, how: "stop" };
+    this.#asked = { count: this.#asked.count + 1, how: "stop" };
     this.#player?.stop();
     // also cancels an audition still starting
     void this.#deps.audition.stop().catch(() => {});

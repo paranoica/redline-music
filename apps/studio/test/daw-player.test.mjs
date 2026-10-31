@@ -482,3 +482,78 @@ test("a pause or a stop asked while the renewed backend starts is kept once it h
     assert.equal(next.pos, how === "stop" ? 0 : 6, how);
   }
 });
+
+// the renewed backend's play waits on `started` before it starts
+function slowStart(made, started, extra = {}) {
+  const make = remake(made, extra);
+  const simple = make.simple;
+  make.simple = () => {
+    const p = simple();
+    const play = p.play.bind(p);
+    p.play = async (from) => {
+      await started.promise;
+      await play(from);
+    };
+    return p;
+  };
+  return make;
+}
+
+test("a play pressed after a pause while the renewed backend starts wins: the song plays", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  await playback.play(1);
+  made[0].pos = 6;
+  const started = gate();
+  const renewed = playback.renew(slowStart(made, started));
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  playback.pause();
+  const replay = playback.play();
+  started.open();
+  await Promise.all([renewed, replay]);
+  assert.equal(made[1].playing, true);
+  assert.equal(playback.playing, true);
+});
+
+test("a renewed backend that fails to start still lets go of the old one", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  await playback.play(1);
+  const make = remake(made);
+  const simple = make.simple;
+  make.simple = () => {
+    const p = simple();
+    p.play = async () => {
+      throw new Error("closed");
+    };
+    return p;
+  };
+  await assert.rejects(playback.renew(make), /closed/);
+  assert.equal(made[0].disposed, true);
+});
+
+test("the current backend is the one that plays: a renewed one only once it took over", async () => {
+  const { playback, made } = owner(false);
+  await playback.sync();
+  await playback.play(1);
+  const hold = gate();
+  const make = remake(made, { hold });
+  const renewing = playback.renew(make);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(playback.current, made[0]);
+  hold.open();
+  await renewing;
+  assert.equal(playback.current, made[1]);
+  const failing = remake(made);
+  const simple = failing.simple;
+  failing.simple = () => {
+    const p = simple();
+    p.load = async () => {
+      throw new Error("no stems");
+    };
+    return p;
+  };
+  await assert.rejects(playback.renew(failing), /no stems/);
+  assert.equal(playback.current, made[1]);
+  assert.equal(made[1].playing, true);
+});

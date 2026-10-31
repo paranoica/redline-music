@@ -92,6 +92,7 @@ class Outcome:
         discarded, finished_late_discarded: take.
         still_finishing: take (not yet collected).
         nothing_to_discard.
+        not_running: take (a stop for a take that is no longer the one running).
     """
 
     code: str

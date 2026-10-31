@@ -120,3 +120,12 @@ test("a new song is posted to the songs list with the server's body", async () =
   assert.equal(calls[0].init.headers["X-Token"], "tok");
   assert.deepEqual(JSON.parse(calls[0].init.body), body);
 });
+
+test("a stop names its take; a plain toggle sends no take", async () => {
+  const calls = fake();
+  const api = createSongApi({ token: "t" });
+  await api.recToggle("take-03");
+  await api.recToggle();
+  assert.deepEqual(JSON.parse(calls[0].init.body), { take: "take-03" });
+  assert.deepEqual(JSON.parse(calls[1].init.body), {});
+});
