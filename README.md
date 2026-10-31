@@ -89,37 +89,28 @@ the same loudness, a `compare/` pair at equal loudness and a `report.md`.
 
 ## One song, one page
 
-A song ties a beat, a text and a voice together in `private/songs/<name>/song.json`. Start one
-and open its page:
-
 ```sh
-uv run redline song new my-song --beat-seed 7 --text-seed 12 --ref input/refs/*.mp3
-uv run redline song studio my-song
+uv run redline app
 ```
 
-`--beat FILE` takes a type beat instead of an own one, `--suno FILE` a Suno track instead of
-recorded takes; `redline song refs` changes the references later.
+opens **My songs** in the browser: every song as a card and a **New song** button (a name, a
+type beat from `input/beats` or an own beat seed, a written text or none; the references default
+to everything in `input/refs`). A song opens on one screen, laid out like a DAW:
 
-The page reads like a patch line across six stations: **Beat → Text → Recording → Takes →
-Mix → Result**. The line is lit up to where the song has got, so what is missing shows without
-a checklist, and each station says what it needs and how to get it.
+- **Transport** across the top: play/pause (Space), stop, record (R), loop (L), the clock in
+  time and bars, a hint of what to do next, and **Export**.
+- **Tracks** on a bar ruler: the text with its lines over the bars they are sung on, the voice
+  (the chosen take) with every take under it, the beat as its sections, and for an own beat its
+  808 notes and drums. A star picks the take; a small ▶ plays one take over the beat.
+- **Editor** at the bottom, for the selected track: a piano roll for the 808 and a step grid for
+  the drums of an own beat, heard at once on a loop of the selected section; five knobs for the
+  voice (level, clean, echo, reverb, tune) and **Auto**, which sets them closest to the
+  references; the text, its versions and where its lines sit.
 
-- **Beat**: the beat page sits inside it; the render becomes the song's beat.
-- **Text**: pick a version, edit it by hand (saved as the next version after the same checks
-  the writer's texts pass), or get the command that asks the writer for a new one.
-- **Recording**: opens the recording engine and shows its stages, then one button (or `R`)
-  for a take. The text stays beside it in large type. Red appears only while a take records.
-- **Takes**: each finished take is ranked as it lands; play one over the beat and take it.
-- **Mix**: the studio sits inside it. Auto mix finds the settings closest to the references and
-  draws three variants by seed, each one setting a grid step away. They are there to be heard:
-  the auto result is the closest the search found, so the variants usually measure further.
-  Click a pad to hear it, keep one or none.
-- **Result**: renders the final track into `output/<song>/`.
-
-Long work (separation, ranking, auto mix, the result) runs as separate processes you can
-cancel, and pauses while a take records so the audio stays clean. Closing the tab never stops a
-take; stopping the server keeps it. The mix and beat surfaces need a screen 1024 px wide; the
-rest works on a phone. More in [docs/song.md](docs/song.md).
+Recording starts at bar 1: the native engine plays the beat and the take lines up with it.
+Separation, auto mix and the export run in the background and wait while a take records.
+`redline song studio <name>` opens one song straight away; `redline song new` still works from
+the terminal. More in [docs/song.md](docs/song.md).
 
 ## Flipping a type beat
 

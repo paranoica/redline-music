@@ -1,8 +1,8 @@
 # The song page
 
-One page for one song: the beat, the text, the takes, the mix and the result, driven from a
-browser on the same machine. This guide covers the song file, what each station does, the long
-jobs and the recording engine behind the page.
+One screen for one song, laid out like a DAW: the beat, the text, the takes, the mix and the
+export, driven from a browser on the same machine. This guide covers the song file, the screen,
+the long jobs and the recording engine behind it.
 
 ## The song file
 
@@ -35,28 +35,42 @@ under `private/`):
 | `song new <name> --beat-seed N \| --beat FILE [--text-seed N] [--suno FILE] [--ref ...]` | start a song |
 | `song refs <name> --ref FILE...` | replace its references |
 | `song list`, `song show <name>` | the songs, one song's file |
-| `song studio <name> [--port N] [--no-browser]` | the page |
+| `app [--port N] [--no-browser]` | the page, starting at the list of songs |
+| `song studio [name] [--port N] [--no-browser]` | the page, with that song open |
 
-## Stations
+## The screen
 
-The rail across the top lists six stations. A station is lit when the song has what it makes,
-the current one is underlined, and a station that does not apply folds away (recording, for a
-Suno voice).
+`redline app` starts at **My songs**. **New song** makes a song from a name, a beat (a type beat
+from `input/beats`, or an own seed that has a score: a new own beat is written by the beatmaker
+agent, not on the page), a written text or none; the references are every audio file in
+`input/refs`. One server holds one open song at a time; opening another closes the first one's
+recording session and cancels its jobs, and is refused while a take records.
 
-| Station | Needs | Does |
-|---|---|---|
-| Beat | a beat seed or file | an own beat: the beat page mounted inside; its render is the song's beat. A type beat: the file and its tempo. |
-| Text | a lyrics seed | pick a version; edit by hand and save as the next version; or the command that asks the writer for a new text. |
-| Recording | a rendered beat; a recorded voice | opens the recording engine, records takes, discards the last, calibrates the round trip. |
-| Takes | takes | ranks finished takes, plays one over the beat, sets the chosen take. |
-| Mix | a chosen voice, references, separated stems | the studio mounted inside; auto mix and its variants. |
-| Result | a kept variant or saved settings | renders the final track into `output/<song>/`. |
+The song screen:
 
-A hand edit goes through the same checks as the writer's texts: it must read as lyrics, keep the
-length and places of the seed's recipe, and copy no lines from the base (the seed's own
-`min_words`). Without the copy-check index the save is refused with the command that builds it.
-A version file is created only if it does not exist yet, so a hand save and an agent's edit never
-overwrite each other.
+| Part | What it does |
+|---|---|
+| Transport | play/pause (Space), stop, record (R), loop (L, or drag on the ruler), Home; the clock in m:ss.s and bar.beat; «дальше:» names the next step; ⋯ holds calibration (cup, cable, speakers), discard the last take, cancel the running job, the result folder; Export |
+| Text | the chosen text's lines over the bars they are sung on: two bars a line after a four-bar intro, as the writer fits them. The placement says «примерно» until it is nudged (start bar, one or two bars a line), which is kept in `private/songs/<name>/layout.json` |
+| Voice and takes | the chosen take, and every take under it; a star chooses one, ▶ plays one over the beat. Choosing a take starts its preparation (separation and measuring) |
+| Beat | an own beat's sections, its 808 notes and drums; a type beat's waveform, or its arrangement once split |
+| Editor | for the selected track: the 808 piano roll and the drum grid of an own beat, the voice and beat knobs, the text and its versions |
+
+**Playback.** The main transport always plays the song from files through the studio engine,
+so what you hear is what the export renders. Until the chosen take is prepared, the beat and
+the raw take play without effects and the knobs wait. The editor's own ▶ loops the selected
+section of an own beat live from its score, so a note or a hit is heard at once.
+
+**Own beat edits** are saved to one draft per seed (`private/beats/<seed>/draft.json`) as you
+go. The draft becomes the next `score-N.json` and is rendered when you leave the beat's tracks,
+press play, record or export. A pattern played by several sections asks once whether to change
+it everywhere or only here.
+
+**Knobs and Auto.** The five voice knobs (level, clean, echo, reverb, tune) and the beat knobs
+change the mix at once and are saved to the song's mix settings, the file the export renders
+with. **Auto** runs one job: separation if the stems are stale, the auto mix, then its result
+kept; Ctrl+Z restores the knobs from before. Any change to the beat, the take or the
+references marks the mix out of date, and Export runs what is stale first.
 
 ## Variants
 
@@ -65,10 +79,9 @@ render measures closest to the references. Its variants move one of those settin
 the search grid, chosen by the seed: the same seed gives the same variants. Each variant carries
 its distance to the references, measured on the same windows as the search.
 
-The auto result is the closest point the search found, so a variant usually measures further;
-the page says so. Variants are for listening: clicking a pad loads its settings into the mix,
-"keep" stores them as the song's mix settings, "none" clears the choice. Numbers say closer or
-further, never better.
+The auto result is the closest point the search found, so a variant usually measures further.
+Auto keeps the auto result; the variants stay in `work/songs/<name>/jobs/` for listening.
+Numbers say closer or further, never better.
 
 ## Jobs
 
@@ -94,7 +107,7 @@ headphones, as with `redline record` (see [sound.md](sound.md) and RDL-D24).
 
 - One thread owns the engine and the recording session. The page's buttons queue commands to
   it; a 50 ms tick is the only place meters are read, and every open tab polls a copy of that
-  snapshot, about 20 times a second while the station is visible.
+  snapshot, about 20 times a second while the engine is open.
 - Opening goes through stages the page shows: building the engine the first time, launching,
   relaunching at the audio graph's rate, analysing the monitor, a 5 s level check, ready.
 - A reply that comes late or does not match its command marks the engine out of sync: commands
