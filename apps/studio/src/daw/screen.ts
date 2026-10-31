@@ -24,7 +24,7 @@ import { exportPlan, exportText, type ExportPhase } from "./export.ts";
 import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } from "./lyrics.ts";
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
-import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, takeEnded, type Effect, type Transport, type TransportEvent } from "./transport.ts";
+import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Transport, type TransportEvent } from "./transport.ts";
 import { capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
@@ -641,8 +641,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       // the take's name makes the engine refuse a stop that another tab's stop got to first
       const s = await api.recState();
       applySnapshot(s);
-      if (stopAction(s) === "toggle" && s.take !== null) await api.recToggle(s.take);
-      await waitRec((x) => (!x.recording && !x.stopping) || x.out_of_sync);
+      const refused = stopAction(s) === "toggle" && s.take !== null && (await api.recToggle(s.take)).code === "not_running";
+      await waitRec((x) => stopSettled(s.take, refused, x) || x.out_of_sync);
       dispatch({ type: "recordStopped" });
       await reload();
       await refreshJobs();

@@ -158,6 +158,12 @@ export function stopAction(s: TakeView): "toggle" | "settle" {
   return takeState(s) === "held" ? "toggle" : "settle";
 }
 
+// a stop is over once no take is left; one the engine refused (another tab's stop got there first)
+// also once the take it named is gone, even if another take started meanwhile
+export function stopSettled(named: string | null, refused: boolean, s: TakeView): boolean {
+  return (!s.recording && !s.stopping) || (refused && s.take !== named);
+}
+
 // a take the transport shows recording that the engine no longer has: it was stopped elsewhere
 export function takeEnded(t: Transport, s: TakeView | null): boolean {
   return t.mode === "recording" && t.step === "recording" && s !== null && takeState(s) === "none";

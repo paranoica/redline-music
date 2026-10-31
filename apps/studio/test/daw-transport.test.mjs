@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { IDLE, exportBlockers, nextStep, recordBlockers, step, stopAction, takeEnded } from "../src/daw/transport.ts";
+import { IDLE, exportBlockers, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded } from "../src/daw/transport.ts";
 
 const idle = IDLE;
 const failed = { mode: "idle", error: "boom" };
@@ -250,4 +250,17 @@ test("a take the transport shows recording ends when a snapshot shows no take an
   // before the take started, or while this tab stops it, the screen's own flow decides
   for (const s of ["opening", "calibrate", "counting", "stopping"]) assert.equal(takeEnded(rec(s), snap()), false, s);
   for (const t of [idle, failed, playing, rendering("record")]) assert.equal(takeEnded(t, snap()), false, t.mode);
+});
+
+test("a stop is over once no take is left; a refused one also once its take is gone", () => {
+  const named = "take-003.wav";
+  assert.equal(stopSettled(named, false, snap()), true);
+  assert.equal(stopSettled(named, false, live), false);
+  assert.equal(stopSettled(named, false, snap({ stopping: true, take: named })), false);
+  // another tab's stop got there first and a new take started meanwhile: this stop is over
+  const other = snap({ recording: true, take: "take-004.wav" });
+  assert.equal(stopSettled(named, true, other), true);
+  assert.equal(stopSettled(named, false, other), false);
+  // the named take is still being finished by the other tab
+  assert.equal(stopSettled(named, true, snap({ recording: true, stopping: true, take: named })), false);
 });
