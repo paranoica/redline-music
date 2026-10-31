@@ -193,6 +193,24 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .daw .clip__label { position: absolute; left: 6px; top: 2px; font-size: 11px; font-weight: 600; color: var(--edge); white-space: nowrap; z-index: 1; text-shadow: 0 1px 2px #000; }
 .daw .clip canvas { position: absolute; left: 0; top: 4px; width: 100%; height: calc(100% - 8px); }
+.daw .clip--drag { opacity: 0.45; }
+.daw .clip-ghost {
+  position: absolute; top: 4px; bottom: 4px; z-index: 4; pointer-events: none; border-radius: 5px;
+  border: 2px dashed var(--text); background: rgb(233 235 239 / 0.1);
+}
+.daw .clip-ghost[hidden] { display: none; }
+.daw .clip-ghost--copy { border-style: solid; }
+.daw .clip-ghost--refused { border-color: var(--red); }
+.daw .clipbar {
+  position: absolute; top: 8px; z-index: 4; display: flex; gap: 2px; padding: 2px; border-radius: 6px;
+  background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 2px 8px rgb(0 0 0 / 0.5);
+}
+.daw .clipbar__btn {
+  height: 22px; min-width: 24px; padding: 0 6px; border: 0; border-radius: 4px; background: var(--raised);
+  color: var(--text-dim); font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.daw .clipbar__btn:hover:not(:disabled) { background: var(--raised-hover); color: var(--text); }
+.daw .clipbar__btn:disabled { opacity: 0.4; cursor: default; }
 .daw .analyse { position: sticky; left: 16px; top: 11px; margin-left: 16px; margin-top: 11px; height: 32px; z-index: 2; background: var(--raised-hover); }
 .daw .lyric {
   position: absolute; top: 6px; bottom: 6px; padding: 3px 8px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;

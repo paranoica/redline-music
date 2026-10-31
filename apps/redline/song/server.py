@@ -569,9 +569,12 @@ class SongApp:
         )
 
     def _beat_dirty(self, song: model.Song) -> bool:
-        """An own beat with a draft over its newest score, or a newest score not rendered."""
+        """An own beat with a draft over its newest score, or a newest score not rendered.
+
+        A flip render is dirty when the flip's draft differs from the version it was made from.
+        """
         if "own" not in song.beat:
-            return False
+            return self._flip_dirty(song)
         from redline.beat.render import RenderError, latest_score
 
         seed = song.beat["own"]
@@ -589,6 +592,21 @@ class SongApp:
         except (OSError, ValueError, TypeError, KeyError):
             return True
         return rendered != newest or not (out / "beat.wav").is_file()
+
+    def _flip_dirty(self, song: model.Song) -> bool:
+        from redline.flip import model as flip_model
+        from redline.flip import pipeline
+
+        found = pipeline.FLIP_RENDER.fullmatch(song.beat.get("file", ""))
+        if found is None:
+            return False
+        try:
+            folder = pipeline.flip_dir(self.root, found.group(1))
+            draft = flip_model.load(pipeline.inside(folder, flip_model.DRAFT))
+            used = flip_model.load(pipeline.inside(folder, f"flip-{found.group(2)}.json"))
+        except (flip_model.FlipError, pipeline.PipelineError):
+            return False
+        return draft.to_json() != used.to_json()
 
     def get_song(self) -> Reply:
         """The song and its stations."""

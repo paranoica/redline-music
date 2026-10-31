@@ -766,6 +766,40 @@ def test_facts_beat_dirty(daw, root):
     assert facts(daw)["beat_dirty"] is False
 
 
+def flip_json(label="all"):
+    return {
+        "format": 1,
+        "source": "input/beat.wav",
+        "grid": {"bpm": 120, "downbeat_s": 0.0, "swing": 50},
+        "bass808": {"mode": "original", "params": {}},
+        "hats": {"mode": "original", "remove": [], "patterns": []},
+        "gains": {"drums": 0, "other": 0, "bass": 0},
+        "arrangement": [{"label": label, "from_bar": 0, "to_bar": 2}],
+        "effects": [],
+    }
+
+
+def test_facts_beat_dirty_for_a_flip_is_a_draft_that_differs_from_the_version_in_use(daw, root):
+    folder = root / "work" / "flips" / "0123abcd"
+    folder.mkdir(parents=True)
+    sf.write(folder / "flip-2.wav", tone(0.25), 8000)
+    set_beat(daw, {"file": "work/flips/0123abcd/flip-2.wav"})
+    write = lambda name, label: (folder / name).write_text(  # noqa: E731
+        json.dumps(flip_json(label)), encoding="utf-8"
+    )
+    assert facts(daw)["beat_dirty"] is False
+    write("flip-2.json", "all")
+    assert facts(daw)["beat_dirty"] is False
+    write("draft.json", "all")
+    assert facts(daw)["beat_dirty"] is False
+    write("draft.json", "verse")
+    assert facts(daw)["beat_dirty"] is True
+    write("flip-2.json", "verse")
+    assert facts(daw)["beat_dirty"] is False
+    (folder / "draft.json").write_text("{", encoding="utf-8")
+    assert facts(daw)["beat_dirty"] is False
+
+
 # knob saves reach the export
 
 

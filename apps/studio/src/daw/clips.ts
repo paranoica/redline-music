@@ -42,6 +42,18 @@ export function flipClips(doc: Pick<FlipDoc, "arrangement">): Clip[] {
   });
 }
 
+// The source bar a flip block is cut at: the bar line nearest to the pointer when it is over the
+// block, else the middle. Null for a block of one bar, which has no inside.
+export function splitAt(clip: Pick<Clip, "fromBar" | "bars" | "source">, pointerBar: number | null): number | null {
+  const src = clip.source;
+  if (!src) return null;
+  const bars = src.toBar - src.fromBar;
+  if (bars < 2) return null;
+  const over = pointerBar !== null && pointerBar > clip.fromBar && pointerBar < clip.fromBar + clip.bars;
+  const k = over ? Math.round(pointerBar - clip.fromBar) : Math.floor(bars / 2);
+  return src.fromBar + Math.min(bars - 1, Math.max(1, k));
+}
+
 // a file with no score or arrangement: one block from its first sample to its last
 export function fileClips(g: Grid, duration: number, label: string): Clip[] {
   if (!(duration > 0)) return [];

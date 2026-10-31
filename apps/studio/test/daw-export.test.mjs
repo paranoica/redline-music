@@ -22,9 +22,11 @@ test("an own beat with edits or no render is committed first", () => {
   assert.deepEqual(exportPlan(facts({ beatKind: "own", hasBeatAudio: false })), ["commit", "result"]);
 });
 
-test("a file beat or a flip is never committed, whatever its flags say", () => {
-  assert.deepEqual(exportPlan(facts({ beatKind: "flip", beatDirty: true })), ["result"]);
-  assert.deepEqual(exportPlan(facts({ beatKind: "file", hasBeatAudio: false, mixStale: true })), ["mix", "result"]);
+test("a flip with edits is committed first, a clean flip or a file beat never", () => {
+  assert.deepEqual(exportPlan(facts({ beatKind: "flip", beatDirty: true })), ["commit", "result"]);
+  assert.deepEqual(exportPlan(facts({ beatKind: "flip", beatDirty: true, mixStale: true })), ["commit", "mix", "result"]);
+  assert.deepEqual(exportPlan(facts({ beatKind: "flip" })), ["result"]);
+  assert.deepEqual(exportPlan(facts({ beatKind: "file", hasBeatAudio: false, beatDirty: true, mixStale: true })), ["mix", "result"]);
 });
 
 test("the button says the running step, then done", () => {

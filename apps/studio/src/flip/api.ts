@@ -10,6 +10,8 @@ export interface FlipState {
   sha8: string;
   analysis: Analysis | null;
   draft: FlipDoc | null;
+  // how many times the draft was saved: the base of the next save and of a render
+  draft_rev: number;
   versions: number[];
   renders: number[];
   used: number | null;
@@ -32,6 +34,12 @@ export class DraftError extends Error {
     this.errors = errors;
   }
 }
+
+// the draft was changed by another writer since the revision this one holds
+export const isStale = (error: unknown): boolean => error instanceof ApiError && error.status === 409 && error.code === "stale_base";
+
+// a flip render is already running
+export const isBusy = (error: unknown): boolean => error instanceof ApiError && error.status === 409 && error.code === "busy";
 
 export interface FlipApiOptions {
   base?: string | undefined;
@@ -61,9 +69,10 @@ export function createFlipApi({ base, token }: FlipApiOptions) {
     state: async (): Promise<FlipState> => (await flip("/state", "GET")).json() as Promise<FlipState>,
     peaks: async (stem?: string): Promise<Peaks> =>
       (await flip(stem ? `/peaks?stem=${encodeURIComponent(stem)}` : "/peaks?bars=1", "GET")).json() as Promise<Peaks>,
-    saveDraft: async (doc: FlipDoc): Promise<void> => {
+    // saves the draft over revision `base`; answers the new revision
+    saveDraft: async (doc: FlipDoc, base: number): Promise<number> => {
       try {
-        await flip("/draft", "POST", { flip: doc });
+        return ((await (await flip("/draft", "POST", { flip: doc, base })).json()) as { draft_rev: number }).draft_rev;
       } catch (error) {
         if (error instanceof ApiError && error.status === 422) {
           const list = error.body["errors"];
@@ -72,8 +81,17 @@ export function createFlipApi({ base, token }: FlipApiOptions) {
         throw error;
       }
     },
+    // the page is going away: the newest draft goes out with a request that outlives it
+    beacon: (doc: FlipDoc, base: number): void => {
+      void fetch(apiPath(root, "/draft"), {
+        method: "POST",
+        keepalive: true,
+        headers: { "X-Token": token, "Content-Type": "application/json" },
+        body: JSON.stringify({ flip: doc, base }),
+      }).catch(() => {});
+    },
     propose: async (): Promise<Block[]> => ((await (await flip("/propose", "POST", {})).json()) as { arrangement: Block[] }).arrangement,
-    render: async (): Promise<number> => ((await (await flip("/render", "POST", {})).json()) as { n: number }).n,
+    render: async (base: number): Promise<number> => ((await (await flip("/render", "POST", { base })).json()) as { n: number }).n,
     use: async (n: number, rev: number): Promise<void> => {
       await flip("/use", "POST", { n, rev });
     },

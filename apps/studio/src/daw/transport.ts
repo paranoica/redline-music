@@ -201,6 +201,16 @@ export function nextStep(f: SongFacts): NextStep {
   return "done";
 }
 
+// What a press does about a beat with edits the song's render does not have. `wait`: commit first
+// and go on when the render is in. `background`: go on at once on the beat as it is, the render
+// runs meanwhile and is heard from the next play. A flip's play goes on at once; record and export
+// need the beat they will be made over.
+export function commitPlan(f: { beatKind: "own" | "file" | "flip"; hasBeatAudio: boolean; beatDirty: boolean }, press: Pending): { wait: boolean; background: boolean } {
+  if (f.beatKind === "own") return { wait: f.beatDirty || !f.hasBeatAudio, background: false };
+  if (f.beatKind === "flip" && f.beatDirty) return press === "play" ? { wait: false, background: true } : { wait: true, background: false };
+  return { wait: false, background: false };
+}
+
 export type RecordBlocker = "suno" | "busy" | "rendering";
 export type ExportBlocker = "no-refs" | "no-take";
 

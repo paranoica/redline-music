@@ -12,13 +12,13 @@ import { jobActive } from "../song/jobs.ts";
 import type { Schema, Settings } from "../types.ts";
 import { ChainPanels } from "../ui/chain.ts";
 import { h } from "../ui/dom.ts";
+import { draftOf, type FlipDraft } from "./flipdraft.ts";
 import { KnobControl } from "./knob.ts";
 import { KNOBS, knobsFromSettings, knobText, settingsFromKnob, type Knob } from "./knobs.ts";
 import { SaveQueue, type SaveState } from "./queue.ts";
 import type { ScreenFacts } from "./view.ts";
 
 const SAVE_MS = 700;
-const FLIP_IDLE_MS = 1500;
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -398,34 +398,32 @@ const HAT_MODES: [HatsMode, string][] = [
 class FlipModes {
   readonly #host: FxHost;
   readonly #box: HTMLElement;
-  #doc: FlipDoc | null = null;
-  #timer: ReturnType<typeof setTimeout> | null = null;
-  #saving: Promise<void> | null = null;
-  #asked = false;
-  #closed = false;
-  #building = false;
 
   constructor(host: FxHost, box: HTMLElement) {
     this.#host = host;
     this.#box = box;
   }
 
+  #draft(): FlipDraft | undefined {
+    return draftOf(this.#host.flipApi);
+  }
+
   show(): void {
-    const state = this.#host.flip();
-    if (!this.#saving && !this.#timer && !this.#building) this.#doc = state?.draft ? structuredClone(state.draft) : null;
-    const d = this.#doc;
-    if (!d) {
+    const draft = this.#draft();
+    const d = draft?.doc ?? null;
+    if (!draft || !d) {
       this.#box.replaceChildren(h("p", { class: "fx__note" }, "Черновика флипа нет."));
       return;
     }
+    const busy = draft.rendering;
     this.#box.replaceChildren(
-      h("div", { class: "fx__row" }, h("span", { class: "fx__lbl" }, "808"), seg("808", BASS_MODES, d.bass808.mode, this.#building, (m) => this.#edit((x) => (x.bass808.mode = m)))),
+      h("div", { class: "fx__row" }, h("span", { class: "fx__lbl" }, "808"), seg("808", BASS_MODES, d.bass808.mode, busy, (m) => this.#edit(draft, (x) => (x.bass808.mode = m)))),
       h(
         "div",
         { class: "fx__row" },
         h("span", { class: "fx__lbl" }, "Хэты"),
-        seg("Хэты", HAT_MODES, d.hats.mode, this.#building, (m) =>
-          this.#edit((x) => {
+        seg("Хэты", HAT_MODES, d.hats.mode, busy, (m) =>
+          this.#edit(draft, (x) => {
             x.hats.mode = m;
             if (m !== "original" && !x.hats.remove.includes("hh")) x.hats.remove.unshift("hh");
           }),
@@ -435,63 +433,17 @@ class FlipModes {
   }
 
   async flush(): Promise<void> {
-    if (this.#saving) await this.#saving;
+    await this.#draft()?.flush();
   }
 
-  dispose(): void {
-    this.#closed = true;
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#timer = null;
-  }
+  dispose(): void {}
 
-  #edit(change: (d: FlipDoc) => void): void {
-    const d = this.#doc;
-    if (!d) return;
-    const takes = this.#host.facts().takes;
-    if (!this.#asked && takes > 0 && !confirm(`Флип пересоберётся новой версией. ${takes} дубл${takes === 1 ? "ь останется записанным" : takes < 5 ? "я останутся записанными" : "ей останутся записанными"} под прошлую. Продолжить?`)) return;
-    this.#asked = true;
-    change(d);
+  #edit(draft: FlipDraft, change: (d: FlipDoc) => void): void {
+    draft.apply((d) => {
+      change(d);
+      return d;
+    });
     this.show();
-    const snapshot = structuredClone(d);
-    const prior = this.#saving ?? Promise.resolve();
-    this.#saving = prior
-      .then(() => this.#host.flipApi.saveDraft(snapshot))
-      .catch((error: unknown) => this.#host.say(`Черновик флипа не сохранился: ${message(error)}`))
-      .finally(() => {
-        this.#saving = null;
-      });
-    if (this.#timer) clearTimeout(this.#timer);
-    this.#host.beatBusy("флип пересоберётся…");
-    this.#timer = setTimeout(() => void this.#rebuild(), FLIP_IDLE_MS);
-  }
-
-  async #rebuild(): Promise<void> {
-    this.#timer = null;
-    if (this.#closed) return;
-    await this.flush();
-    this.#building = true;
-    this.show();
-    this.#host.beatBusy("флип пересобирается…");
-    try {
-      const api = this.#host.flipApi;
-      const n = await api.render();
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 800));
-        if (this.#closed) return;
-        const job = (await api.jobs()).find((j) => j.kind === "flip_render");
-        if (job && jobActive(job)) continue;
-        if (job?.state !== "done") throw new Error(job?.reason ?? "сборка не прошла");
-        break;
-      }
-      await api.use(n, await api.rev());
-      await this.#host.reload();
-    } catch (error) {
-      this.#host.say(`Флип не пересобрался: ${message(error)}`);
-    } finally {
-      this.#building = false;
-      this.#host.beatBusy(null);
-      if (!this.#closed) this.show();
-    }
   }
 }
 

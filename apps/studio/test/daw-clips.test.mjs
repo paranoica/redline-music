@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fileClips, flipClips, ownClips, shareCount, sharedPatterns } from "../src/daw/clips.ts";
+import { fileClips, flipClips, ownClips, shareCount, sharedPatterns, splitAt } from "../src/daw/clips.ts";
 import { grid } from "../src/daw/time.ts";
 
 const score = (sections) => ({ version: 1, bpm: 140, seed: 1, key: "C", sounds: {}, patterns: {}, sections });
@@ -83,4 +83,27 @@ test("a plain file is one block over the whole file", () => {
   assert.ok(Math.abs(early.fromBar - 0.01) < 1e-9);
   assert.equal(early.bars, 30);
   assert.deepEqual(fileClips(grid(120), 0, "бит"), []);
+});
+
+// ---------- where a flip block is cut ----------
+
+const cutClip = { fromBar: 8, bars: 4, source: { fromBar: 20, toBar: 24 } };
+
+test("a block is cut at the bar line nearest the pointer, in source bars", () => {
+  assert.equal(splitAt(cutClip, 9.2), 21);
+  assert.equal(splitAt(cutClip, 10.6), 23);
+  assert.equal(splitAt(cutClip, 11), 23);
+});
+
+test("a pointer at an edge or outside still cuts inside the block; none cuts in the middle", () => {
+  assert.equal(splitAt(cutClip, 8.1), 21);
+  assert.equal(splitAt(cutClip, 11.9), 23);
+  assert.equal(splitAt(cutClip, 3), 22);
+  assert.equal(splitAt(cutClip, null), 22);
+  assert.equal(splitAt({ ...cutClip, bars: 3, source: { fromBar: 20, toBar: 23 } }, null), 21);
+});
+
+test("a block of one bar, or an own section, has no cut", () => {
+  assert.equal(splitAt({ fromBar: 0, bars: 1, source: { fromBar: 4, toBar: 5 } }, 0.5), null);
+  assert.equal(splitAt({ fromBar: 0, bars: 4, source: null }, 2), null);
 });

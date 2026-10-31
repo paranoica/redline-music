@@ -7,7 +7,7 @@ import { History } from "../core/history.ts";
 import { KeySurface, Scope } from "../core/lifecycle.ts";
 import type { Loop } from "../core/loop.ts";
 import { createFlipApi, type FlipState } from "../flip/api.ts";
-import { totalBars as flipBars } from "../flip/model.ts";
+import { copyBlockTo, copyRefusal, deleteBlock, deleteRefusal, moveBlock, moveBlockTo, splitBlock, totalBars as flipBars, type BlockEdit, type Layout, type Refusal } from "../flip/model.ts";
 import { acceptSong, ApiError, createSongApi } from "../song/api.ts";
 import type { Job, LayoutReply, Ranking, RecSnapshot, SongApi, SongChange, SongReply, StartKind } from "../song/api.ts";
 import { finishedKinds, JOB_NAMES, jobActive, refusalText } from "../song/jobs.ts";
@@ -17,14 +17,16 @@ import { TakePlayer } from "../song/takes.ts";
 import { parseLyric, type LyricPart } from "../song/text.ts";
 import { dismissable, h, icon } from "../ui/dom.ts";
 import { Audition, loadZones } from "./audition.ts";
-import { fileClips, flipClips, ownClips, type Clip } from "./clips.ts";
+import { fileClips, flipClips, ownClips, splitAt, type Clip } from "./clips.ts";
+import { isDrag, planDrag } from "./drag.ts";
 import { drawHits, drawNotes, drawWave, sizedCanvas, type PeakData } from "./draw.ts";
 import { BEAT_LANES, Editor } from "./editor.ts";
 import { exportPlan, exportText, type ExportPhase } from "./export.ts";
+import { FlipDraft, flipLayout, StaleDraft, withBlocks } from "./flipdraft.ts";
 import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } from "./lyrics.ts";
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
-import { BLOCKER_TEXT, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Transport, type TransportEvent } from "./transport.ts";
+import { BLOCKER_TEXT, commitPlan, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Pending, type Transport, type TransportEvent } from "./transport.ts";
 import { capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
 import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
@@ -81,6 +83,19 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   const api: SongApi = createSongApi({ base: options.base, token: options.token });
   const flipApi = createFlipApi({ base: api.flipBase, token: options.token });
   const beatApi = createBeatApi({ base: api.beatBase, token: options.token });
+  const flipDraft = new FlipDraft({
+    api: flipApi,
+    takes: () => facts.takes,
+    confirm: (text) => confirm(text),
+    recording: () => transport.mode === "recording",
+    reload: () => reload(),
+    changed: () => {
+      if (!ready || scope.closed) return;
+      rebuildModel();
+      render();
+    },
+    say: (text) => say(text),
+  });
   const colors = getComputedStyle(root);
   const color = (name: string): string => colors.getPropertyValue(name).trim() || "#aaa";
 
@@ -92,6 +107,14 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   let recAt = 0;
   let failedAt: OpenStage | null = null;
   let flip: FlipState | null = null;
+  // the block picked on the beat lane by a click, which the block bar belongs to
+  let picked: number | null = null;
+  // a click right after a drag is not a pick
+  let suppressClick = false;
+  let beatLaneEl: HTMLElement | null = null;
+  let hoverBar: number | null = null;
+  // the beat the song player was built over, to hold a swap while a flip plays
+  let playingBeat = { file: null as string | null, renders: 0 };
   let score: Score | null = null;
   let beatLibraries: Library[] = [];
   let lyric: LyricPart[] = [];
@@ -235,16 +258,18 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   function rebuildModel(): void {
     facts = factsOf(reply, jobs, { flipAnalysed: flip ? flip.analysis !== null : null });
     if (facts.beatKind === "own" && (bottom.beatDirty || bottom.rendering)) facts = { ...facts, beatDirty: true };
+    if (facts.beatKind === "flip") facts = { ...facts, beatDirty: flipDraft.wantsCommit || flipDraft.rendering };
     const analysis = flip?.analysis ?? null;
     if (facts.beatKind === "own" && score) {
       g = grid(score.bpm);
       clips = ownClips(score);
       total = Math.max(1, clips.reduce((n, c) => n + c.bars, 0));
       marks = scoreMarks(score);
-    } else if (facts.beatKind === "flip" && flip?.draft) {
-      g = grid(flip.draft.grid.bpm);
-      clips = flipClips(flip.draft);
-      total = Math.max(1, flipBars(flip.draft.arrangement));
+    } else if (facts.beatKind === "flip" && (flipDraft.doc ?? flip?.draft)) {
+      const doc = (flipDraft.doc ?? flip?.draft) as NonNullable<FlipState["draft"]>;
+      g = grid(doc.grid.bpm);
+      clips = flipClips(doc);
+      total = Math.max(1, flipBars(doc.arrangement));
       marks = { bass: [], drums: [] };
     } else {
       g = grid(analysis?.bpm ?? facts.bpm ?? FALLBACK_BPM, facts.beatKind === "file" ? (analysis?.downbeat_s ?? 0) : 0);
@@ -253,6 +278,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       total = duration > 0 ? Math.max(1, Math.ceil(toBars(g, duration) - 1e-6)) : FALLBACK_BARS;
       marks = { bass: [], drums: [] };
     }
+    if (picked !== null && (facts.beatKind === "file" || picked >= clips.length)) picked = null;
     const sections = lyric.map((p) => ({ kind: p.part ?? "", lines: p.lines.length }));
     places = placeLines(sections, total, lyricLayout());
   }
@@ -270,7 +296,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   function syncPlayback(): void {
     const key = playbackKey(facts, reply.stations.beat.file, bottom.renders);
     if (key === playbackAt && playback) return;
+    // a flip that plays goes on over the beat it started with; the new render is heard from the next play
+    if (playback && facts.beatKind === "flip" && transport.mode === "playing" && playbackKey(facts, playingBeat.file, playingBeat.renders) === playbackAt) return;
     playbackAt = key;
+    playingBeat = { file: reply.stations.beat.file, renders: bottom.renders };
     const old = playback;
     const chosen = facts.chosen;
     const studioReady = facts.studioReady;
@@ -314,8 +343,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   scope.add(() => takePlayer.stop());
 
   // ---------- transport ----------
-  function needsRender(): boolean {
-    return facts.beatKind === "own" && (!facts.hasBeatAudio || facts.beatDirty);
+  function needsRender(press: Pending): boolean {
+    return commitPlan(facts, press).wait;
   }
 
   function dispatch(e: TransportEvent): void {
@@ -325,6 +354,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     if (was.mode === "recording" && transport.mode !== "recording") flushWaiters();
     if (transport.mode === "idle" && transport.error && was !== transport) say(transport.error);
     for (const effect of next.effects) run(effect);
+    // a render that landed while the flip played is taken in now
+    if (was.mode === "playing" && transport.mode !== "playing") syncPlayback();
     syncRecPoll();
     paintTop();
     paintModal();
@@ -378,11 +409,13 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     if (transport.mode === "playing") dispatch({ type: "pause" });
     else if (transport.mode === "rendering" && transport.then === "play") dispatch({ type: "pause" });
     else if (transport.mode === "idle" || transport.mode === "rendering") {
-      if (!facts.hasBeatAudio && !needsRender()) {
+      const plan = commitPlan(facts, "play");
+      if (!facts.hasBeatAudio && !plan.wait) {
         say("Бит ещё не готов.");
         return;
       }
-      dispatch({ type: "play", render: needsRender() });
+      dispatch({ type: "play", render: plan.wait });
+      if (plan.background) commitInBackground();
     }
   }
 
@@ -402,7 +435,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       return;
     }
     takePlayer.stop();
-    dispatch({ type: "record", render: needsRender(), held: rec?.recording === true });
+    dispatch({ type: "record", render: needsRender("record"), held: rec?.recording === true });
   }
 
   function seekTo(seconds: number): void {
@@ -425,12 +458,22 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   async function commitBeat(): Promise<void> {
     try {
-      await bottom.commitBeat();
+      await (facts.beatKind === "flip" ? flipDraft.commit() : bottom.commitBeat());
       if (scope.closed) return;
       dispatch({ type: "renderDone" });
     } catch (error) {
-      dispatch({ type: "error", message: `Бит не собрался: ${message(error)}` });
+      dispatch({ type: "error", message: error instanceof StaleDraft ? error.message : `Бит не собрался: ${message(error)}` });
     }
+  }
+
+  // the flip renders while it plays or while the lanes are left; a failure is said, nothing waits
+  function commitInBackground(): void {
+    flipDraft.commit().then(
+      () => {},
+      (error: unknown) => {
+        if (!scope.closed && !(error instanceof StaleDraft)) say(`Бит не собрался: ${message(error)}`);
+      },
+    );
   }
 
   // ---------- export ----------
@@ -701,7 +744,16 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       flip = null;
     } else {
       score = null;
-      tasks.push(flipApi.state().then((s) => (flip = s), () => (flip = null)));
+      const dirty = factsOf(reply, jobs, { flipAnalysed: null }).beatDirty;
+      tasks.push(
+        flipApi.state().then(
+          (s) => {
+            flip = s;
+            flipDraft.adopt(s, dirty);
+          },
+          () => (flip = null),
+        ),
+      );
     }
     tasks.push(api.peaks("beat", undefined, 4000).then((p) => (beatPeaks = { duration: p.duration_s, peaks: p.peaks }), () => (beatPeaks = null)));
     await Promise.all(tasks);
@@ -807,7 +859,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   async function undo(redo: boolean): Promise<void> {
-    if (editorOpen && bottom.undo(redo)) return;
+    if (facts.beatKind === "flip" && (redo ? flipDraft.canRedo : flipDraft.canUndo)) {
+      flipDraft.undo(redo);
+      return;
+    }
+    if (bottom.undo(redo)) return;
     if (!history) return;
     const to = redo ? history.redo() : history.undo();
     if (!to) return;
@@ -1025,7 +1081,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   function clipOf(c: Clip, el: HTMLElement): HTMLElement {
     el.dataset["clip"] = String(c.index);
-    const on = selected !== null && BEAT_LANES.includes(selected) && bottom.block()?.section === c.index && facts.beatKind === "own";
+    const on = selected !== null && BEAT_LANES.includes(selected) && (facts.beatKind === "own" ? bottom.block()?.section === c.index : facts.beatKind === "flip" && picked === c.index);
     el.classList.toggle("clip--on", on);
     return el;
   }
@@ -1033,14 +1089,160 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   // a click on a block selects its lane and the block, and opens the editor
   function pickable(el: HTMLElement, kind: LaneKind): HTMLElement {
     el.addEventListener("click", (e) => {
+      if (suppressClick) return;
       const target = (e.target as HTMLElement).closest<HTMLElement>(".clip[data-clip]");
-      if (!target || facts.beatKind !== "own") return;
-      bottom.selectBlock(Number(target.dataset["clip"]));
-      editorOpen = true;
+      if (!target || (facts.beatKind !== "own" && facts.beatKind !== "flip")) return;
+      picked = Number(target.dataset["clip"]);
+      bottom.selectBlock(picked);
+      if (facts.beatKind === "own") editorOpen = true;
       select(kind);
       render();
     });
     return el;
+  }
+
+  // ---------- blocks of the beat lane ----------
+  // Own-beat blocks are not editable from here yet: that goes through the editor's draft.
+  const blocksEditable = (): boolean => facts.beatKind === "flip" && flipDraft.doc !== null;
+
+  // one flip edit on the block arrangement; the pick follows the block the op made or moved
+  function flipBlocks(make: (l: Layout) => BlockEdit | Refusal | null): void {
+    if (transport.mode === "recording") {
+      say("Во время записи бит не правится.");
+      return;
+    }
+    const out = { at: null as number | null };
+    const done = flipDraft.apply((doc) => {
+      const edit = make(flipLayout(doc));
+      if (edit === null) return null;
+      if ("ok" in edit) return edit;
+      out.at = edit.at;
+      return withBlocks(doc, edit);
+    });
+    if (done && out.at !== null) {
+      picked = out.at;
+      bottom.selectBlock(out.at);
+      rebuildModel();
+      render();
+    }
+  }
+
+  function duplicateBlock(i: number): void {
+    if (!blocksEditable()) return;
+    flipBlocks((l) => {
+      const why = copyRefusal(l, i);
+      return why ? { ok: false, reason: why } : copyBlockTo(l, i, i + 1);
+    });
+  }
+
+  function removeBlock(i: number): void {
+    if (!blocksEditable()) return;
+    flipBlocks((l) => {
+      const why = deleteRefusal(l, i);
+      return why ? { ok: false, reason: why } : deleteBlock(l, i);
+    });
+  }
+
+  function stepBlock(i: number, dir: -1 | 1): void {
+    if (blocksEditable()) flipBlocks((l) => moveBlock(l, i, dir));
+  }
+
+  function cutBlock(i: number): void {
+    const clip = clips[i];
+    if (!blocksEditable() || !clip) return;
+    const at = splitAt(clip, hoverBar);
+    if (at === null) {
+      say("Разрезать можно блок от двух тактов.");
+      return;
+    }
+    flipBlocks((l) => splitBlock(l, i, at));
+  }
+
+  function blockBar(c: Clip): HTMLElement {
+    const btn = (text: string, title: string, act: () => void, disabled = false): HTMLButtonElement => {
+      const b = h("button", { class: "clipbar__btn", type: "button", title, "aria-label": title, disabled }, text);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        act();
+      });
+      return b;
+    };
+    const i = c.index;
+    const bar = h(
+      "div",
+      { class: "clipbar", role: "toolbar", "aria-label": `Блок ${c.label}` },
+      btn("◀", "Сдвинуть левее", () => stepBlock(i, -1), i === 0),
+      btn("▶", "Сдвинуть правее", () => stepBlock(i, 1), i === clips.length - 1),
+      btn("Копия", "Копия после блока (Ctrl+D)", () => duplicateBlock(i)),
+      btn("Разрезать", "Разрезать по такту под курсором, без него — посередине", () => cutBlock(i), (c.source?.toBar ?? 0) - (c.source?.fromBar ?? 0) < 2),
+      btn("Удалить", "Удалить блок (Delete)", () => removeBlock(i)),
+    );
+    bar.style.setProperty("left", `${c.fromBar * BAR_PX + 4}px`);
+    bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+    return bar;
+  }
+
+  // a block dragged along the lane drops between blocks; Ctrl copies it there
+  function dragBlocks(el: HTMLElement): void {
+    el.addEventListener("pointermove", (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest(".clipbar")) hoverBar = (e.clientX - inner.getBoundingClientRect().left) / BAR_PX;
+    });
+    el.addEventListener("pointerdown", (e: PointerEvent) => {
+      const target = (e.target as HTMLElement).closest<HTMLElement>(".clip[data-clip]");
+      if (e.button !== 0 || !target || !blocksEditable() || transport.mode === "recording") return;
+      const index = Number(target.dataset["clip"]);
+      const doc = target.ownerDocument;
+      const x0 = e.clientX;
+      const y0 = e.clientY;
+      const ghost = h("div", { class: "clip-ghost", "aria-hidden": "true" });
+      ghost.style.setProperty("width", `${(clips[index]?.bars ?? 1) * BAR_PX - 2}px`);
+      let dragging = false;
+      let plan: ReturnType<typeof planDrag> = null;
+      const aim = (ev: PointerEvent): void => {
+        const bar = (ev.clientX - inner.getBoundingClientRect().left) / BAR_PX;
+        plan = planDrag(clips.map((c) => c.bars), index, bar, ev.ctrlKey || ev.metaKey);
+        const show = plan !== null && !plan.noop;
+        ghost.hidden = !show;
+        ghost.classList.toggle("clip-ghost--copy", plan?.copy === true);
+        ghost.classList.toggle("clip-ghost--refused", plan?.reason != null);
+        if (plan) ghost.style.setProperty("left", `${plan.ghostBar * BAR_PX}px`);
+        if (!ghost.isConnected) (beatLaneEl ?? el).append(ghost);
+      };
+      const move = (ev: PointerEvent): void => {
+        if (!dragging && isDrag(x0, ev.clientX, y0, ev.clientY)) {
+          dragging = true;
+          target.classList.add("clip--drag");
+        }
+        if (dragging) aim(ev);
+      };
+      const end = (): void => {
+        doc.removeEventListener("pointermove", move);
+        doc.removeEventListener("pointerup", up);
+        doc.removeEventListener("pointercancel", cancel);
+        ghost.remove();
+        target.classList.remove("clip--drag");
+      };
+      const cancel = (): void => end();
+      const up = (ev: PointerEvent): void => {
+        end();
+        if (!dragging) return;
+        suppressClick = true;
+        scope.setTimeout(() => (suppressClick = false), 0);
+        aim(ev);
+        ghost.remove();
+        const drop = plan as ReturnType<typeof planDrag>;
+        if (!drop || drop.noop) return;
+        if (drop.reason) {
+          say(drop.reason);
+          return;
+        }
+        picked = index;
+        flipBlocks((l) => (drop.copy ? copyBlockTo(l, index, drop.to) : moveBlockTo(l, index, drop.to)));
+      };
+      doc.addEventListener("pointermove", move);
+      doc.addEventListener("pointerup", up);
+      doc.addEventListener("pointercancel", cancel);
+    });
   }
 
   function voiceSub(): string {
@@ -1050,7 +1252,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   function beatSub(): string {
-    const busy = bottom.beatLine();
+    const busy = flipDraft.line() ?? bottom.beatLine();
     if (busy) return busy;
     if (facts.beatKind === "own") return reply.stations.beat.seed !== undefined ? `свой · ${reply.stations.beat.seed}` : "свой";
     const file = reply.stations.beat.file ?? "";
@@ -1158,6 +1360,12 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
         const from = toSeconds(g, c.fromBar);
         el.append(clipOf(c, block(c.fromBar, c.bars, c.label, "--beat", 60, wavePainter(beatPeaks, from, from + c.bars * barSeconds(g), "--beat"))));
       }
+      beatLaneEl = el;
+      if (blocksEditable()) {
+        dragBlocks(el);
+        const chosen = picked === null ? undefined : clips[picked];
+        if (chosen && transport.mode !== "recording") el.append(blockBar(chosen));
+      }
       return el;
     }
     const duration = beatPeaks?.duration ?? 0;
@@ -1188,6 +1396,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   // ---------- the editor shell ----------
   function leaveBeat(): void {
+    if (facts.beatKind === "flip") {
+      if (flipDraft.wantsCommit && transport.mode !== "recording") commitInBackground();
+      return;
+    }
     if (facts.beatKind !== "own" || !bottom.beatDirty || transport.mode !== "idle") return;
     dispatch({ type: "renderStarted" });
     void commitBeat();
@@ -1506,10 +1718,18 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       case "redo":
         void undo(true);
         return;
+      case "duplicate":
+        if (picked !== null) duplicateBlock(picked);
+        return;
+      case "delete":
+        // a Delete inside the editor belongs to what is edited there, a roll note
+        if (picked !== null && !editor.contains(e.target as Node | null)) removeBlock(picked);
+        return;
     }
   });
   keys.setActive(true);
   scope.add(() => keys.setActive(false));
+  scope.listen(window, "pagehide", () => flipDraft.leave());
   scope.listen(root.ownerDocument, "visibilitychange", () => {
     const seen = root.ownerDocument.visibilityState !== "hidden";
     jobsPoller.setVisible(seen);
@@ -1540,6 +1760,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       if (scope.closed) return;
       flushWaiters();
       await bottom.dispose();
+      await flipDraft.dispose();
       scope.dispose();
       api.close();
       flipApi.close();

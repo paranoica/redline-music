@@ -245,6 +245,17 @@ test("the screen's keys: Space, R, L, Home, Ctrl+Z and Ctrl+Y / Ctrl+Shift+Z", (
   assert.equal(dawKey(key("KeyZ", { ctrlKey: true, shiftKey: true }), false), "redo");
 });
 
+test("Ctrl+D duplicates and Delete deletes; neither is taken while typing or with other modifiers", () => {
+  assert.equal(dawKey(key("KeyD", { ctrlKey: true }), false), "duplicate");
+  assert.equal(dawKey(key("KeyD", { metaKey: true }), false), "duplicate");
+  assert.equal(dawKey(key("Delete"), false), "delete");
+  assert.equal(dawKey(key("KeyD", { ctrlKey: true }), true), null);
+  assert.equal(dawKey(key("Delete"), true), null);
+  assert.equal(dawKey(key("KeyD", { ctrlKey: true, shiftKey: true }), false), null);
+  assert.equal(dawKey(key("KeyD"), false), null);
+  assert.equal(dawKey(key("Delete", { altKey: true }), false), null);
+});
+
 test("no key is taken while typing, with Alt, or with Ctrl on a plain key", () => {
   assert.equal(dawKey(key("Space"), true), null);
   assert.equal(dawKey(key("KeyR"), true), null);

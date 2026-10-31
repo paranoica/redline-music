@@ -192,7 +192,7 @@ export function scoreMarks(score: Score): { bass: BassMark[]; drums: HitMark[] }
 
 // ---------- keys and the editor's tabs ----------
 
-export type DawKey = "play" | "record" | "loop" | "home" | "undo" | "redo";
+export type DawKey = "play" | "record" | "loop" | "home" | "undo" | "redo" | "duplicate" | "delete";
 
 export interface KeyLike {
   code: string;
@@ -207,6 +207,7 @@ export function dawKey(e: KeyLike, typing: boolean): DawKey | null {
   if (typing || e.altKey) return null;
   if (e.ctrlKey || e.metaKey) {
     if (e.code === "KeyZ") return e.shiftKey ? "redo" : "undo";
+    if (e.code === "KeyD" && !e.shiftKey) return "duplicate";
     return e.code === "KeyY" ? "redo" : null;
   }
   switch (e.code) {
@@ -218,6 +219,8 @@ export function dawKey(e: KeyLike, typing: boolean): DawKey | null {
       return "loop";
     case "Home":
       return "home";
+    case "Delete":
+      return "delete";
     default:
       return null;
   }

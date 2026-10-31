@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { IDLE, exportBlockers, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded } from "../src/daw/transport.ts";
+import { IDLE, commitPlan, exportBlockers, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded } from "../src/daw/transport.ts";
 
 const idle = IDLE;
 const failed = { mode: "idle", error: "boom" };
@@ -263,4 +263,30 @@ test("a stop is over once no take is left; a refused one also once its take is g
   assert.equal(stopSettled(named, false, other), false);
   // the named take is still being finished by the other tab
   assert.equal(stopSettled(named, true, snap({ recording: true, stopping: true, take: named })), false);
+});
+
+// ---------- what a press does about edits the render does not have ----------
+
+const beat = (over) => ({ beatKind: "own", hasBeatAudio: true, beatDirty: false, ...over });
+
+test("an own beat with edits or no render is waited for, whatever the press", () => {
+  for (const press of ["play", "record", "export"]) {
+    assert.deepEqual(commitPlan(beat({ beatDirty: true }), press), { wait: true, background: false });
+    assert.deepEqual(commitPlan(beat({ hasBeatAudio: false }), press), { wait: true, background: false });
+    assert.deepEqual(commitPlan(beat(), press), { wait: false, background: false });
+  }
+});
+
+test("a flip with edits plays at once on the old beat and renders behind it; record and export wait", () => {
+  const flip = beat({ beatKind: "flip", beatDirty: true });
+  assert.deepEqual(commitPlan(flip, "play"), { wait: false, background: true });
+  assert.deepEqual(commitPlan(flip, "record"), { wait: true, background: false });
+  assert.deepEqual(commitPlan(flip, "export"), { wait: true, background: false });
+});
+
+test("a clean flip and a file beat commit nothing", () => {
+  for (const press of ["play", "record", "export"]) {
+    assert.deepEqual(commitPlan(beat({ beatKind: "flip" }), press), { wait: false, background: false });
+    assert.deepEqual(commitPlan(beat({ beatKind: "file", beatDirty: true, hasBeatAudio: false }), press), { wait: false, background: false });
+  }
 });
