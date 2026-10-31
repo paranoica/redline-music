@@ -527,6 +527,65 @@ export function makeUnique(score: Score, section: number, pattern: string): { sc
   return { score: out, name };
 }
 
+// ---------- sections ----------
+
+export const MAX_SONG_BARS = 512;
+const SECTION_NAME_MAX = 48;
+
+export type SectionEdit = { ok: true; score: Score; selected: number } | { ok: false; reason: string };
+
+const noSection = (): SectionEdit => ({ ok: false, reason: "Такой секции нет." });
+
+const sectionAt = (score: Score, i: number): SectionJson | undefined => (Number.isInteger(i) ? score.sections[i] : undefined);
+
+// a section's name with the next free _n; names that are not pattern-like get the same suffix
+function sectionName(taken: readonly string[], base: string): string {
+  if (NAME.test(base)) return freshName(taken, base);
+  const names = new Set(taken);
+  const stem = base.replace(/_\d+$/, "");
+  for (let n = 2; ; n++) {
+    const suffix = `_${n}`;
+    const name = stem.slice(0, SECTION_NAME_MAX - suffix.length) + suffix;
+    if (!names.has(name)) return name;
+  }
+}
+
+// Moves section i so that it sits at index j of the list without it; selected is where it ends.
+export function moveSection(score: Score, i: number, j: number): SectionEdit {
+  const s = sectionAt(score, i);
+  if (!s) return noSection();
+  if (!Number.isInteger(j) || j < 0 || j >= score.sections.length) return noSection();
+  const out = copy(score);
+  const [moved] = out.sections.splice(i, 1);
+  out.sections.splice(j, 0, moved as SectionJson);
+  return { ok: true, score: out, selected: j };
+}
+
+// Puts a copy of section i into the gap j (0..n) of the list as it is, by default after i. The
+// copy plays the same patterns, under a fresh name.
+export function duplicateSection(score: Score, i: number, j: number = i + 1): SectionEdit {
+  const s = sectionAt(score, i);
+  if (!s) return noSection();
+  if (!Number.isInteger(j) || j < 0 || j > score.sections.length) return noSection();
+  if (songBars(score) + (typeof s.bars === "number" ? s.bars : 0) > MAX_SONG_BARS) {
+    return { ok: false, reason: `Копия не влезет: в песне не больше ${MAX_SONG_BARS} тактов.` };
+  }
+  const out = copy(score);
+  const twin = structuredClone(s);
+  twin.name = sectionName(score.sections.map((x) => x.name), s.name);
+  out.sections.splice(j, 0, twin);
+  return { ok: true, score: out, selected: j };
+}
+
+// The patterns stay in the score, so an undo has them.
+export function deleteSection(score: Score, i: number): SectionEdit {
+  if (!sectionAt(score, i)) return noSection();
+  if (score.sections.length <= 1) return { ok: false, reason: "Последнюю секцию удалить нельзя." };
+  const out = copy(score);
+  out.sections.splice(i, 1);
+  return { ok: true, score: out, selected: Math.min(i, out.sections.length - 1) };
+}
+
 // the score the engine hears: solo and mute as section mutes on a copy
 export function liveScore(score: Score, muted: ReadonlySet<string>, solo: ReadonlySet<string>): Score {
   if (muted.size === 0 && solo.size === 0) return score;

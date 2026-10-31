@@ -579,3 +579,88 @@ test("an error's place reads as pattern, sound and note or step, not as a JSON p
   assert.equal(pathText("bpm"), "bpm");
   assert.equal(pathText(""), "");
 });
+
+// ---- section ops ----
+import { deleteSection, duplicateSection, moveSection } from "../src/beat/model.ts";
+
+const three = () => {
+  const s = fresh();
+  s.sections.push({ name: "outro", bars: 2, play: ["low"] });
+  return s;
+};
+const names = (r) => r.score.sections.map((x) => x.name);
+
+test("moveSection: j is the index in the list without the section; selected follows it", () => {
+  const s = three();
+  const last = moveSection(s, 0, 2);
+  assert.deepEqual(names(last), ["hook", "outro", "intro"]);
+  assert.equal(last.selected, 2);
+  const first = moveSection(s, 2, 0);
+  assert.deepEqual(names(first), ["outro", "intro", "hook"]);
+  assert.equal(first.selected, 0);
+  assert.deepEqual(names(moveSection(s, 1, 1)), ["intro", "hook", "outro"]);
+  assert.deepEqual(names(moveSection(s, 0, 1)), ["hook", "intro", "outro"]);
+  assert.equal(moveSection(s, 0, 3).ok, false);
+  assert.equal(moveSection(s, 3, 0).ok, false);
+  assert.equal(moveSection(s, 0, -1).ok, false);
+  assert.deepEqual(names({ score: s }), ["intro", "hook", "outro"]);
+  assert.equal(songBars(last.score), songBars(s));
+  assert.deepEqual(last.score.patterns, s.patterns);
+});
+
+test("duplicateSection plays the same patterns under a fresh name; usage counts the copy", () => {
+  const s = fresh();
+  const r = duplicateSection(s, 1);
+  assert.deepEqual(names(r), ["intro", "hook", "hook_2"]);
+  assert.equal(r.selected, 2);
+  assert.deepEqual(r.score.sections[2], { ...s.sections[1], name: "hook_2" });
+  assert.deepEqual(usage(s, "drums"), [0, 1]);
+  assert.deepEqual(usage(r.score, "drums"), [0, 1, 2]);
+  assert.deepEqual(usage(r.score, "fill"), [1, 2]);
+  assert.deepEqual(usage(r.score, "low"), [1, 2]);
+  r.score.sections[2].play.push("zzz");
+  assert.deepEqual(s.sections[1].play, ["drums", "low"]);
+  const again = duplicateSection(r.score, 1, 0);
+  assert.deepEqual(names(again), ["hook_3", "intro", "hook", "hook_2"]);
+  assert.equal(again.selected, 0);
+  assert.deepEqual(names(duplicateSection(s, 0, 2)), ["intro", "hook", "intro_2"]);
+  assert.equal(duplicateSection(s, 0, 3).ok, false);
+  assert.equal(duplicateSection(s, 2).ok, false);
+});
+
+test("duplicateSection names sections whose names are not pattern-like", () => {
+  const s = fresh();
+  s.sections[0].name = "Verse 1";
+  const r = duplicateSection(s, 0);
+  assert.equal(r.score.sections[1].name, "Verse 1_2");
+  assert.equal(duplicateSection(r.score, 0).score.sections[1].name, "Verse 1_3");
+});
+
+test("duplicateSection refuses past 512 bars with a reason", () => {
+  const s = fresh();
+  s.sections = [{ name: "a", bars: 256, play: ["drums"] }, { name: "b", bars: 256, play: ["drums"] }];
+  const r = duplicateSection(s, 1);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /512/);
+  s.sections[1].bars = 255;
+  s.sections.push({ name: "c", bars: 1, play: ["drums"] });
+  assert.equal(duplicateSection(s, 2).ok, false);
+  s.sections[1].bars = 254;
+  assert.equal(songBars(duplicateSection(s, 2).score), 512);
+});
+
+test("deleteSection refuses the last, keeps the patterns, and moves the selection", () => {
+  const s = three();
+  const r = deleteSection(s, 1);
+  assert.deepEqual(names(r), ["intro", "outro"]);
+  assert.equal(r.selected, 1);
+  assert.deepEqual(r.score.patterns, s.patterns);
+  assert.equal(deleteSection(s, 2).selected, 1);
+  assert.equal(deleteSection(s, 0).selected, 0);
+  assert.equal(deleteSection(s, 3).ok, false);
+  const one = { ...fresh(), sections: [fresh().sections[0]] };
+  const no = deleteSection(one, 0);
+  assert.equal(no.ok, false);
+  assert.match(no.reason, /Последнюю/);
+  assert.equal(s.sections.length, 3);
+});

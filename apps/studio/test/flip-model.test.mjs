@@ -266,3 +266,325 @@ test("a parked flip keeps a finished render ready without playing it", () => {
   assert.equal(renderOutcome({ failed: true, present: false, parked: true }), "failed");
   assert.equal(renderOutcome({ failed: false, present: false, parked: false }), "missing");
 });
+
+// ---- notes, drums, block ops that carry them, effects that follow blocks ----
+import {
+  copyBlockTo,
+  copyRefusal,
+  deleteRefusal,
+  moveBlockTo,
+  normalisePatterns,
+  remapEffects,
+} from "../src/flip/model.ts";
+
+const note = (step, len = 2, n = 36, vel = 100) => ({ step, len, note: n, vel });
+const rich = (label, from, to, extra = {}) => ({ ...block(label, from, to), ...extra });
+const fx = (effect, from, to, params = {}) => ({ effect, from_bar: from, to_bar: to, params });
+const lengths = (l) => l.blocks.map((b) => b.to_bar - b.from_bar);
+const mkdoc = (mode, blocks, patterns, over = {}) => ({
+  format: 1,
+  source: "x.wav",
+  grid: { bpm: 120, downbeat_s: 0, swing: 50 },
+  bass808: { mode: "original", params: {} },
+  hats: { mode, remove: [], patterns },
+  gains: { drums: 0, other: 0, bass: 0 },
+  arrangement: blocks,
+  effects: [],
+  ...over,
+});
+
+test("moveBlockTo: j is the index in the list without the block", () => {
+  const l = layout(block("a", 0, 1), block("b", 1, 2), block("c", 2, 3), block("d", 3, 4));
+  l.patterns = ["p0", "p1", "p2", "p3"];
+  const labels = (r) => r.blocks.map((b) => b.label).join("");
+  assert.equal(labels(moveBlockTo(l, 0, 3)), "bcda");
+  assert.equal(labels(moveBlockTo(l, 3, 0)), "dabc");
+  assert.equal(labels(moveBlockTo(l, 1, 2)), "acbd");
+  assert.equal(labels(moveBlockTo(l, 2, 2)), "abcd");
+  const r = moveBlockTo(l, 0, 3);
+  assert.equal(r.at, 3);
+  assert.deepEqual(r.patterns, ["p1", "p2", "p3", "p0"]);
+  assert.deepEqual(r.map, [3, 0, 1, 2]);
+  assert.equal(moveBlockTo(l, 0, 4).ok, false);
+  assert.equal(moveBlockTo(l, 0, -1).ok, false);
+  assert.equal(moveBlockTo(l, 4, 0).ok, false);
+});
+
+test("move and copy make deep copies; the input is untouched", () => {
+  const l = layout(rich("a", 0, 2, { notes: [note(0)], drums: { kick: "x".repeat(32) } }), block("b", 2, 4));
+  const moved = moveBlockTo(l, 0, 1);
+  moved.blocks[1].notes[0].step = 9;
+  moved.blocks[1].drums.kick = "";
+  const copied = copyBlockTo(l, 0, 2);
+  copied.blocks[2].notes[0].vel = 1;
+  copied.blocks[2].drums.kick = "";
+  assert.equal(l.blocks[0].notes[0].step, 0);
+  assert.equal(l.blocks[0].notes[0].vel, 100);
+  assert.equal(l.blocks[0].drums.kick.length, 32);
+  assert.equal(copied.blocks[0].notes[0].vel, 100);
+  const dup = duplicateBlock(l, 0);
+  dup.blocks[1].notes[0].len = 7;
+  assert.equal(dup.blocks[0].notes[0].len, 2);
+  const del = deleteBlock(l, 1);
+  del.blocks[0].notes.push(note(5));
+  assert.equal(l.blocks[0].notes.length, 1);
+  const spl = splitBlock(l, 0, 1);
+  spl.blocks[0].drums.kick = "z";
+  assert.equal(l.blocks[0].drums.kick.length, 32);
+});
+
+test("absent notes and drums stay absent; an empty notes list is kept", () => {
+  const l = layout(block("a", 0, 4), rich("b", 4, 8, { notes: [] }));
+  for (const r of [moveBlockTo(l, 0, 1), copyBlockTo(l, 0, 0), duplicateBlock(l, 0), splitBlock(l, 0, 2), setRange(l, 0, 0, 3, 8)]) {
+    for (const b of r.blocks) {
+      assert.ok(!("drums" in b));
+      assert.equal("notes" in b, b.label === "b");
+    }
+  }
+  const back = JSON.parse(JSON.stringify(moveBlockTo(l, 0, 1).blocks));
+  assert.deepEqual(back[0], { label: "b", from_bar: 4, to_bar: 8, notes: [] });
+  assert.deepEqual(back[1], block("a", 0, 4));
+  const split = splitBlock(l, 1, 6);
+  assert.deepEqual(split.blocks[1].notes, []);
+  assert.deepEqual(split.blocks[2].notes, []);
+});
+
+test("copyBlockTo puts the copy in the gap, refuses at 512 bars with a reason", () => {
+  const l = layout(block("a", 0, 1), block("b", 1, 2));
+  l.patterns = ["x", "y"];
+  const r = copyBlockTo(l, 1, 0);
+  assert.deepEqual(r.blocks.map((b) => b.label), ["b", "a", "b"]);
+  assert.deepEqual(r.patterns, ["y", "x", "y"]);
+  assert.deepEqual(r.map, [1, 2]);
+  assert.equal(r.at, 0);
+  assert.deepEqual(copyBlockTo(l, 0, 2).blocks.map((b) => b.label), ["a", "b", "a"]);
+  assert.equal(copyBlockTo(l, 0, 3).ok, false);
+  const full = layout(block("a", 0, 256), block("b", 0, 256));
+  const no = copyBlockTo(full, 0, 1);
+  assert.equal(no.ok, false);
+  assert.match(no.reason, /512/);
+  assert.match(copyRefusal(full, 0), /512/);
+  assert.equal(copyRefusal(l, 0), null);
+  const edge = layout(block("a", 0, 256), block("b", 0, 255), block("c", 0, 1));
+  assert.equal(copyBlockTo(edge, 2, 3).ok, false);
+  const under = layout(block("a", 0, 256), block("b", 0, 254), block("c", 0, 1));
+  assert.equal(totalBars(copyBlockTo(under, 2, 3).blocks), 512);
+});
+
+test("deleting the last block is refused with a reason", () => {
+  assert.match(deleteRefusal(layout(block("a", 0, 1)), 0), /Последний/);
+  assert.equal(deleteRefusal(layout(block("a", 0, 1), block("b", 0, 1)), 1), null);
+  assert.ok(deleteRefusal(layout(block("a", 0, 1)), 3));
+});
+
+test("split slices notes by step and drum rows at the cut", () => {
+  const drums = { kick: "x...".repeat(8), hat: "." .repeat(16) + "x".repeat(16) };
+  const l = layout(rich("a", 2, 4, { notes: [note(0), note(14, 4), note(16), note(20, 6, 40, 90), note(31, 17)], drums }));
+  const s = splitBlock(l, 0, 3);
+  const [a, b] = s.blocks;
+  assert.deepEqual(a.notes, [note(0), note(14, 2)]);
+  assert.deepEqual(b.notes, [note(0), note(4, 6, 40, 90), note(15, 17)]);
+  assert.equal(a.drums.kick, "x...".repeat(4));
+  assert.equal(b.drums.kick, "x...".repeat(4));
+  assert.equal(a.drums.hat, ".".repeat(16));
+  assert.equal(b.drums.hat, "x".repeat(16));
+  assert.equal(drums.kick.length, 32);
+  assert.deepEqual(l.blocks[0].notes[1], note(14, 4));
+});
+
+test("setRange: a front trim shifts the notes and drops those that leave the block", () => {
+  const l = layout(rich("a", 2, 6, { notes: [note(0), note(16), note(33), note(50, 20), note(63, 17)] }));
+  const t = setRange(l, 0, 3, 6, 10);
+  assert.deepEqual(t.blocks[0].notes, [note(0), note(17), note(34, 20), note(47, 17)]);
+  const end = setRange(l, 0, 2, 4, 10);
+  assert.deepEqual(end.blocks[0].notes, [note(0), note(16)]);
+  const both = setRange(l, 0, 3, 5, 10);
+  assert.deepEqual(both.blocks[0].notes, [note(0), note(17)]);
+  const wholeCut = setRange(l, 0, 4, 5, 10);
+  assert.deepEqual(wholeCut.blocks[0].notes, [note(1)]);
+});
+
+test("setRange: a note that rings past the new end is shortened to the allowed tail", () => {
+  const l = layout(rich("a", 0, 4, { notes: [note(20, 40)] }));
+  const t = setRange(l, 0, 0, 2, 10);
+  assert.deepEqual(t.blocks[0].notes, [note(20, 28)]);
+});
+
+test("setRange: growth takes the new bars from sourceNotes, only for a block that has notes", () => {
+  const asked = [];
+  const src = (bar) => {
+    asked.push(bar);
+    return [note(0, 2, 30 + bar), note(8, 2, 30 + bar)];
+  };
+  const l = layout(rich("a", 2, 4, { notes: [note(0, 2, 99)] }), block("plain", 4, 6));
+  const g = setRange(l, 0, 1, 6, 8, src);
+  assert.deepEqual(asked, [1, 4, 5]);
+  assert.deepEqual(g.blocks[0].notes, [
+    note(16, 2, 99),
+    note(0, 2, 31),
+    note(8, 2, 31),
+    note(48, 2, 34),
+    note(56, 2, 34),
+    note(64, 2, 35),
+    note(72, 2, 35),
+  ]);
+  const plain = setRange(l, 1, 3, 6, 8, src);
+  assert.ok(!("notes" in plain.blocks[1]));
+  const none = setRange(l, 0, 2, 5, 8);
+  assert.deepEqual(none.blocks[0].notes, [note(0, 2, 99)]);
+});
+
+test("setRange pads and cuts drum rows with rests", () => {
+  const l = layout(rich("a", 0, 2, { drums: { kick: "x".repeat(32), snare: "x...".repeat(8) } }));
+  const g = setRange(l, 0, 0, 3, 8);
+  assert.equal(g.blocks[0].drums.kick, "x".repeat(32) + ".".repeat(16));
+  assert.equal(g.blocks[0].drums.snare, "x...".repeat(8) + ".".repeat(16));
+  const c = setRange(l, 0, 0, 1, 8);
+  assert.equal(c.blocks[0].drums.kick, "x".repeat(16));
+  assert.equal(l.blocks[0].drums.kick.length, 32);
+});
+
+test("hats.patterns stays as long as the blocks after every op, in every hats mode", () => {
+  for (const mode of ["original", "removed", "ours"]) {
+    const loaded = normalisePatterns(mkdoc(mode, [block("a", 0, 4), block("b", 4, 8), block("c", 8, 12)], mode === "ours" ? ["16ths"] : []));
+    assert.equal(loaded.hats.patterns.length, 3);
+    assert.deepEqual(loaded.hats.patterns[0], mode === "ours" ? "16ths" : "8ths");
+    const l = { blocks: loaded.arrangement, patterns: loaded.hats.patterns };
+    const ragged = { blocks: l.blocks, patterns: [] };
+    for (const base of [l, ragged]) {
+      const n = base.blocks.length;
+      const runs = {
+        move: moveBlockTo(base, 0, 2),
+        moveStep: moveBlock(base, 1, -1),
+        copy: copyBlockTo(base, 1, 0),
+        dup: duplicateBlock(base, 2),
+        del: deleteBlock(base, 1),
+        split: splitBlock(base, 0, 2),
+        range: setRange(base, 0, 0, 2, 12),
+      };
+      const want = { move: n, moveStep: n, copy: n + 1, dup: n + 1, del: n - 1, split: n + 1, range: n };
+      for (const [k, r] of Object.entries(runs)) {
+        assert.equal(r.blocks.length, want[k], k);
+        assert.equal(r.patterns.length, want[k], `${mode} ${k}`);
+      }
+    }
+  }
+  const over = normalisePatterns(mkdoc("ours", [block("a", 0, 1)], ["8ths", "16ths", "roll32"]));
+  assert.deepEqual(over.hats.patterns, ["8ths"]);
+  assert.equal(normalisePatterns(mkdoc("ours", [block("a", 0, 1)], [])).hats.patterns.length, 1);
+});
+
+test("patterns follow their blocks through a move", () => {
+  const l = { blocks: [block("a", 0, 1), block("b", 1, 2), block("c", 2, 3)], patterns: ["p", "q", "r"] };
+  assert.deepEqual(moveBlockTo(l, 2, 0).patterns, ["r", "p", "q"]);
+  assert.deepEqual(deleteBlock(l, 0).patterns, ["q", "r"]);
+  assert.deepEqual(splitBlock(l, 0, 0.5), null);
+});
+
+test("effects inside a moved block travel with it, keeping their place in it", () => {
+  const l = {
+    blocks: [block("a", 0, 4), block("b", 4, 6), block("c", 6, 10)],
+    patterns: ["8ths", "8ths", "8ths"],
+    effects: [fx("reverse", 1, 3), fx("stutter", 4, 5, { repeats: 4 }), fx("granular", 7, 9)],
+    bpm: 120,
+  };
+  const r = moveBlockTo(l, 0, 2);
+  assert.deepEqual(r.blocks.map((b) => b.label), ["b", "c", "a"]);
+  assert.deepEqual(r.effects.map((e) => [e.effect, e.from_bar, e.to_bar]), [
+    ["reverse", 7, 9],
+    ["stutter", 0, 1],
+    ["granular", 3, 5],
+  ]);
+  assert.deepEqual(r.effects[1].params, { repeats: 4 });
+  assert.equal(l.effects[0].from_bar, 1);
+  r.effects[1].params.repeats = 9;
+  assert.equal(l.effects[1].params.repeats, 4);
+});
+
+test("an effect straddling blocks is cut at its block's end", () => {
+  const l = {
+    blocks: [block("a", 0, 2), block("b", 2, 6)],
+    patterns: ["8ths", "8ths"],
+    effects: [fx("reverse", 1, 4), fx("granular", 3, 6)],
+  };
+  const r = moveBlockTo(l, 0, 1);
+  assert.deepEqual(r.effects.map((e) => [e.from_bar, e.to_bar]), [[5, 6], [1, 4]]);
+  const c = copyBlockTo(l, 1, 0);
+  assert.deepEqual(c.effects.map((e) => [e.from_bar, e.to_bar]), [[5, 6], [7, 10]]);
+});
+
+test("effects of a deleted block go; the rest close up", () => {
+  const l = {
+    blocks: [block("a", 0, 2), block("b", 2, 4), block("c", 4, 8)],
+    patterns: ["8ths", "8ths", "8ths"],
+    effects: [fx("reverse", 0, 2), fx("granular", 2, 4), fx("stutter", 5, 7)],
+  };
+  const r = deleteBlock(l, 1);
+  assert.deepEqual(r.effects.map((e) => [e.effect, e.from_bar, e.to_bar]), [["reverse", 0, 2], ["stutter", 3, 5]]);
+  const first = deleteBlock(l, 0);
+  assert.deepEqual(first.effects.map((e) => [e.effect, e.from_bar]), [["granular", 0], ["stutter", 3]]);
+  assert.equal(deleteBlock({ ...l, effects: [fx("reverse", 2, 3)] }, 1).effects.length, 0);
+});
+
+test("a copy leaves the effects on the original; split and a longer block keep them", () => {
+  const l = { blocks: [block("a", 0, 4)], patterns: ["8ths"], effects: [fx("reverse", 1, 3)] };
+  assert.deepEqual(copyBlockTo(l, 0, 1).effects.map((e) => [e.from_bar, e.to_bar]), [[1, 3]]);
+  assert.deepEqual(duplicateBlock(l, 0).effects.length, 1);
+  assert.deepEqual(splitBlock(l, 0, 2).effects.map((e) => [e.from_bar, e.to_bar]), [[1, 3]]);
+  assert.deepEqual(setRange(l, 0, 0, 6, 8).effects.map((e) => [e.from_bar, e.to_bar]), [[1, 3]]);
+  assert.deepEqual(setRange(l, 0, 0, 2, 8).effects.map((e) => [e.from_bar, e.to_bar]), [[1, 2]]);
+  assert.equal(setRange(l, 0, 0, 1, 8).effects.length, 0);
+  assert.equal(moveBlockTo(layout(block("a", 0, 1), block("b", 1, 2)), 0, 1).effects, undefined);
+});
+
+test("a tape effect is re-capped to its range after a trim", () => {
+  const l = {
+    blocks: [block("a", 0, 4)],
+    patterns: ["8ths"],
+    bpm: 120,
+    effects: [
+      fx("tape_stop", 0, 4, { duration: 4, time: 1 }),
+      fx("tape_start", 0, 3, { duration: 3 }),
+      fx("tape_stop", 0, 2, {}),
+    ],
+  };
+  const r = setRange(l, 0, 0, 1, 8);
+  assert.deepEqual(r.effects.map((e) => e.to_bar), [1, 1, 1]);
+  assert.equal(r.effects[0].params.duration, 2);
+  assert.equal(r.effects[0].params.time, 1);
+  assert.equal(r.effects[1].params.duration, 2);
+  assert.equal(r.effects[2].params.duration, undefined);
+  const tight = setRange({ ...l, bpm: 240 }, 0, 0, 1, 8);
+  assert.equal(tight.effects[0].params.duration, 1);
+  assert.ok(!("time" in tight.effects[0].params));
+  assert.equal(tight.effects[2].params.duration, undefined);
+  const t = remapEffects(l.blocks, l.blocks, [fx("tape_stop", 0, 1, { duration: 4 })], [0], 240);
+  assert.equal(t[0].params.duration, 1);
+  const half = remapEffects(l.blocks, [block("a", 0, 1)], [fx("tape_stop", 0, 1, {})], [0], 480);
+  assert.equal(half[0].params.duration, undefined);
+  const narrow = remapEffects(l.blocks, [block("a", 0, 1)], [fx("tape_stop", 0, 1, {})], [0], 960);
+  assert.equal(narrow[0].params.duration, 0.25);
+  const reverse = remapEffects(l.blocks, [block("a", 0, 1)], [fx("reverse", 0, 4, { x: 1 })], [0], 120);
+  assert.deepEqual(reverse[0], fx("reverse", 0, 1, { x: 1 }));
+});
+
+test("draftProblem also guards a block with drums or notes at a tempo the synth refuses", () => {
+  const plain = mkdoc("original", [block("a", 0, 4)], []);
+  assert.equal(draftProblem({ ...plain, grid: { ...plain.grid, bpm: 250 } }), null);
+  const fast = (b) => draftProblem(mkdoc("original", [b], [], { grid: { bpm: 250, downbeat_s: 0, swing: 50 } }));
+  assert.match(fast(rich("a", 0, 4, { drums: { kick: "x".repeat(64) } })), /250/);
+  assert.match(fast(rich("a", 0, 4, { notes: [note(0)] })), /250/);
+  assert.equal(fast(rich("a", 0, 4, { notes: [] })), null);
+  assert.equal(fast(block("a", 0, 4)), null);
+  const slow = mkdoc("original", [rich("a", 0, 4, { drums: { kick: "x".repeat(64) } })], []);
+  assert.equal(draftProblem(slow), null);
+  assert.equal(draftProblem({ ...slow, grid: { ...slow.grid, bpm: 40 } }), null);
+  assert.ok(draftProblem({ ...slow, grid: { ...slow.grid, bpm: 39 } }));
+  assert.ok(draftProblem({ ...slow, grid: { ...slow.grid, bpm: 221 } }));
+  assert.ok(draftProblem(mkdoc("ours", [block("a", 0, 4)], ["8ths"], { grid: { bpm: 250, downbeat_s: 0, swing: 50 } })));
+});
+
+test("a straddling effect stays cut at its old block's end when that block grows", () => {
+  const l = { blocks: [block("a", 0, 2), block("b", 2, 4)], patterns: ["8ths", "8ths"], effects: [fx("reverse", 1, 3)] };
+  assert.deepEqual(setRange(l, 0, 0, 4, 8).effects.map((e) => [e.from_bar, e.to_bar]), [[1, 2]]);
+});
