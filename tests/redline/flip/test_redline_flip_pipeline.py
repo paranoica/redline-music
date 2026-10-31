@@ -616,3 +616,45 @@ def test_a_second_analysis_moves_an_untouched_draft_to_its_new_default(tmp_path)
     draft = model.load(folder / "draft.json")
     assert [(b.from_bar, b.to_bar) for b in draft.arrangement] == [(0, bars)]
     assert draft.bpm == pytest.approx(again["bpm"])
+
+
+def fresh(tmp_path):
+    root = tmp_path / "repo"
+    for top in song_model.ALLOWED:
+        (root / top).mkdir(parents=True)
+    path = root / "input" / "demo.wav"
+    sf.write(path, sum(make_stems().values()), RATE)
+    fake = FakeFour()
+    first = pipeline.analyse(path, root / "work", separator=fake, root=root)
+    return root, path, fake, root / "work" / "flips" / first["sha8"]
+
+
+def test_a_second_analysis_with_the_same_result_leaves_the_draft_and_its_revision(tmp_path):
+    root, path, fake, folder = fresh(tmp_path)
+    before = model.draft_rev(folder)
+    pipeline.analyse(path, root / "work", separator=fake, root=root)
+    assert model.draft_rev(folder) == before
+
+
+def test_a_page_save_during_a_second_analysis_keeps_its_edit(tmp_path, monkeypatch):
+    root, path, fake, folder = fresh(tmp_path)
+    store = pipeline._store_stems
+
+    def saving_meanwhile(*args):
+        edited = json.loads((folder / "draft.json").read_text(encoding="utf-8"))
+        edited["arrangement"] = [{"label": "mine", "from_bar": 0, "to_bar": 2}]
+        model.save_draft(folder, model.parse(edited), base=model.draft_rev(folder))
+        store(*args)
+
+    monkeypatch.setattr(pipeline, "_store_stems", saving_meanwhile)
+    pipeline.analyse(path, root / "work", separator=fake, root=root, half=True)
+    assert [b.label for b in model.load(folder / "draft.json").arrangement] == ["mine"]
+
+
+def test_a_broken_old_analysis_does_not_stop_a_new_one(tmp_path):
+    root, path, fake, folder = fresh(tmp_path)
+    old = json.loads((folder / "analysis.json").read_text(encoding="utf-8"))
+    old["bar_starts_s"] = None
+    (folder / "analysis.json").write_text(json.dumps(old))
+    again = pipeline.analyse(path, root / "work", separator=fake, root=root, half=True)
+    assert again["bar_starts_s"]

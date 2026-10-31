@@ -306,21 +306,30 @@ def analyse(
     untouched = _untouched_draft(folder, source)
     _store_stems(folder, stems48)
     write_private(folder / ANALYSIS, json.dumps(analysis, ensure_ascii=False))
-    if untouched or not (folder / model.DRAFT).exists():
-        model.save_draft(folder, _default_draft(source, analysis))
+    default = _default_draft(source, analysis)
+    if not (folder / model.DRAFT).exists():
+        model.save_draft(folder, default)
+    elif untouched is not None and untouched[1] != default.to_json():
+        # over the revision it was read at: a save from the page meanwhile keeps its edit
+        model.save_draft(folder, default, base=untouched[0])
     return analysis
 
 
-def _untouched_draft(folder: Path, source: str) -> bool:
-    # a draft nobody edited follows a new analysis; an edited one is kept
+def _untouched_draft(folder: Path, source: str) -> tuple[int, dict[str, Any]] | None:
+    """The revision and content of a draft nobody edited since the last analysis, else None."""
     try:
         before = read_analysis(folder)
         if before is None:
-            return False
-        draft = model.load(inside(folder, model.DRAFT))
-        return draft.to_json() == _default_draft(source, before).to_json()
-    except (PipelineError, model.FlipError, KeyError):
-        return False
+            return None
+        with model.draft_lock(folder):
+            rev = model.draft_rev(folder)
+            draft = model.load(inside(folder, model.DRAFT)).to_json()
+        if draft != _default_draft(source, before).to_json():
+            return None
+        return rev, draft
+    # an old analysis that cannot rebuild its default leaves the draft alone
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _bass_params(values: Mapping[str, float]) -> Bass808Params:

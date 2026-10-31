@@ -865,7 +865,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
 
   async function undo(redo: boolean): Promise<void> {
     if (facts.beatKind === "flip" && (redo ? flipDraft.canRedo : flipDraft.canUndo)) {
-      if (flipDraft.undo(redo)) picked = pickAfterUndo(picked, bottom.block()?.section ?? null);
+      if (flipDraft.undo(redo)) picked = pickAfterUndo(picked, bottom.ownBlock());
       return;
     }
     if (bottom.undo(redo)) return;

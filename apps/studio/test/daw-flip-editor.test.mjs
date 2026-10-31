@@ -471,3 +471,17 @@ test("an audition asks for the layer again only when the edited block's content 
   await settle();
   assert.equal(asked, 2);
 });
+
+test("the editor's own block is the one it was pointed at while it exists, never the playhead's", async () => {
+  const clips = [
+    { index: 0, fromBar: 0, bars: 4, label: "a" },
+    { index: 1, fromBar: 4, bars: 4, label: "b" },
+  ];
+  const { editor } = await editorSetup({ load: false, over: { clips: () => clips, playheadBar: () => 5 } });
+  assert.equal(editor.ownBlock(), null);
+  editor.selectBlock(1);
+  assert.equal(editor.ownBlock(), 1);
+  editor.selectBlock(2);
+  assert.equal(editor.ownBlock(), null);
+  assert.equal(editor.block()?.section, 1);
+});

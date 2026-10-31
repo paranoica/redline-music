@@ -211,6 +211,12 @@ export class Editor {
     return { section: clip.index, fromBar: Math.round(clip.fromBar), bars: Math.max(1, Math.round(clip.bars)), label: clip.label };
   }
 
+  // the block the editor was pointed at while it still exists; no playhead fallback
+  ownBlock(): number | null {
+    const at = this.#block;
+    return at !== null && this.#host.clips().some((c) => c.index === at && c.bars >= 1) ? at : null;
+  }
+
   selectBlock(index: number): void {
     this.#block = index;
     this.#source.retry();
