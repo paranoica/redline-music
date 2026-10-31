@@ -72,6 +72,16 @@ def _source_bars(flip: model.Flip, analysis: dict[str, Any]) -> int:
     return bars
 
 
+def _fits_source(flip: model.Flip, analysis: dict[str, Any]) -> None:
+    """Raise FlipError for a block past the source's bars."""
+    bars = len(mixer.source_bar_starts(flip, analysis["frames"], analysis["rate"])) - 1
+    for i, block in enumerate(flip.arrangement):
+        if block.to_bar > bars:
+            raise model.FlipError(
+                f"arrangement[{i}].to_bar: {block.to_bar} is past the {bars} bars"
+            )
+
+
 def _stale() -> ApiError:
     return ApiError(HTTPStatus.CONFLICT, "the draft was changed elsewhere: reload it", "stale_base")
 
@@ -325,12 +335,7 @@ class FlipRoutes:
                 raise model.FlipError(problem)
             analysis = self._analysis(ctx, needed=False)
             if analysis is not None:
-                bars = len(mixer.source_bar_starts(flip, analysis["frames"], analysis["rate"])) - 1
-                for i, block in enumerate(flip.arrangement):
-                    if block.to_bar > bars:
-                        raise model.FlipError(
-                            f"arrangement[{i}].to_bar: {block.to_bar} is past the {bars} bars"
-                        )
+                _fits_source(flip, analysis)
         except model.FlipError as error:
             raise ApiError(
                 HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -374,7 +379,7 @@ class FlipRoutes:
         base = _int(body.get("base"), "base")
         with self._lock:
             ctx = self.context()
-            self._analysis(ctx)
+            analysis = self._analysis(ctx)
             running = self.app.jobs.state(self.app.name).get("flip_render")
             if running is not None and running["state"] in ACTIVE:
                 raise ApiError(HTTPStatus.CONFLICT, "a flip render is running", "busy")
@@ -388,6 +393,13 @@ class FlipRoutes:
                     raise ApiError(
                         HTTPStatus.CONFLICT, "the draft is missing", "no_draft"
                     ) from None
+            # a draft saved before a new analysis with fewer bars
+            try:
+                _fits_source(flip, analysis)
+            except model.FlipError as error:
+                raise ApiError(
+                    HTTPStatus.UNPROCESSABLE_ENTITY, str(error), "invalid_flip", errors=[str(error)]
+                ) from None
             n = model.save_new(ctx.folder, flip)
             try:
                 self.app._start("flip_render", 0, flip=n)

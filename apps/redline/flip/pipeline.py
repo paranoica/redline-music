@@ -306,12 +306,17 @@ def analyse(
     untouched = _untouched_draft(folder, source)
     _store_stems(folder, stems48)
     write_private(folder / ANALYSIS, json.dumps(analysis, ensure_ascii=False))
-    default = _default_draft(source, analysis)
     if not (folder / model.DRAFT).exists():
-        model.save_draft(folder, default)
-    elif untouched is not None and untouched[1] != default.to_json():
-        # over the revision it was read at: a save from the page meanwhile keeps its edit
-        model.save_draft(folder, default, base=untouched[0])
+        model.save_draft(folder, _default_draft(source, analysis))
+    elif untouched is not None:
+        try:
+            default = _default_draft(source, analysis)
+        except model.FlipError:
+            # a grid no flip takes (a tempo set out of range): the draft stays as it was
+            return analysis
+        if untouched[1] != default.to_json():
+            # over the revision it was read at: a save from the page meanwhile keeps its edit
+            model.save_draft(folder, default, base=untouched[0])
     return analysis
 
 
@@ -403,7 +408,10 @@ def render(folder: Path, n: int, drumsep: NamedSeparator | None = None) -> Path:
     stems = load_stems(folder)
     frames = len(stems["drums"])
     source = mixer.source_bar_starts(flip, frames, FLIP_RATE)
-    mixer.play_bar_starts(source, flip.arrangement)
+    try:
+        mixer.play_bar_starts(source, flip.arrangement)
+    except ValueError as error:
+        raise PipelineError(str(error)) from None
 
     notes: list[str] = []
     ours: dict[str, Samples] = {}

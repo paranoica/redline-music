@@ -658,3 +658,22 @@ def test_a_broken_old_analysis_does_not_stop_a_new_one(tmp_path):
     (folder / "analysis.json").write_text(json.dumps(old))
     again = pipeline.analyse(path, root / "work", separator=fake, root=root, half=True)
     assert again["bar_starts_s"]
+
+
+def test_a_second_analysis_whose_default_cannot_be_a_flip_keeps_the_edited_draft(tmp_path):
+    root, path, fake, folder = fresh(tmp_path)
+    edited = json.loads((folder / "draft.json").read_text(encoding="utf-8"))
+    edited["arrangement"] = [{"label": "mine", "from_bar": 0, "to_bar": 2}]
+    model.save_draft(folder, model.parse(edited))
+    again = pipeline.analyse(path, root / "work", separator=fake, root=root, bpm=25)
+    assert again["bpm"] == pytest.approx(25, abs=0.5)
+    assert [b.label for b in model.load(folder / "draft.json").arrangement] == ["mine"]
+
+
+def test_a_version_past_the_sources_bars_is_a_pipeline_error(analysed):
+    folder = folder_of(analysed)
+    data = flip_data(folder)
+    data["arrangement"] = [{"label": "a", "from_bar": 0, "to_bar": BARS + 3}]
+    n = model.save_new(folder, model.parse(data))
+    with pytest.raises(pipeline.PipelineError, match="outside"):
+        pipeline.render(folder, n)

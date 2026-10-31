@@ -817,3 +817,12 @@ def test_a_render_reads_the_revision_and_the_draft_under_the_draft_lock(made, ro
     asked.join(10)
     assert answers[0][1]["code"] == "stale_base"
     assert not list(folder.glob("flip-*.json"))
+
+
+def test_a_render_of_a_draft_past_the_sources_bars_is_422_before_any_version(made, root):
+    folder = analyse_by_hand(root)
+    wide = draft_json(arrangement=[{"label": "a", "from_bar": 0, "to_bar": BARS + 4}])
+    flip_model.save_draft(folder, flip_model.parse(wide))
+    status, data = api(made, "POST", "/api/flip/render", {"base": rev(made)})
+    assert status == 422 and data["code"] == "invalid_flip" and "past the" in data["error"]
+    assert not list(folder.glob("flip-*.json"))
