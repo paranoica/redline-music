@@ -1,3 +1,4 @@
+import functools
 import http.client
 import json
 import stat
@@ -13,6 +14,7 @@ from redline.flip import model as flip_model
 from redline.flip import pipeline
 from redline.record.session import Outcome
 from redline.song import model
+from redline.song.app import AppHost
 from redline.song.rec import NotReady, TakeRunning
 from redline.song.server import SongApp, job_argv, make_server
 
@@ -189,14 +191,18 @@ def made(root, tmp_path):
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "song.html").write_bytes(b"<!doctype html><title>song</title>")
-    app = SongApp(
-        NAME, make_rec=FakeRec, argv=argv, assets=lambda: (None, None, str), kill_after=0.3
+    (dist / "daw.html").write_bytes(b"<!doctype html><title>daw</title>")
+    host = AppHost(
+        make_rec=FakeRec,
+        make_app=functools.partial(SongApp, argv=argv, assets=lambda: (None, None, str)),
+        kill_after=0.3,
     )
-    httpd = make_server(app, TOKEN, port=0, site=dist)
+    host.open(NAME)
+    httpd = make_server(host, TOKEN, port=0, site=dist)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield httpd
     httpd.shutdown()
-    app.jobs.close(timeout=5)
+    host.jobs.close(timeout=5)
     httpd.server_close()
 
 

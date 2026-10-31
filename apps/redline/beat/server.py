@@ -36,6 +36,7 @@ from redline.beat.render import (
     notes_used,
     render_seed,
 )
+from redline.core.private import write_private
 from redline.studio.server import (
     PAGE_KINDS,
     POLICY,
@@ -53,6 +54,7 @@ SAVED = re.compile(r"score-(\d+)\.json")
 FILE_ID = re.compile(r"\d{1,5}")
 STEM = re.compile(r"[A-Za-z0-9_-]{1,64}")
 RENDER_FILES = ("beat.wav", "render.json")
+DRAFT = "draft.json"
 MAX_NOTE = 2000
 # a score with per-step lanes on every row of 64 patterns runs to a few megabytes
 BEAT_MAX_BODY = 4 * 1024 * 1024
@@ -93,6 +95,23 @@ class Refused(BadRequest):
         """Keep the errors for the answer."""
         super().__init__(HTTPStatus.UNPROCESSABLE_ENTITY, "the score has errors; nothing was saved")
         self.errors = errors
+
+
+class StaleBase(BadRequest):
+    """An edit that started from a score which is no longer the newest."""
+
+    def __init__(self, base: str, newest: str) -> None:
+        """Name both scores in the message."""
+        super().__init__(
+            HTTPStatus.CONFLICT, f"{newest} is newer than {base}: reload before saving"
+        )
+
+
+def _base_number(base: str) -> int:
+    found = SAVED.fullmatch(base)
+    if found is None:
+        raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name, score-K.json")
+    return int(found.group(1))
 
 
 @dataclass
@@ -308,21 +327,62 @@ class BeatStudio:
             BadRequest: A base that is not a score name (400) or not the newest (409).
             Refused: The checks found errors (422); nothing is written.
         """
-        found = SAVED.fullmatch(base)
-        if found is None:
-            raise BadRequest(HTTPStatus.BAD_REQUEST, "base is a saved score's name, score-K.json")
+        number = _base_number(base)
         with self._save_lock:
             newest = self.newest().name
             if base != newest:
-                raise BadRequest(
-                    HTTPStatus.CONFLICT, f"{newest} is newer than {base}: reload before saving"
-                )
+                raise StaleBase(base, newest)
             errors, warnings = self.check(score)
             if errors:
                 raise Refused(errors)
             text = json.dumps(score, ensure_ascii=False, indent=1) + "\n"
-            name = write_new_score(self.folder, int(found.group(1)) + 1, text)
+            name = write_new_score(self.folder, number + 1, text)
+            # the draft was an edit of the score just replaced
+            (self.folder / DRAFT).unlink(missing_ok=True)
         return name, warnings
+
+    def draft(self) -> tuple[dict[str, Any], str]:
+        """The working copy over the newest score, or the newest score itself.
+
+        A draft over an older score is not given: it can no longer be saved.
+
+        Returns:
+            The score and the name of the saved score it starts from.
+
+        Raises:
+            BadRequest: The seed has no saved score (404), or it is not JSON (409).
+        """
+        with self._save_lock:
+            newest = self.newest()
+            with contextlib.suppress(OSError, ValueError, TypeError, KeyError):
+                kept = json.loads((self.folder / DRAFT).read_text(encoding="utf-8"))
+                if kept["base"] == newest.name and isinstance(kept["score"], dict):
+                    return kept["score"], newest.name
+            try:
+                score = json.loads(newest.read_text(encoding="utf-8"))
+            except ValueError as error:
+                raise BadRequest(HTTPStatus.CONFLICT, f"{newest.name} is not JSON") from error
+        return score, newest.name
+
+    def save_draft(self, score: dict[str, Any], base: str) -> None:
+        """Replace the working copy after the score parses as the player reads it.
+
+        Raises:
+            BadRequest: A base that is not a score name (400), or no saved score (404).
+            StaleBase: base is not the newest score (409).
+            Refused: The player refuses the score (422); the old draft stays.
+        """
+        _base_number(base)
+        text = json.dumps(score, ensure_ascii=False)
+        with self._save_lock:
+            newest = self.newest().name
+            if base != newest:
+                raise StaleBase(base, newest)
+            errors = tuple(redline_dsp.beat_check(text))
+            if errors:
+                raise Refused(errors)
+            kept = {"base": base, "score": score}
+            write_private(self.folder / DRAFT, json.dumps(kept, ensure_ascii=False) + "\n")
 
     def mark(self, bar: int, verdict: str, note: str, base: str) -> dict[str, Any]:
         """A good or bad mark on a bar of the score the page shows, through `redline.beat.marks`.

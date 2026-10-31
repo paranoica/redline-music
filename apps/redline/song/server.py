@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
@@ -24,14 +24,22 @@ from urllib.parse import parse_qs, urlsplit
 import numpy as np
 from scipy.signal import resample_poly
 
-from redline.beat.server import BEAT_MAX_BODY, BeatStudio, beat_get, beat_post
+from redline.beat.server import (
+    BEAT_MAX_BODY,
+    DRAFT,
+    BeatStudio,
+    Refused,
+    StaleBase,
+    beat_get,
+    beat_post,
+)
 from redline.core.audio import AudioError, Decoded, decode
 from redline.core.private import make_private_dir, write_private
 from redline.engine.settings import Settings, from_dict, to_dict
 from redline.record.process import EngineError
 from redline.record.sweep import CalibrationError
 from redline.song import model, rec
-from redline.song.jobs import Busy, JobRunner, reap_orphans
+from redline.song.jobs import ACTIVE, CANCELLED, DONE, FAILED, Busy, JobRunner, reap_orphans
 from redline.song.rec import OpenRequest, RecOwner
 from redline.studio.server import (
     PAGE_KINDS,
@@ -51,7 +59,7 @@ from redline.web.local import MAX_BODY, BadRequest, LocalHandler, LocalServer, o
 if TYPE_CHECKING:
     from redline.song.app import AppHost
 
-PAGE = "song.html"
+PAGE = "daw.html"
 NOT_BUILT = "the song page is not built: run `npm --prefix apps/studio run build`"
 KINDS = ("separate", "rank", "auto", "result")
 FLIP_KINDS = ("flip_stems", "flip_render")
@@ -61,6 +69,11 @@ LYRICS = "private/lyrics"
 BUILD = "private/lyrics/build"
 MAX_SEED = 2**31 - 1
 BEAT_GONE = "the beat changed and is not rendered"
+PEAKS = (200, 2000, 8000)
+LAST_BAR = 511
+BARS_PER_LINE = (1, 2)
+LAYOUT = ("start_bar", "bars_per_line")
+STEP_TICK_S = 0.05
 
 REC_ERRORS = (
     (rec.OutOfSync, HTTPStatus.CONFLICT, "out_of_sync"),
@@ -91,7 +104,7 @@ class ApiError(BadRequest):
 
 
 def song_files(root: Path) -> dict[str, tuple[Path, str]]:
-    """The built song page at `/` and the build's assets; empty while song.html is missing."""
+    """The built song screen at `/` and the build's assets; empty while daw.html is missing."""
     if not (root / PAGE).is_file():
         return {}
     files = {
@@ -209,6 +222,48 @@ def _one(query: dict[str, list[str]], key: str) -> str | None:
     return values[0] if len(values) == 1 else None
 
 
+def min_max(mono: np.ndarray, points: int) -> list[list[float]]:
+    """[min, max] over `points` equal spans of a mono signal; fewer only for a shorter one."""
+    count = min(points, len(mono))
+    if count == 0:
+        return []
+    starts = np.linspace(0, len(mono), count + 1).astype(np.int64)[:-1]
+    low, high = np.minimum.reduceat(mono, starts), np.maximum.reduceat(mono, starts)
+    return [[round(float(a), 4), round(float(b), 4)] for a, b in zip(low, high, strict=True)]
+
+
+@dataclass
+class MixChain:
+    """The "mix" job: separate when stale, auto, then keep variant 0, one step at a time."""
+
+    seed: int
+    state: str = "running"
+    step: str | None = None
+    reason: str | None = None
+    started: float = field(default_factory=time.time)
+    finished: float | None = None
+    cancelled: bool = False
+
+    def info(self) -> dict[str, Any]:
+        """The chain as a job of the list."""
+        return {
+            "state": self.state,
+            "step": self.step,
+            "paused": False,
+            "reason": self.reason,
+            "result": None,
+            "log": None,
+            "follow_up": False,
+            "pid": None,
+            "started": self.started,
+            "finished": self.finished,
+        }
+
+    def end(self, state: str, reason: str | None = None) -> None:
+        """Finish the chain in a state."""
+        self.state, self.reason, self.finished = state, reason, time.time()
+
+
 class SongApp:
     """What the page asks of one song, as route functions over services that tests can swap."""
 
@@ -257,6 +312,10 @@ class SongApp:
         self.jobs = jobs
         self._rec_used = False
         self._closed = False
+        self._mix: MixChain | None = None
+        self._mix_lock = threading.Lock()
+        self._hashes: dict[tuple[str, int, int], str] = {}
+        self._peaks_lock = threading.Lock()
         self._server_lock = self._claim_song()
         reap_orphans(self._jobs_dir())
         from redline.flip.server import FlipRoutes
@@ -273,7 +332,11 @@ class SongApp:
             raise ApiError(HTTPStatus.NOT_FOUND, str(error), "no_song") from None
 
     def _payload(self, song: model.Song) -> dict[str, Any]:
-        return {"song": song.to_json(), "stations": self._stations(song)}
+        return {
+            "song": song.to_json(),
+            "stations": self._stations(song),
+            "facts": self._facts(song),
+        }
 
     def _state_dir(self) -> Path:
         return make_private_dir(self.work / "songs" / self.name, self.root)
@@ -442,6 +505,89 @@ class SongApp:
             reason = str(error)
         return {"ready": reason is None, "reason": reason, "variant": song.mix["variant"]}
 
+    def _facts(self, song: model.Song) -> dict[str, Any]:
+        exporting = self.jobs.state(self.name).get("result", {}).get("state") in ACTIVE
+        return {
+            "beat_audio": self._beat_file_ready(song),
+            "beat_analysed": self._beat_analysed(song),
+            "studio_ready": self._studio_ready(song),
+            "mix_stale": self._mix_stale(song),
+            "refs": len(song.references),
+            "voice_kind": "suno" if "suno" in song.voice else "own",
+            "exporting": exporting,
+            "beat_dirty": self._beat_dirty(song),
+        }
+
+    def _beat_file_ready(self, song: model.Song) -> bool:
+        try:
+            return model.beat_file(song, self.root).is_file()
+        except model.SongError:
+            return False
+
+    def _beat_analysed(self, song: model.Song) -> bool:
+        if "own" in song.beat:
+            return True
+        from redline.flip import pipeline
+
+        try:
+            line = pipeline.lineage(song.beat["file"], self.root)
+            return pipeline.read_analysis(pipeline.flip_dir(self.root, line.sha8)) is not None
+        except pipeline.PipelineError:
+            return False
+
+    def _studio_ready(self, song: model.Song) -> bool:
+        try:
+            model.mix_inputs(song, self.root)
+        except model.SongError:
+            return False
+        return self._stems_ready(song)
+
+    def _mix_key_file(self) -> Path:
+        return self._state_dir() / "mix-key.json"
+
+    def _record_mix_key(self, key: str | None, settings: str) -> None:
+        if key is not None:
+            data = {"key": key, "settings": settings}
+            write_private(self._mix_key_file(), json.dumps(data) + "\n")
+
+    def _mix_stale(self, song: model.Song) -> bool:
+        """No kept settings, or settings kept for other voice, beat or reference files."""
+        rel = song.mix["settings"]
+        try:
+            current = model.mix_inputs(song, self.root).key()
+            if rel is None or not model.resolve_inside(rel, self.root).is_file():
+                return True
+            record = json.loads(self._mix_key_file().read_text(encoding="utf-8"))
+        except (model.SongError, OSError, ValueError):
+            return True
+        return not (
+            isinstance(record, dict)
+            and record.get("key") == current
+            and record.get("settings") == rel
+        )
+
+    def _beat_dirty(self, song: model.Song) -> bool:
+        """An own beat with a draft over its newest score, or a newest score not rendered."""
+        if "own" not in song.beat:
+            return False
+        from redline.beat.render import RenderError, latest_score
+
+        seed = song.beat["own"]
+        folder = model.resolve_inside("private/beats", self.root) / str(seed)
+        try:
+            newest = latest_score(folder).name
+        except RenderError:
+            return False
+        with contextlib.suppress(OSError, ValueError, TypeError, KeyError):
+            if json.loads((folder / DRAFT).read_text(encoding="utf-8"))["base"] == newest:
+                return True
+        out = self.work / "beats" / str(seed)
+        try:
+            rendered = json.loads((out / "render.json").read_text(encoding="utf-8"))["score"]
+        except (OSError, ValueError, TypeError, KeyError):
+            return True
+        return rendered != newest or not (out / "beat.wav").is_file()
+
     def get_song(self) -> Reply:
         """The song and its stations."""
         return reply_json(HTTPStatus.OK, self._payload(self.song()))
@@ -503,6 +649,10 @@ class SongApp:
             # the Studio opens from the settings saved under its track key
             studio_folder = make_private_dir(self.work / "studio" / self.name, self.root)
             write_private(studio_folder / "settings.json", kept)
+            with contextlib.suppress(model.SongError, OSError):
+                self._record_mix_key(
+                    model.mix_inputs(saved, self.root).key(), saved.mix["settings"]
+                )
         return reply_json(HTTPStatus.OK, self._payload(saved))
 
     def _new_text(self, value: Any) -> dict[str, int] | None:
@@ -843,9 +993,239 @@ class SongApp:
             raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
         return reply_bytes(HTTPStatus.OK, wav_bytes(samples, decoded.rate), "audio/wav")
 
+    def _beat_path(self, song: model.Song) -> Path:
+        try:
+            path = model.beat_file(song, self.root)
+        except model.SongError as error:
+            raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
+        if path.is_file():
+            return path
+        if "own" in song.beat:
+            raise ApiError(HTTPStatus.CONFLICT, "the beat is not rendered yet", "no_render")
+        raise ApiError(HTTPStatus.CONFLICT, f"{path.name}: no such file", "no_beat")
+
+    def beat_audio(self) -> Reply:
+        """The song's beat as a 16-bit stereo WAV at its own rate."""
+        path = self._beat_path(self.song())
+        try:
+            decoded = decode(path)
+        except AudioError as error:
+            raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
+        return reply_bytes(HTTPStatus.OK, wav_bytes(decoded.samples, decoded.rate), "audio/wav")
+
+    def _take_path(self, song: model.Song, name: str | None) -> Path:
+        if name is None or not model.TAKE_FILE.fullmatch(name):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "name is a take file, take-NN.wav")
+        if "takes" not in song.voice:
+            raise ApiError(HTTPStatus.CONFLICT, "a Suno voice has no takes", "no_takes")
+        try:
+            folder = model.resolve_inside(song.voice["takes"], self.root, "voice.takes")
+        except model.SongError as error:
+            raise ApiError(HTTPStatus.CONFLICT, str(error), "outside") from None
+        path = folder / name
+        if not path.exists():
+            raise ApiError(HTTPStatus.NOT_FOUND, f"{name}: no such take", "no_take")
+        if path.resolve().parent != folder:
+            raise ApiError(HTTPStatus.CONFLICT, f"{name} resolves out of its folder", "outside")
+        return path
+
+    def _hash(self, path: Path) -> str:
+        from redline.record.takes import file_sha256
+
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        if key not in self._hashes:
+            self._hashes[key] = file_sha256(path)
+        return self._hashes[key]
+
+    def _peaks_of(self, path: Path, points: int) -> dict[str, Any]:
+        try:
+            digest = self._hash(path)
+        except OSError as error:
+            raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
+        # write_private's temporary name is per process: one writer at a time
+        with self._peaks_lock:
+            cache = (
+                make_private_dir(self._state_dir() / "peaks", self.root) / f"{digest}-{points}.json"
+            )
+            with contextlib.suppress(OSError, ValueError):
+                data = json.loads(cache.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and {"duration_s", "rate", "peaks"} <= set(data):
+                    return data
+            try:
+                decoded = decode(path)
+            except AudioError as error:
+                raise ApiError(HTTPStatus.CONFLICT, str(error), "unreadable") from None
+            mono = decoded.samples.mean(axis=1)
+            data = {
+                "duration_s": len(mono) / decoded.rate,
+                "rate": decoded.rate,
+                "peaks": min_max(mono, points),
+            }
+            write_private(cache, json.dumps(data))
+            return data
+
+    def peaks(self, query: dict[str, list[str]]) -> Reply:
+        """[min, max] pairs of the beat or a take, mono, cached by the file's hash."""
+        low, default, high = PEAKS
+        raw = _one(query, "n")
+        if raw is None and "n" in query:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "give one n")
+        if raw is not None and not (raw.isascii() and raw.isdigit() and len(raw) <= 9):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "n is a whole number")
+        points = default if raw is None else min(max(int(raw), low), high)
+        of = _one(query, "of")
+        song = self.song()
+        if of == "beat":
+            if "name" in query:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "the beat takes no name")
+            path = self._beat_path(song)
+        elif of == "take":
+            path = self._take_path(song, _one(query, "name"))
+        else:
+            raise ApiError(HTTPStatus.BAD_REQUEST, "of is beat or take")
+        return reply_json(HTTPStatus.OK, self._peaks_of(path, points))
+
+    def _layout_file(self) -> Path:
+        return model.song_dir(self.name, self.root) / "layout.json"
+
+    @staticmethod
+    def _layout(body: Any) -> dict[str, int | None]:
+        if not isinstance(body, dict):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "the layout is an object")
+        only(body, *LAYOUT)
+        missing = [key for key in LAYOUT if key not in body]
+        if missing:
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"{', '.join(missing)} missing: give it or null")
+        start, per = body["start_bar"], body["bars_per_line"]
+        if start is not None and (
+            isinstance(start, bool) or not isinstance(start, int) or not 0 <= start <= LAST_BAR
+        ):
+            raise ApiError(HTTPStatus.BAD_REQUEST, f"start_bar is 0 to {LAST_BAR} or null")
+        if per is not None and (isinstance(per, bool) or per not in BARS_PER_LINE):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "bars_per_line is 1, 2 or null")
+        return {"start_bar": start, "bars_per_line": per}
+
+    def get_layout(self) -> Reply:
+        """Where the lyric lines start and how many bars each takes; null where not nudged."""
+        try:
+            data = self._layout(json.loads(self._layout_file().read_text(encoding="utf-8")))
+        except (OSError, ValueError, ApiError, BadRequest):
+            data = {"start_bar": None, "bars_per_line": None}
+        return reply_json(HTTPStatus.OK, data)
+
+    def post_layout(self, body: dict) -> Reply:
+        """Keep the lyric layout after its values are checked."""
+        data = self._layout(body)
+        make_private_dir(model.song_dir(self.name, self.root), self.root)
+        write_private(self._layout_file(), json.dumps(data) + "\n")
+        return reply_json(HTTPStatus.OK, data)
+
+    def _mix_info(self, chain: MixChain) -> dict[str, Any]:
+        info = chain.info()
+        if chain.state == "running" and chain.step in ("separate", "auto"):
+            step = self.jobs.state(self.name).get("mix")
+            if step is not None and step["state"] in ACTIVE:
+                for key in ("state", "paused", "pid", "log"):
+                    info[key] = step[key]
+        return info
+
+    def _mix_running(self) -> bool:
+        return self._mix is not None and self._mix.state == "running"
+
+    def _start_mix(self, seed: int) -> dict[str, Any]:
+        song = self.song()
+        try:
+            model.mix_inputs(song, self.root)
+        except model.NoVoice as error:
+            raise ApiError(HTTPStatus.CONFLICT, str(error), "no_voice") from None
+        with self._mix_lock:
+            running = self.jobs.state(self.name)
+            if self._mix_running() or any(
+                running.get(kind, {}).get("state") in ACTIVE for kind in ("separate", "auto")
+            ):
+                raise ApiError(HTTPStatus.CONFLICT, "a mix step is already running", "busy")
+            steps = ("auto", "keep") if self._stems_ready(song) else ("separate", "auto", "keep")
+            chain = self._mix = MixChain(seed)
+        threading.Thread(target=self._run_mix, args=(chain, steps), daemon=True).start()
+        return self._mix_info(chain)
+
+    def _run_mix(self, chain: MixChain, steps: tuple[str, ...]) -> None:
+        for step in steps:
+            with self._mix_lock:
+                if chain.cancelled or self._closed:
+                    chain.end(CANCELLED)
+                    return
+                chain.step = step
+                if step != "keep":
+                    try:
+                        make_private_dir(self._jobs_dir(), self.root)
+                        result = self._result_path(step)
+                        argv = self._argv(step, self.name, chain.seed, result)
+                        self.jobs.start(self.name, "mix", argv, result, heavy=True)
+                    except (Busy, ApiError, model.SongError, OSError, ValueError) as error:
+                        chain.end(FAILED, str(error))
+                        return
+            if step == "keep":
+                break
+            done = self._wait_step()
+            with self._mix_lock:
+                if done["state"] == CANCELLED:
+                    chain.end(CANCELLED)
+                    return
+                if done["state"] != DONE:
+                    chain.end(FAILED, done.get("reason") or f"{step} did not finish")
+                    return
+        try:
+            self._keep_auto()
+        except (ApiError, model.SongError, OSError) as error:
+            reason = str(error)
+        else:
+            reason = None
+        with self._mix_lock:
+            chain.end(DONE if reason is None else FAILED, reason)
+
+    def _wait_step(self) -> dict[str, Any]:
+        while True:
+            info = self.jobs.state(self.name).get("mix")
+            if info is None:
+                return {"state": FAILED, "reason": "the step is gone"}
+            if info["state"] not in ACTIVE:
+                return info
+            time.sleep(STEP_TICK_S)
+
+    def _keep_auto(self) -> None:
+        """Keep variant 0 as a POST /api/song does, read again while the song moves on."""
+        for _ in range(3):
+            song = self.song()
+            changed, kept = self._new_variant(song, 0)
+            try:
+                self._save(changed, song.rev, kept)
+                return
+            except ApiError as error:
+                if error.payload.get("code") != "stale":
+                    raise
+        raise ApiError(HTTPStatus.CONFLICT, "the song kept changing: run the mix again", "stale")
+
+    def _cancel_mix(self) -> Reply:
+        with self._mix_lock:
+            chain = self._mix
+            if chain is None:
+                raise ApiError(HTTPStatus.NOT_FOUND, "no mix job", "no_job")
+            if chain.state == "running":
+                chain.cancelled = True
+                if chain.step in ("separate", "auto"):
+                    self.jobs.cancel(self.name, "mix")
+            return reply_json(HTTPStatus.OK, {"kind": "mix", **self._mix_info(chain)})
+
     def get_jobs(self) -> Reply:
         """The song's jobs and the beat render, as a list."""
-        listed = [{"kind": k, **info} for k, info in self.jobs.state(self.name).items()]
+        listed = [
+            {"kind": k, **info} for k, info in self.jobs.state(self.name).items() if k != "mix"
+        ]
+        chain = self._mix
+        if chain is not None:
+            listed.append({"kind": "mix", **self._mix_info(chain)})
         beat = self._beat
         if beat is not None:
             status = beat.render_status()
@@ -865,12 +1245,17 @@ class SongApp:
         """Start a job; 409 when the song has one of that kind unfinished."""
         only(body, "kind", "seed")
         kind = body.get("kind")
-        startable = (*KINDS, "flip_stems")
+        startable = (*KINDS, "flip_stems", "mix")
         if kind not in startable:
             raise ApiError(HTTPStatus.BAD_REQUEST, f"kind is one of {', '.join(startable)}")
         seed = body.get("seed", 0)
         if _int(seed, "seed") > MAX_SEED:
             raise ApiError(HTTPStatus.BAD_REQUEST, "seed is too large")
+        if kind == "mix":
+            return reply_json(HTTPStatus.ACCEPTED, {"kind": kind, **self._start_mix(seed)})
+        # the chain writes the same stems marker and variants
+        if kind in ("separate", "auto") and self._mix_running():
+            raise ApiError(HTTPStatus.CONFLICT, "the mix job is running", "busy")
         try:
             info = self._start(kind, seed)
         except Busy as error:
@@ -881,6 +1266,8 @@ class SongApp:
         """Cancel a job of the song."""
         only(body, "kind")
         kind = body.get("kind")
+        if kind == "mix":
+            return self._cancel_mix()
         if kind not in (*KINDS, *FLIP_KINDS):
             raise ApiError(HTTPStatus.BAD_REQUEST, f"kind is one of {', '.join(KINDS)}")
         info = self.jobs.cancel(self.name, kind)
@@ -932,28 +1319,37 @@ class SongApp:
         if method == "GET" and inner == "/api/variants":
             return self._variants()
         studio = self.studio()
+        key = self._studio_key
         if method == "GET":
             return studio_get(studio, inner, query)
         if inner != "/api/save":
             return studio_post(studio, inner, body)
-        # the studio's save and a kept variant write the same settings file
+        # the studio's save and a kept variant write the same settings files
         with self._save_lock:
             reply = studio_post(studio, inner, body)
             if reply[0] == HTTPStatus.OK:
-                self._keep_settings(Path(json.loads(reply[1])["path"]))
+                self._keep_settings(Path(json.loads(reply[1])["path"]), key)
             return reply
 
-    def _keep_settings(self, saved: Path) -> None:
-        for _ in range(2):
+    def _keep_settings(self, saved: Path, key: str | None) -> None:
+        """Copy the studio's save to the song's settings file, the one the result job reads."""
+        folder = make_private_dir(model.song_dir(self.name, self.root), self.root)
+        write_private(folder / "mix.json", saved.read_text(encoding="utf-8"))
+        rel = f"private/songs/{self.name}/mix.json"
+        for _ in range(3):
             song = self.song()
-            rel = model.relative_to_root(saved, self.root)
             if song.mix["settings"] == rel:
-                return
+                break
             try:
                 model.save(replace(song, mix={**song.mix, "settings": rel}), song.rev, self.root)
-                return
-            except (model.StaleRev, model.SongError):
+                break
+            except model.StaleRev:
                 continue
+        else:
+            raise ApiError(
+                HTTPStatus.CONFLICT, "the song changed while saving: save again", "stale"
+            )
+        self._record_mix_key(key, rel)
 
     def _variants_data(self, song: model.Song) -> dict[str, Any]:
         try:
@@ -996,8 +1392,34 @@ class SongApp:
             self._beat = self._make_beat(seed, root, self.work)
             return self._beat
 
+    def beat_draft(self, method: str, body: dict) -> Reply:
+        """The own beat's working copy: read it, or replace it after the player parses it."""
+        if "own" not in self.song().beat:
+            raise ApiError(HTTPStatus.CONFLICT, "the song's beat is not an own seed", "not_own")
+        beat = self.beat_studio()
+        if method == "GET":
+            score, base = beat.draft()
+            return reply_json(HTTPStatus.OK, {"score": score, "base": base})
+        only(body, "score", "base")
+        score, base = body.get("score"), body.get("base")
+        if not isinstance(score, dict):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "score is a JSON object")
+        if not isinstance(base, str):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "base is a saved score's name")
+        try:
+            beat.save_draft(score, base)
+        except StaleBase as error:
+            raise ApiError(HTTPStatus.CONFLICT, str(error), "stale_base") from None
+        except Refused as refused:
+            raise ApiError(
+                refused.status, str(refused), "refused", errors=list(refused.errors)
+            ) from None
+        return reply_json(HTTPStatus.OK, {"ok": True})
+
     def beat(self, method: str, path: str, query: dict[str, list[str]], body: dict) -> Reply:
         """A beat route for the BeatStudio the song has now."""
+        if path == "/api/beat/draft":
+            return self.beat_draft(method, body)
         beat = self.beat_studio()
         if method == "GET":
             return beat_get(beat, path, query)
@@ -1023,6 +1445,9 @@ class SongApp:
                 self.rec.close()
             self._engine_sig = None
         self._closed = True
+        with self._mix_lock:
+            if self._mix is not None:
+                self._mix.cancelled = True
         self.jobs.cancel_song(self.name)
         with self._studio_lock:
             self._studio = self._studio_key = None
@@ -1048,19 +1473,24 @@ class SongApp:
 
     def get(self, path: str, query: dict[str, list[str]]) -> Reply:
         """Answer a GET under /api/."""
+        plain: dict[str, Callable[[], Reply]] = {
+            "/api/song": self.get_song,
+            "/api/rec/state": self.rec_state,
+            "/api/takes": self.get_takes,
+            "/api/jobs": self.get_jobs,
+            "/api/song/beat-audio": self.beat_audio,
+            "/api/song/layout": self.get_layout,
+        }
+        asked: dict[str, Callable[[dict[str, list[str]]], Reply]] = {
+            "/api/text": self.get_text,
+            "/api/takes/audio": self.take_audio,
+            "/api/peaks": self.peaks,
+        }
         try:
-            if path == "/api/song":
-                return self.get_song()
-            if path == "/api/text":
-                return self.get_text(query)
-            if path == "/api/rec/state":
-                return self.rec_state()
-            if path == "/api/takes":
-                return self.get_takes()
-            if path == "/api/takes/audio":
-                return self.take_audio(query)
-            if path == "/api/jobs":
-                return self.get_jobs()
+            if path in plain:
+                return plain[path]()
+            if path in asked:
+                return asked[path](query)
             if path.startswith(("/api/mix/", "/api/beat/", "/api/flip/")):
                 return self._area_get(path, query)
         except ApiError as error:
@@ -1082,6 +1512,8 @@ class SongApp:
                 return self.start_job(body)
             if path == "/api/jobs/cancel":
                 return self.cancel_job(body)
+            if path == "/api/song/layout":
+                return self.post_layout(body)
             if path.startswith(("/api/mix/", "/api/beat/", "/api/flip/")):
                 return self._area_post(path, body)
         except ApiError as error:
