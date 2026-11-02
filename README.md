@@ -94,18 +94,28 @@ uv run redline app
 ```
 
 opens **My songs** in the browser: every song as a card and a **New song** button (a name, a
-type beat from `input/beats` or an own beat seed, a written text or none; the references default
-to everything in `input/refs`). A song opens on one screen, laid out like a DAW:
+type beat from `input/beats`, an own beat seed or **a new beat** — a genre, its sounds from your
+pack or synthesised; a written text or none; the references default to everything in
+`input/refs`). A new beat is a starter in the genre that you build yourself, no agent needed. A
+song opens on one screen, laid out like a DAW:
 
 - **Transport** across the top: play/pause (Space), stop, record (R), loop (L), the clock in
   time and bars, a hint of what to do next, and **Export**.
 - **Tracks** on a bar ruler: the text with its lines over the bars they are sung on, the voice
   (the chosen take) with every take under it, the beat as its sections, and for an own beat its
   808 notes and drums. A star picks the take; a small ▶ plays one take over the beat.
-- **Editor** at the bottom, for the selected track: a piano roll for the 808 and a step grid for
-  the drums of an own beat, heard at once on a loop of the selected section; five knobs for the
-  voice (level, clean, echo, reverb, tune) and **Auto**, which sets them closest to the
-  references; the text, its versions and where its lines sit.
+- **Editor** at the bottom, for the selected track. An own beat gets a **channel rack**, the FL
+  way:
+  - the pattern on top: pick, ＋ new, ⧉ copy, length 1/2/4/8 bars;
+  - a row per sound: on/off, volume, pan, its name (click to hear a hit) and the steps (click a
+    hit, Shift for accent and ghost, right click to clear); a note sound shows a preview that
+    opens the piano roll;
+  - «＋ звук» adds a synthesised sound or one from your pack, ✕ removes one;
+  - a **Pattern | Song** toggle in the transport: pattern mode loops that pattern alone, every
+    edit heard at once, the playing step lit.
+
+  The voice gets five knobs (level, clean, echo, reverb, tune) and **Auto**, which sets them
+  closest to the references; the text, its versions and where its lines sit.
 
 Recording starts at bar 1: the native engine plays the beat and the take lines up with it.
 Separation, auto mix and the export run in the background and wait while a take records.

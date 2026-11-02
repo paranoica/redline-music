@@ -41,9 +41,11 @@ under `private/`):
 ## The screen
 
 `redline app` starts at **My songs**. **New song** makes a song from a name, a beat (a type beat
-from `input/beats`, or an own seed that has a score: a new own beat is written by the beatmaker
-agent, not on the page), a written text or none; the references are every audio file in
-`input/refs`. One server holds one open song at a time; opening another closes the first one's
+from `input/beats`, an own seed that has a score, or **a new beat**: a genre or one drawn by the
+seed, and its drums and 808 from the scanned pack or synthesised), a written text or none; the
+references are every audio file in `input/refs`. A new beat starts as a playable starter score
+(two bars of drums in the genre's habit, an 808 on the key's root, an empty melody pattern on
+the lead, the recipe's sections) that you build on the page; the beatmaker agent is not needed. One server holds one open song at a time; opening another closes the first one's
 recording session and cancels its jobs, and is refused while a take records.
 
 The song screen:
@@ -54,17 +56,31 @@ The song screen:
 | Text | the chosen text's lines over the bars they are sung on: two bars a line after a four-bar intro, as the writer fits them. The placement says «примерно» until it is nudged (start bar, one or two bars a line), which is kept in `private/songs/<name>/layout.json` |
 | Voice and takes | the chosen take, and every take under it; a star chooses one, ▶ plays one over the beat. Choosing a take starts its preparation (separation and measuring) |
 | Beat | an own beat's sections, its 808 notes and drums; a type beat's waveform, or its arrangement once split |
-| Editor | for the selected track: the 808 piano roll and the drum grid of an own beat, the voice and beat knobs, the text and its versions |
+| Editor | for the selected track: an own beat's channel rack and piano roll, the voice and beat knobs, the text and its versions |
 
 **Playback.** The main transport always plays the song from files through the studio engine,
 so what you hear is what the export renders. Until the chosen take is prepared, the beat and
 the raw take play without effects and the knobs wait. The editor's own ▶ loops the selected
 section of an own beat live from its score, so a note or a hit is heard at once.
 
+**The channel rack** («Каналы», an own beat's editor) works the FL way: one pattern at a time,
+picked, added (＋), copied (⧉) or resized (1/2/4/8 bars) at the top. Each sound is a row: a
+mute that holds in every section, volume and pan knobs, its name (a click plays one hit of it),
+and the pattern's steps — click for a hit (or the roll picked), Shift for accent then ghost,
+right click to clear, ‹ › for the bar — or, for a note sound, a preview of its notes that opens
+the piano roll on it. A sound another pattern of the same section already plays is shown locked
+with that pattern's name (one sound, one pattern a section, as the score format wants). «＋ звук»
+adds a synthesised instrument or a sound from your scanned pack, heard before it is added; ✕
+removes one. Edits change the pattern everywhere it plays.
+
+**Pattern / song.** The transport's «Паттерн | Песня» toggle (own beats): pattern mode loops the
+rack's pattern alone through the live engine, following every edit and a switched pattern at
+once; the rack lights the playing step. Record and export always play the song.
+
 **Own beat edits** are saved to one draft per seed (`private/beats/<seed>/draft.json`) as you
 go. The draft becomes the next `score-N.json` and is rendered when you leave the beat's tracks,
-press play, record or export. A pattern played by several sections asks once whether to change
-it everywhere or only here.
+press play, record or export. In the piano roll opened from the timeline (not from the rack), a
+pattern played by several sections asks once whether to change it everywhere or only here.
 
 **Knobs and Auto.** The five voice knobs (level, clean, echo, reverb, tune) and the beat knobs
 change the mix at once and are saved to the song's mix settings, the file the export renders
