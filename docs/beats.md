@@ -169,6 +169,24 @@ Sample Library. Two more are listed as local only: they are allowed in your own 
 be passed on as samples, so the tool never downloads them and marks them as not for sale; you
 place them in `work/sounds/<name>/` by hand. A render report lists any sound of that kind.
 
+### The owner's pack
+
+`redline beat sounds scan` walks `input/sounds/` (hidden folders and `__MACOSX` skipped) and
+writes `work/sounds/pack/catalog.json`. A file's category comes from the words of its own name
+first, then of its folders (so `808 Kit/Kick 7.wav` is a kick), and from its sound when no word
+says it: low-heavy and short is a kick, low-heavy and long an 808, bright and short a closed hat,
+anything over 2.5 s with no word a loop. An 808 or melodic one-shot gets its MIDI root: a note in
+its name (`808 Boom (F#)`) in the octave its pitch is heard at, else the pitch alone. A rescan
+reads only new or changed files.
+
+A catalogued sound is the library `pack-<id>`: one zone at its root (middle C when unpitched).
+Two instruments play them besides `sampler`: `oneshot` (a drum row; the step's pitch and `tune`
+move it, `length` cuts it) and `sample808` (a mono note bass that glides like `bass808`, a legato
+note starting past the recording's attack). A recipe drawn with a kit replaces each drum and the
+808 with a pack sound of its category, sounds whose path names the genre first; `--kit synth`,
+`pack` or `auto` (the default: the pack when it has a kick, a snare or clap and a closed hat).
+The page serves a pack file only from inside the pack folder and only while it matches the scan.
+
 ## The engine
 
 The score is laid out once as events at frame times, with swing, rolls, chance, chokes, the

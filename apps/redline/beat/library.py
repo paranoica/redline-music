@@ -235,11 +235,11 @@ def load(manifest: Path | None = None) -> dict[str, Source]:
     return sources
 
 
-PACK_PREFIX = "pack:"
+PACK_PREFIX = "pack-"
 
 
 def is_pack(name: str) -> bool:
-    """Whether a library name is one sound of the owner's pack, ``pack:<id>``."""
+    """Whether a library name is one sound of the owner's pack, ``pack-<id>``."""
     return name.startswith(PACK_PREFIX)
 
 
@@ -258,7 +258,7 @@ def _pack_source(name: str) -> Source:
 
 
 def source(name: str, manifest: Path | None = None) -> Source:
-    """The manifest entry of one instrument, or the entry of a ``pack:<id>`` sound.
+    """The manifest entry of one instrument, or the entry of a ``pack-<id>`` sound.
 
     Raises:
         LibraryError: No source has that name.
@@ -423,12 +423,12 @@ def _pack_zone(name: str, root: Path) -> Zone:
     return Zone(path, entry.note if entry.note is not None else 60, (0, 127))
 
 
-def pack_names(root: Path = SOUNDS) -> set[str]:
-    """The ``pack:<id>`` names of every catalogued pack sound."""
+def pack_names(catalog: Path | None = None) -> set[str]:
+    """The ``pack-<id>`` names of every catalogued pack sound (default: `pack.CATALOG`)."""
     from redline.beat import pack
 
     try:
-        return {f"{PACK_PREFIX}{i}" for i in pack.load(root / "pack" / "catalog.json")}
+        return {f"{PACK_PREFIX}{i}" for i in pack.load(catalog or pack.CATALOG)}
     except pack.PackError:
         return set()
 

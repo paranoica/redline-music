@@ -1,7 +1,7 @@
 //! A beat's score, read from JSON by hand so every problem comes back at once, each with the
 //! path of the value at fault.
 
-use super::instruments::{instrument, Instrument, Kind};
+use super::instruments::{instrument, Instrument, Kind, SAMPLED};
 use crate::effect::{check, make, Rack};
 use serde_json::{json, Map, Value};
 use std::fmt;
@@ -576,9 +576,9 @@ impl Parser {
             let lpath = join(path, "library");
             if let Some(s) = self.string(v, &lpath) {
                 match draft.instrument {
-                    Some(i) if i.name != "sampler" => self.err(
+                    Some(i) if !SAMPLED.contains(&i.name) => self.err(
                         &lpath,
-                        format!("only a sampler takes a library, not {}", i.name),
+                        format!("only {} take a library, not {}", SAMPLED.join(", "), i.name),
                     ),
                     _ if !good_library(s) => {
                         self.err(&lpath, "a library name takes 1 to 48 of a-z, 0-9, _ and -")

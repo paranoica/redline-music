@@ -15,7 +15,9 @@ from typing import Any
 
 import redline_dsp
 
-from redline.beat.checks import Caution, check_score
+from redline.beat import library, pack
+from redline.beat.checks import Caution, check_score, note_name
+from redline.beat.pack import PackSound
 from redline.beat.recipe import (
     BASS_STYLES,
     CHARACTER,
@@ -23,6 +25,7 @@ from redline.beat.recipe import (
     GENRES,
     Recipe,
     make_recipe,
+    pack_kit,
     parse_key,
     recipe_from_json,
     recipe_json,
@@ -246,10 +249,16 @@ def _sent_back(state: dict[str, Any], previous: str | None) -> list[str]:
 
 
 def render(
-    recipe: Recipe, marks: Marks, state: dict[str, Any], draft: Path, previous: str | None
+    recipe: Recipe,
+    marks: Marks,
+    state: dict[str, Any],
+    draft: Path,
+    previous: str | None,
+    catalog: Path | None = None,
 ) -> str:
     """The request of a round as one Markdown page."""
     out = [prompt_text().rstrip(), "", "## Recipe", "", *_recipe(recipe)]
+    out += _pack_lines(recipe, pack.CATALOG if catalog is None else catalog)
     out += ["", "## Instruments and their params", "", *_instruments()]
     out += ["", "## Effects and their params", "", *_effects()]
     out += _marks(marks)
@@ -283,11 +292,15 @@ def _other_ask(recipe: Recipe, genre: str | None, bpm: float | None, key: str | 
 class Session:
     """One seed's folder and its rounds."""
 
-    def __init__(self, root: Path, seed: int) -> None:
-        """Work on `<root>/<seed>/`; `root` also holds the marks file."""
+    def __init__(self, root: Path, seed: int, catalog: Path | None = None) -> None:
+        """Work on `<root>/<seed>/`; `root` also holds the marks file.
+
+        `catalog` is the owner's pack catalogue a kit is drawn from (default: `pack.CATALOG`).
+        """
         self.root = root
         self.seed = seed
         self.folder = root / str(seed)
+        self.catalog = pack.CATALOG if catalog is None else catalog
 
     def _state(self) -> dict[str, Any] | None:
         path = self.folder / "state.json"
@@ -296,8 +309,10 @@ class Session:
     def _save_state(self, state: dict[str, Any]) -> None:
         _write(self.folder / "state.json", json.dumps(state, ensure_ascii=False, indent=1))
 
-    def _start(self, genre: str | None, bpm: float | None, key: str | None) -> dict[str, Any]:
-        recipe = make_recipe(self.seed, genre, bpm, key)
+    def _start(
+        self, genre: str | None, bpm: float | None, key: str | None, kit: str
+    ) -> dict[str, Any]:
+        recipe = make_recipe(self.seed, genre, bpm, key, _kit(kit, self.catalog))
         self.folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         # mkdir leaves a folder that already exists at its old mode
         self.folder.chmod(0o700)
@@ -333,6 +348,7 @@ class Session:
         bpm: float | None = None,
         key: str | None = None,
         force: bool = False,
+        kit: str = "auto",
     ) -> Saved | Pending | Failed:
         """Take the seed one step on: start it, wait, check a draft, ask again or save."""
         state = self._state()
@@ -345,7 +361,7 @@ class Session:
             if settled is not None:
                 return settled
         else:
-            state = self._start(genre, bpm, key)
+            state = self._start(genre, bpm, key, kit)
         recipe = recipe_from_json((self.folder / "recipe.json").read_text(encoding="utf-8"))
         while True:
             draft = self.folder / f"score-draft-{state['round']}.json"
@@ -367,7 +383,7 @@ class Session:
             last = self.folder / f"score-draft-{state['round'] - 1}.json"
             previous = last.read_text(encoding="utf-8") if last.exists() else None
             marks = read_marks(self.root, recipe.genre)
-            _write(request, render(recipe, marks, state, draft, previous))
+            _write(request, render(recipe, marks, state, draft, previous, self.catalog))
         return Pending(request, draft)
 
     def _judge(self, recipe: Recipe, state: dict[str, Any], text: str) -> Saved | Failed | None:
@@ -412,6 +428,7 @@ def write_beat(
     bpm: float | None = None,
     key: str | None = None,
     force: bool = False,
+    kit: str = "auto",
 ) -> Saved | Pending | Failed:
     """Take a seed's beat one step on.
 
@@ -424,9 +441,57 @@ def write_beat(
         key: A key like `F# minor`, or None to draw one.
         force: Start the seed over; its saved scores stay and the next one takes the next
             free number.
+        kit: Where a new seed's drums and 808 come from: ``synth``, ``pack`` (the owner's
+            scanned pack) or ``auto`` (the pack when it holds a kick, a snare or clap and a
+            closed hat).
 
     Raises:
-        BeatError: Options other than the started seed's, without `force`.
+        BeatError: Options other than the started seed's, without `force`, or a pack kit
+            asked of a pack that cannot make one.
         RecipeError: An option the recipe cannot take.
     """
-    return Session(root, seed).run(genre, bpm, key, force)
+    return Session(root, seed).run(genre, bpm, key, force, kit)
+
+
+KITS = ("auto", "synth", "pack")
+
+
+def _kit(kit: str, catalog: Path) -> dict[str, list[PackSound]] | None:
+    """The pack's sounds by category for a kit, or None for a synthesised one."""
+    if kit not in KITS:
+        raise BeatError(f"no kit {kit!r}: one of {', '.join(KITS)}")
+    if kit == "synth":
+        return None
+    try:
+        sounds = pack_kit(pack.load(catalog).values())
+    except pack.PackError as error:
+        raise BeatError(str(error)) from error
+    usable = bool(sounds.get("kick")) and bool(sounds.get("snare") or sounds.get("clap"))
+    usable = usable and bool(sounds.get("hat_closed"))
+    if usable:
+        return sounds
+    if kit == "pack":
+        raise BeatError(
+            "the pack has no kick, snare or clap and closed hat to make a kit of: put a pack in "
+            "input/sounds and run `redline beat sounds scan`"
+        )
+    return None
+
+
+def _pack_lines(recipe: Recipe, catalog: Path) -> list[str]:
+    """Which pack file each pack sound plays, for the beatmaker to judge its character."""
+    used = [s for s in recipe.sounds if library.is_pack(s.library or "")]
+    if not used:
+        return []
+    try:
+        entries = pack.load(catalog)
+    except pack.PackError:
+        return []
+    out = ["- From the owner's pack (play them as the drums and 808 they are):"]
+    for s in used:
+        entry = entries.get((s.library or "")[len(library.PACK_PREFIX) :])
+        if entry is None:
+            continue
+        root = f", root {note_name(entry.note)}" if entry.note is not None else ""
+        out.append(f"  - {s.name} = {entry.path} ({entry.category}{root}, {s.instrument})")
+    return out

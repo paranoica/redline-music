@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -177,19 +178,19 @@ def test_a_rescan_reads_only_new_or_changed_files(made, monkeypatch):
 def test_a_pack_sound_is_found_by_id_and_refused_once_it_changed(made):
     root, catalog = made
     kick = by_path(pack.scan(root, catalog)[0])["Drums/Kicks/Hard Kick 01.wav"]
-    path, entry = pack.file_of(f"pack:{kick.id}", root, catalog)
+    path, entry = pack.file_of(f"pack-{kick.id}", root, catalog)
     assert path == root / "Drums/Kicks/Hard Kick 01.wav" and entry == kick
     with pytest.raises(PackError, match="not in the pack"):
-        pack.file_of("pack:0000000000", root, catalog)
+        pack.file_of("pack-0000000000", root, catalog)
     with pytest.raises(PackError, match="not a pack sound"):
         pack.file_of("vsco-harp", root, catalog)
     stat = path.stat()
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
     with pytest.raises(PackError, match="changed since the scan"):
-        pack.file_of(f"pack:{kick.id}", root, catalog)
+        pack.file_of(f"pack-{kick.id}", root, catalog)
     path.unlink()
     with pytest.raises(PackError, match="is gone"):
-        pack.file_of(f"pack:{kick.id}", root, catalog)
+        pack.file_of(f"pack-{kick.id}", root, catalog)
 
 
 def test_no_pack_folder_is_an_error_and_no_catalogue_is_empty(tmp_path):
@@ -211,6 +212,7 @@ def test_the_catalogue_is_written_private(made):
 def placed(tmp_path, monkeypatch):
     """A pack and its catalogue where the defaults look: input/sounds and work/sounds/pack."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(pack, "CATALOG", Path("work/sounds/pack/catalog.json"))
     root = tmp_path / "input" / "sounds"
     put(root, "Kicks/Kick 1.wav", tone(55, 0.3))
     put(root, "808s/808 Boom (F#).wav", tone(46.25, 1.5))
@@ -222,18 +224,18 @@ def test_a_pack_sound_is_a_library_never_marked_for_sale(placed):
     from redline.beat import library
 
     kick = placed["Kicks/Kick 1.wav"]
-    entry = library.source(f"pack:{kick.id}")
+    entry = library.source(f"pack-{kick.id}")
     assert (entry.kind, entry.commercial) == ("pack", False)
-    assert library.pack_names() == {f"pack:{s.id}" for s in placed.values()}
+    assert library.pack_names() == {f"pack-{s.id}" for s in placed.values()}
 
 
 def test_a_pack_sound_is_one_zone_at_its_root_or_middle_c(placed):
     from redline.beat import library
 
     boom = placed["808s/808 Boom (F#).wav"]
-    (zone,) = library.zones(f"pack:{boom.id}", library.SOUNDS, [30, 40])
+    (zone,) = library.zones(f"pack-{boom.id}", library.SOUNDS, [30, 40])
     assert (zone.path.name, zone.note, zone.vel) == ("808 Boom (F#).wav", 30, (0, 127))
-    (kick,) = library.zones(f"pack:{placed['Kicks/Kick 1.wav'].id}")
+    (kick,) = library.zones(f"pack-{placed['Kicks/Kick 1.wav'].id}")
     assert kick.note == 60
 
 
@@ -243,7 +245,7 @@ def test_a_changed_pack_file_is_a_library_error(placed):
     kick = placed["Kicks/Kick 1.wav"]
     sf.write(pack.PACK / kick.path, tone(70, 0.4), RATE)
     with pytest.raises(library.LibraryError, match="changed since the scan"):
-        library.zones(f"pack:{kick.id}")
+        library.zones(f"pack-{kick.id}")
 
 
 def test_a_score_may_name_a_catalogued_pack_sound_and_no_other(placed):
@@ -255,13 +257,13 @@ def test_a_score_may_name_a_catalogued_pack_sound_and_no_other(placed):
     known = load().keys() | pack_names()
     good = {
         "sounds": {
-            "s": {"instrument": "sampler", "library": f"pack:{placed['Kicks/Kick 1.wav'].id}"}
+            "s": {"instrument": "sampler", "library": f"pack-{placed['Kicks/Kick 1.wav'].id}"}
         }
     }
-    bad = {"sounds": {"s": {"instrument": "sampler", "library": "pack:ffffffffff"}}}
+    bad = {"sounds": {"s": {"instrument": "sampler", "library": "pack-ffffffffff"}}}
     assert _libraries(good, known) == []
     assert _libraries(bad, known) == [
-        "sounds.s.library: pack:ffffffffff is not in the sound library"
+        "sounds.s.library: pack-ffffffffff is not in the sound library"
     ]
 
 
@@ -271,11 +273,11 @@ def test_the_beat_server_serves_a_pack_zone_and_nothing_beside_it(placed, tmp_pa
 
     beat = beat_server.BeatStudio(1, tmp_path / "beats", tmp_path / "work")
     boom = placed["808s/808 Boom (F#).wav"]
-    pcm, rate, channels, frames, root = beat.zone(f"pack:{boom.id}", "0")
+    pcm, rate, channels, frames, root = beat.zone(f"pack-{boom.id}", "0")
     assert (rate, channels, frames, root) == (RATE, 1, int(RATE * 1.5), 30)
     assert len(pcm) == 2 * frames
     with pytest.raises(beat_server.BadRequest) as wrong:
-        beat.zone(f"pack:{boom.id}", "1")
+        beat.zone(f"pack-{boom.id}", "1")
     assert wrong.value.status == 404
     outside = tmp_path / "elsewhere.wav"
     sf.write(outside, tone(100, 0.2), RATE)
@@ -283,5 +285,166 @@ def test_the_beat_server_serves_a_pack_zone_and_nothing_beside_it(placed, tmp_pa
     link.symlink_to(outside)
     linked = {s.path: s for s in pack.scan(pack.PACK, pack.CATALOG)[0]}["Kicks/Link.wav"]
     with pytest.raises(beat_server.BadRequest) as escaped:
-        beat.zone(f"pack:{linked.id}", "0")
+        beat.zone(f"pack-{linked.id}", "0")
     assert escaped.value.status == 403
+
+
+# kits from the pack
+
+
+def entry(path, category, note=None):
+    return pack.PackSound(
+        id=pack.sound_id(path),
+        path=path,
+        category=category,
+        by="name",
+        note=note,
+        bpm=None,
+        key=None,
+        duration_s=0.5,
+        peak_db=-1.0,
+        size=1,
+        mtime_ns=1,
+    )
+
+
+KIT = [
+    entry("Kicks/Kick A.wav", "kick"),
+    entry("Kicks/Kick B.wav", "kick"),
+    entry("Snares/Snare A.wav", "snare"),
+    entry("Claps/Clap A.wav", "clap"),
+    entry("Hats/HH A.wav", "hat_closed"),
+    entry("Hats/Open A.wav", "hat_open"),
+    entry("808s/808 A.wav", "808", note=30),
+    entry("808s/808 no root.wav", "808"),
+]
+
+
+def test_a_recipe_takes_its_drums_and_808_from_the_pack_and_nothing_else():
+    pytest.importorskip("redline_dsp")
+    from redline.beat.recipe import make_recipe, pack_kit
+
+    kit = pack_kit(KIT)
+    synth = make_recipe(5, genre="uk_drill")
+    packed = make_recipe(5, genre="uk_drill", pack=kit)
+    ids = {f"pack-{e.id}": e for e in KIT}
+    assert packed.kit == "pack" and synth.kit == ""
+    by_name = {s.name: s for s in packed.sounds}
+    assert (
+        by_name["kick"].instrument == "oneshot" and ids[by_name["kick"].library].category == "kick"
+    )
+    assert by_name["hat"].instrument == "oneshot"
+    assert by_name["bass"].instrument == "sample808"
+    assert ids[by_name["bass"].library].path == "808s/808 A.wav"
+    # the lead and everything the pack has no category for stay as drawn
+    for before, after in zip(synth.sounds, packed.sounds, strict=True):
+        if after.library is None or not after.library.startswith("pack-"):
+            assert before == after
+    assert (synth.devices, synth.character, synth.structure) == (
+        packed.devices,
+        packed.character,
+        packed.structure,
+    )
+    assert make_recipe(5, genre="uk_drill", pack=kit) == packed
+
+
+def test_an_808_without_a_root_is_never_drawn():
+    from redline.beat.recipe import pack_kit
+
+    assert [e.path for e in pack_kit(KIT)["808"]] == ["808s/808 A.wav"]
+
+
+def test_a_sound_whose_path_names_the_genre_is_drawn_first():
+    pytest.importorskip("redline_dsp")
+    from redline.beat.recipe import make_recipe, pack_kit
+
+    drill = entry("UK Drill Kit/Kick hard.wav", "kick")
+    kit = pack_kit([*KIT, drill])
+    for seed in range(20):
+        (kick,) = [
+            s for s in make_recipe(seed, genre="uk_drill", pack=kit).sounds if s.name == "kick"
+        ]
+        assert kick.library == f"pack-{drill.id}"
+    others = {
+        next(
+            s.library for s in make_recipe(seed, genre="trap", pack=kit).sounds if s.name == "kick"
+        )
+        for seed in range(20)
+    }
+    assert len(others) > 1
+
+
+def write_catalog(path, sounds):
+    import json
+    from dataclasses import asdict
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"format": 1, "root": "x", "sounds": [asdict(s) for s in sounds]}))
+
+
+def test_the_kit_option_takes_the_pack_only_when_it_makes_a_kit(tmp_path):
+    pytest.importorskip("redline_dsp")
+    from redline.beat import handoff
+
+    full, thin = tmp_path / "full.json", tmp_path / "thin.json"
+    write_catalog(full, KIT)
+    write_catalog(thin, [e for e in KIT if e.category != "hat_closed"])
+    assert handoff._kit("synth", full) is None
+    assert set(handoff._kit("auto", full)) >= {"kick", "snare", "hat_closed", "808"}
+    assert handoff._kit("auto", thin) is None
+    assert handoff._kit("auto", tmp_path / "none.json") is None
+    with pytest.raises(handoff.BeatError, match="no kick, snare or clap and closed hat"):
+        handoff._kit("pack", thin)
+    with pytest.raises(handoff.BeatError, match="no kit"):
+        handoff._kit("drums", full)
+
+
+def test_the_request_names_each_pack_file_with_its_root(tmp_path):
+    pytest.importorskip("redline_dsp")
+    from redline.beat import handoff
+
+    catalog = tmp_path / "catalog.json"
+    write_catalog(catalog, KIT)
+    result = handoff.Session(tmp_path / "beats", 5, catalog).run(genre="uk_drill", kit="pack")
+    request = result.request.read_text(encoding="utf-8")
+    assert "- From the owner's pack" in request
+    assert "  - bass = 808s/808 A.wav (808, root F#1, sample808)" in request
+
+
+def test_a_score_on_pack_sounds_renders(placed, tmp_path):
+    pytest.importorskip("redline_dsp")
+    import json
+
+    from redline.cli import main
+
+    kick = placed["Kicks/Kick 1.wav"]
+    boom = placed["808s/808 Boom (F#).wav"]
+    score = {
+        "version": 1,
+        "bpm": 140,
+        "seed": 1,
+        "key": "F# minor",
+        "sounds": {
+            "kick": {"instrument": "oneshot", "library": f"pack-{kick.id}"},
+            "bass": {"instrument": "sample808", "library": f"pack-{boom.id}"},
+        },
+        "patterns": {
+            "p": {
+                "bars": 1,
+                "rows": {
+                    "kick": "x.......x.......",
+                    "bass": [{"step": 2, "len": 6, "note": "F#1", "vel": 1.0}],
+                },
+            }
+        },
+        "sections": [{"name": "a", "bars": 2, "play": ["p"]}],
+    }
+    folder = tmp_path / "beats" / "1"
+    folder.mkdir(parents=True)
+    (folder / "score-1.json").write_text(json.dumps(score))
+    assert main(["beat", "render", "--seed", "1", "--root", "beats", "--work", "work"]) == 0
+    x, _ = sf.read(tmp_path / "work" / "beats" / "1" / "beat.wav")
+    assert np.sqrt(np.mean(x**2)) > 0.01
+    report = json.loads((tmp_path / "work" / "beats" / "1" / "render.json").read_text())
+    assert {lib["name"] for lib in report["libraries"]} == {f"pack-{kick.id}", f"pack-{boom.id}"}
+    assert all(not lib["commercial"] for lib in report["libraries"])

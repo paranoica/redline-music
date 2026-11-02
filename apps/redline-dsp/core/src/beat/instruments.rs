@@ -141,6 +141,22 @@ const SAW: &[ParamSpec] = &[
     ParamSpec::range("release", 0.005, 8.0, 0.3, "s"),
 ];
 
+const ONESHOT: &[ParamSpec] = &[
+    // added to the step's pitch; 0 plays the recording as it is
+    ParamSpec::range("tune", -24.0, 24.0, 0.0, "st"),
+    // where the hit is cut, faded over 5 ms; past the recording's end it simply ends
+    ParamSpec::range("length", 0.01, 10.0, 10.0, "s"),
+    ParamSpec::range("attack", 0.001, 0.1, 0.001, "s"),
+];
+
+const SAMPLE808: &[ParamSpec] = &[
+    ParamSpec::range("tune", -12.0, 12.0, 0.0, "st"),
+    // the fall of a held note on top of the recording's own
+    ParamSpec::range("decay", 0.1, 8.0, 8.0, "s"),
+    ParamSpec::range("release", 0.005, 1.0, 0.05, "s"),
+    ParamSpec::range("glide_ms", 10.0, 500.0, 80.0, "ms"),
+];
+
 const TOM: &[ParamSpec] = &[
     ParamSpec::range("tune", 50.0, 400.0, 110.0, "Hz"),
     ParamSpec::range("pitch_drop", 0.0, 24.0, 7.0, "st"),
@@ -294,7 +310,15 @@ pub static INSTRUMENTS: &[Instrument] = &[
     },
     note("vox", 8, 8.0, VOX),
     note("flute", 4, 3.0, FLUTE),
+    drum("oneshot", 4, 10.0, ONESHOT),
+    Instrument {
+        mono: true,
+        ..note("sample808", 1, 1.0, SAMPLE808)
+    },
 ];
+
+/// The instruments that play a sound library's zones, named by the sound's `library`.
+pub const SAMPLED: &[&str] = &["sampler", "oneshot", "sample808"];
 
 /// The instrument of that name.
 pub fn instrument(name: &str) -> Option<&'static Instrument> {

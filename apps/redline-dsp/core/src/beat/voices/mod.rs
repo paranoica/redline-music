@@ -16,7 +16,7 @@ mod sampler;
 mod saw;
 mod vox;
 
-pub use sampler::{sampler_for, SampleBank};
+pub use sampler::{sampled_for, sampler_for, SampleBank};
 
 /// What every voice reads besides its event.
 pub struct Ctx<'a> {

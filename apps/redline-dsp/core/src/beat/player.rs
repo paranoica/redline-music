@@ -9,9 +9,9 @@
 //! listening sound's delay, so it stays in step with the sound it ducks.
 
 use super::events::{Event, EventTable};
-use super::instruments::{Instrument, Kind};
+use super::instruments::{Instrument, Kind, SAMPLED};
 use super::score::Score;
-use super::voices::{self, sampler_for, Ctx, SampleBank, Voice};
+use super::voices::{self, sampled_for, Ctx, SampleBank, Voice};
 use crate::effect::{Rack, MAX_BLOCK};
 use crate::filters::flush_tiny;
 use std::cmp::Reverse;
@@ -258,9 +258,9 @@ fn make_voices(
 ) -> Result<Vec<Box<dyn Voice>>, String> {
     (0..count)
         .map(|_| {
-            if inst.name == "sampler" {
+            if SAMPLED.contains(&inst.name) {
                 let index = library.and_then(|l| bank.library(l)).unwrap_or(NO_LIBRARY);
-                Ok(sampler_for(rate, index))
+                Ok(sampled_for(inst.name, rate, index))
             } else {
                 voices::make(inst.name, rate).ok_or_else(|| format!("no voice for {}", inst.name))
             }
@@ -441,7 +441,7 @@ impl Player {
     /// samplers' ringing voices: between blocks only.
     pub fn rebuild_samplers(&mut self) -> Result<(), String> {
         for ch in &mut self.channels {
-            if ch.instrument.name == "sampler" {
+            if SAMPLED.contains(&ch.instrument.name) {
                 let voices = make_voices(
                     ch.instrument,
                     ch.library.as_deref(),

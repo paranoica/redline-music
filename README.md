@@ -284,6 +284,15 @@ source. `redline beat sounds list` shows them with their licence; `redline beat 
 vsco-harp` downloads one into `work/sounds/`, pinned to a commit and checked file by file. The
 ten listed now are CC0. A beat that uses a sound you may not sell says so in its render report.
 
+Your own pack: drop any pack (folders as they are, wav/aiff/flac/ogg/mp3) into `input/sounds/`
+and run `redline beat sounds scan`. Each file is sorted by the words of its path, or by its sound
+when they say nothing: kick, 808, snare, clap, hats, cymbals, percussion, FX, vocal, melodic,
+loop. 808s and melodic one-shots get their root note, loops their tempo and key from the name.
+`redline beat write` then takes its drums and 808 from the pack (`--kit synth` keeps the
+synthesis), preferring sounds whose path names the genre. The pack never leaves `input/`, and a
+beat on its sounds is marked not for sale: the pack's licence is whatever you downloaded it
+under.
+
 ## Voice lab
 
 The voice lab is a rack: a list of effects that the vocal goes through in your order, after the
@@ -396,7 +405,7 @@ Every folder the tool writes into also ignores itself. Tests use only audio gene
 | `redline beat measure` | measure the render against the references' beats |
 | `redline beat studio` | the beat page |
 | `redline beat marks` | mark a bar good or bad, or list the marks |
-| `redline beat sounds` | list or fetch the recorded instrument libraries |
+| `redline beat sounds` | list or fetch the recorded instrument libraries, scan your own pack |
 | `redline effects` | the rack's effects with their params and ranges (`--json` for the raw list) |
 | `redline lyrics index` | build style profiles and copy-check digests from the base |
 | `redline lyrics write` | write a new text by seed, optionally for a beat |

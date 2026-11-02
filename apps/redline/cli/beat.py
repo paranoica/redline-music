@@ -91,7 +91,7 @@ def _beat_write(args: argparse.Namespace) -> int:
 
     try:
         result = handoff.write_beat(
-            args.root, args.seed, args.genre, args.bpm, args.key, args.force
+            args.root, args.seed, args.genre, args.bpm, args.key, args.force, args.kit
         )
     except (handoff.BeatError, RecipeError, OSError, ValueError) as error:
         print(f"redline: {error}", file=sys.stderr)

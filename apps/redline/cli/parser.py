@@ -273,6 +273,13 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     write.add_argument(
         "--force", action="store_true", help="start the seed over; saved scores stay"
     )
+    write.add_argument(
+        "--kit",
+        choices=("auto", "synth", "pack"),
+        default="auto",
+        help="where a new seed's drums and 808 come from: synthesised, the scanned pack in "
+        "input/sounds, or the pack when it can make a kit (default)",
+    )
     rendered = beat_commands.add_parser(
         "render", help="render a seed's newest score to <work>/beats/<seed>/: beat and stems"
     )
@@ -313,7 +320,7 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
     for command in (rendered, measured, studio):
         command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
     sounds = beat_commands.add_parser(
-        "sounds", help="the sample instruments and the owner's pack: list, fetch, scan"
+        "sounds", help="the sample instruments and the owner's pack- list, fetch, scan"
     )
     sounds_commands = sounds.add_subparsers(dest="sounds_command", metavar="command")
     listed = sounds_commands.add_parser(

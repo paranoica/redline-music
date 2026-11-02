@@ -1299,6 +1299,12 @@ fn cases() -> Vec<(&'static str, Vec<f32>, SampleBank)> {
         ("reese", params("reese", &[]), empty()),
         ("vox", params("vox", &[("attack", 0.01)]), empty()),
         ("flute", params("flute", &[]), empty()),
+        ("oneshot", params("oneshot", &[]), bank_with_sine(60, 261.0)),
+        (
+            "sample808",
+            params("sample808", &[]),
+            bank_with_sine(36, 65.4),
+        ),
     ]
 }
 
@@ -1368,7 +1374,11 @@ fn a_released_voice_falls_silent_after_its_release() {
     let e = note_event(2, 60.0, 1.0, 0.1);
     for (name, p, bank) in cases() {
         let specs = instrument(name).unwrap().params;
-        let release = p[specs.iter().position(|s| s.name == "release").unwrap()] as f64;
+        // a drum row's hit has no note end to release from
+        let Some(at) = specs.iter().position(|s| s.name == "release") else {
+            continue;
+        };
+        let release = p[at] as f64;
         let x = left(&render(name, &e, &p, &bank, 0.1 + release + 0.1));
         assert!(
             rms(span(&x, 0.05, 0.1)) > 0.01,
@@ -1409,6 +1419,9 @@ fn velocity_scales_the_level() {
         // brass's index grows with the velocity, and an FM tone's level moves with its index
         if name == "fm" && p[0] == 3.0 {
             assert!(ratio > 0.2 && ratio < 0.8, "{name}: {ratio}");
+        } else if matches!(name, "oneshot" | "sample808") {
+            // the drums' and the 808's curve
+            assert!((ratio - 0.5f64.powf(1.5)).abs() < 1e-3, "{name}: {ratio}");
         } else {
             assert!((ratio - 0.5).abs() < 1e-3, "{name}: {ratio}");
         }
@@ -1467,4 +1480,108 @@ fn start_and_render_allocate_nothing() {
             assert_eq!(n, 0, "{name} at {note}");
         }
     }
+}
+
+// --- oneshot and sample808 ---
+
+fn hit_event(id: u32, pitch: f32) -> Event {
+    Event {
+        off: None,
+        ..note_event(id, 60.0 + pitch, 1.0, 0.0)
+    }
+}
+
+#[test]
+fn oneshot_plays_its_recording_at_its_own_pitch_moved_by_the_step_and_tune() {
+    let bank = bank_with_sine(69, 440.0);
+    let base = params("oneshot", &[]);
+    let at = |pitch: f32, p: &[f32]| left(&render("oneshot", &hit_event(1, pitch), p, &bank, 0.5));
+    assert_near(pitch(span(&at(0.0, &base), 0.05, 0.4), 440.0), 440.0, 0.01);
+    assert_near(pitch(span(&at(12.0, &base), 0.05, 0.4), 880.0), 880.0, 0.01);
+    let down = params("oneshot", &[("tune", -12.0)]);
+    assert_near(pitch(span(&at(0.0, &down), 0.05, 0.4), 220.0), 220.0, 0.01);
+}
+
+#[test]
+fn oneshot_is_cut_at_its_length_and_at_the_recordings_end() {
+    let bank = bank_with_sine(69, 440.0);
+    let short = params("oneshot", &[("length", 0.1)]);
+    let x = left(&render("oneshot", &hit_event(1, 0.0), &short, &bank, 0.5));
+    assert!(rms(span(&x, 0.02, 0.08)) > 0.1);
+    assert!(span(&x, 0.1, 0.5).iter().all(|v| *v == 0.0));
+    // the recording is 2 s: an octave up it is over in 1 s, whatever the length
+    let whole = params("oneshot", &[]);
+    let up = left(&render("oneshot", &hit_event(2, 12.0), &whole, &bank, 1.5));
+    assert!(rms(span(&up, 0.5, 0.9)) > 0.1);
+    assert!(span(&up, 1.0, 1.5).iter().all(|v| *v == 0.0));
+    // a step's decay scale shortens the cut too
+    let mut scaled = hit_event(3, 0.0);
+    scaled.decay = 0.5;
+    let x = left(&render("oneshot", &scaled, &short, &bank, 0.3));
+    assert!(span(&x, 0.05, 0.3).iter().all(|v| *v == 0.0));
+}
+
+#[test]
+fn oneshot_without_a_recording_is_silent() {
+    let x = render(
+        "oneshot",
+        &hit_event(1, 0.0),
+        &params("oneshot", &[]),
+        &empty(),
+        0.2,
+    );
+    assert!(x.iter().all(|f| f[0] == 0.0 && f[1] == 0.0));
+}
+
+#[test]
+fn sample808_plays_the_note_from_its_recordings_root() {
+    // a recording of A1 (55 Hz) played as A2
+    let bank = bank_with_sine(33, 55.0);
+    let e = note_event(1, 45.0, 1.0, 1.0);
+    let x = left(&render(
+        "sample808",
+        &e,
+        &params("sample808", &[]),
+        &bank,
+        0.8,
+    ));
+    assert_near(pitch(span(&x, 0.1, 0.6), 110.0), 110.0, 0.01);
+}
+
+#[test]
+fn sample808_glides_from_the_note_it_cut_and_skips_its_attack() {
+    let bank = bank_with_sine(33, 55.0);
+    let p = params("sample808", &[("glide_ms", 200.0)]);
+    let mut e = note_event(1, 45.0, 1.0, 1.0);
+    e.legato_from = Some(33.0);
+    let x = left(&render("sample808", &e, &p, &bank, 0.8));
+    let early = pitch(span(&x, 0.0, 0.06), 70.0);
+    let late = pitch(span(&x, 0.5, 0.8), 110.0);
+    assert!(early < 90.0, "{early} Hz at the start of the glide");
+    assert_near(late, 110.0, 0.01);
+    // past the attack: the first frame is not the recording's silent first sample
+    assert!(x[0].abs() > 1e-3);
+    let fresh = left(&render(
+        "sample808",
+        &note_event(2, 45.0, 1.0, 1.0),
+        &p,
+        &bank,
+        0.1,
+    ));
+    assert!(fresh[0].abs() < 1e-6);
+}
+
+#[test]
+fn sample808_releases_after_the_notes_end() {
+    let bank = bank_with_sine(33, 55.0);
+    let p = params("sample808", &[("release", 0.05)]);
+    let x = left(&render(
+        "sample808",
+        &note_event(1, 33.0, 1.0, 0.3),
+        &p,
+        &bank,
+        0.6,
+    ));
+    assert!(rms(span(&x, 0.1, 0.25)) > 0.1);
+    assert!(span(&x, 0.36, 0.6).iter().all(|v| *v == 0.0));
 }

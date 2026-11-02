@@ -1,5 +1,6 @@
 //! Recorded zones and the voice that plays them.
 
+use super::drums::{Fall, Gate as HitGate};
 use super::fm::{param, Gate};
 use super::{Ctx, Voice};
 use crate::beat::events::Event;
@@ -255,6 +256,194 @@ impl Voice for Sampler {
     }
 }
 
+/// One recorded hit on a drum row: its zone at its own pitch, moved by the step's pitch and
+/// `tune`, cut after `length` (times the step's decay scale) or at the recording's end.
+#[derive(Default)]
+struct OneShot {
+    rate: f64,
+    library: usize,
+    zone: Option<usize>,
+    active: bool,
+    gate: HitGate,
+    step: f64,
+    attack: f64,
+}
+
+mod oneshot {
+    pub const TUNE: usize = 0;
+    pub const LENGTH: usize = 1;
+    pub const ATTACK: usize = 2;
+}
+
+impl Voice for OneShot {
+    fn start(&mut self, event: &Event, params: &[f32], ctx: &Ctx) {
+        let rate = self.rate;
+        let p = |i| param("oneshot", params, i);
+        // a drum hit's note is 60 plus the step's pitch
+        let shift = event.note as f64 - 60.0 + p(oneshot::TUNE);
+        let vel = (event.vel.clamp(0.0, 1.0) * 127.0).round() as u8;
+        let zone = ctx.bank.pick(self.library, 60.0, vel);
+        let found = zone.and_then(|z| ctx.bank.zone(self.library, z));
+        let step = found.map_or(0.0, |z| z.rate / rate * (shift / 12.0).exp2());
+        let recorded = found.map_or(0, |z| (z.frames() as f64 / step).floor() as u64);
+        let cut = (p(oneshot::LENGTH) * (event.decay as f64).max(0.0) * rate).round() as u64;
+        *self = OneShot {
+            rate,
+            library: self.library,
+            zone,
+            active: zone.is_some(),
+            gate: HitGate::new(event, rate, Some(recorded.min(cut))),
+            step,
+            attack: (p(oneshot::ATTACK) * rate).max(1.0),
+        };
+    }
+
+    fn render(&mut self, out: &mut [[f32; 2]], ctx: &Ctx) -> bool {
+        if !self.active {
+            return false;
+        }
+        let Some(zone) = self.zone.and_then(|z| ctx.bank.zone(self.library, z)) else {
+            self.active = false;
+            return false;
+        };
+        let last = (zone.frames() - 1) as f64;
+        for frame in out.iter_mut() {
+            let Some((k, g)) = self.gate.next() else {
+                self.active = false;
+                return false;
+            };
+            let pos = k as f64 * self.step;
+            if pos > last {
+                self.active = false;
+                return false;
+            }
+            let g = g * (k as f64 / self.attack).min(1.0);
+            frame[0] += (Sampler::read(zone, pos, 0) * g) as f32;
+            frame[1] += (Sampler::read(zone, pos, 1) * g) as f32;
+        }
+        true
+    }
+}
+
+mod sample808 {
+    pub const TUNE: usize = 0;
+    pub const DECAY: usize = 1;
+    pub const RELEASE: usize = 2;
+    pub const GLIDE_MS: usize = 3;
+}
+
+/// How close a glide gets to its note by `glide_ms`, in semitones: one cent.
+const GLIDE_REACH: f64 = 0.01;
+/// A legato note starts this far into the recording, past its attack, so the slide does
+/// not hit again.
+const LEGATO_SKIP_S: f64 = 0.05;
+
+/// A recorded 808 played as a mono bass: the zone nearest the note, pitched to it, gliding in
+/// from the note it cut, held with a decay and released after the note's end.
+#[derive(Default)]
+struct Sample808 {
+    rate: f64,
+    library: usize,
+    zone: Option<usize>,
+    active: bool,
+    gate: HitGate,
+    /// zone frames a render frame at the note itself
+    step: f64,
+    pos: f64,
+    away: f64,
+    glide: f64,
+    held: Fall,
+    off: Option<u64>,
+    release_s: f64,
+    release: Fall,
+    level: f64,
+    released: bool,
+}
+
+impl Voice for Sample808 {
+    fn start(&mut self, event: &Event, params: &[f32], ctx: &Ctx) {
+        let rate = self.rate;
+        let p = |i| param("sample808", params, i);
+        let note = event.note as f64 + p(sample808::TUNE);
+        let vel = (event.vel.clamp(0.0, 1.0) * 127.0).round() as u8;
+        let zone = ctx.bank.pick(self.library, note, vel);
+        let found = zone.and_then(|z| ctx.bank.zone(self.library, z));
+        let step = found.map_or(0.0, |z| z.rate / rate * ((note - z.root) / 12.0).exp2());
+        let away = event
+            .legato_from
+            .map_or(0.0, |from| (from - event.note) as f64);
+        let frames = (p(sample808::GLIDE_MS) / 1000.0 * rate).max(1.0);
+        let glide = if away.abs() > GLIDE_REACH {
+            (-(away.abs() / GLIDE_REACH).ln() / frames).exp()
+        } else {
+            0.0
+        };
+        let off = event.off.map(|o| o.saturating_sub(event.start));
+        let release_s = p(sample808::RELEASE);
+        let life = off.map(|o| o + (release_s * rate).ceil() as u64 + 1);
+        let skip = if event.legato_from.is_some() {
+            found.map_or(0.0, |z| LEGATO_SKIP_S * z.rate)
+        } else {
+            0.0
+        };
+        *self = Sample808 {
+            rate,
+            library: self.library,
+            zone,
+            active: zone.is_some(),
+            gate: HitGate::new(event, rate, life),
+            step,
+            pos: skip,
+            away,
+            glide,
+            held: Fall::new(p(sample808::DECAY) * (event.decay as f64).max(0.0), rate),
+            off,
+            release_s,
+            release: Fall::default(),
+            level: 0.0,
+            released: false,
+        };
+    }
+
+    fn render(&mut self, out: &mut [[f32; 2]], ctx: &Ctx) -> bool {
+        if !self.active {
+            return false;
+        }
+        let Some(zone) = self.zone.and_then(|z| ctx.bank.zone(self.library, z)) else {
+            self.active = false;
+            return false;
+        };
+        let last = (zone.frames() - 1) as f64;
+        for frame in out.iter_mut() {
+            let Some((k, g)) = self.gate.next() else {
+                self.active = false;
+                return false;
+            };
+            if self.pos > last {
+                self.active = false;
+                return false;
+            }
+            if !self.released && self.off.is_some_and(|off| k >= off) {
+                self.released = true;
+                self.level = self.held.next();
+                self.release = Fall::new(self.release_s, self.rate);
+            }
+            let env = if self.released {
+                self.level * self.release.next()
+            } else {
+                self.held.next()
+            };
+            let g = g * env;
+            frame[0] += (Sampler::read(zone, self.pos, 0) * g) as f32;
+            frame[1] += (Sampler::read(zone, self.pos, 1) * g) as f32;
+            // the glide bends the reading speed, so the place is a running sum
+            self.pos += self.step * (self.away / 12.0).exp2();
+            self.away *= self.glide;
+        }
+        true
+    }
+}
+
 /// A sampler voice that plays the bank's library of that index; an unknown or empty one
 /// plays silence.
 pub fn sampler_for(_rate: f32, library: usize) -> Box<dyn Voice> {
@@ -264,6 +453,25 @@ pub fn sampler_for(_rate: f32, library: usize) -> Box<dyn Voice> {
     })
 }
 
+/// A voice of a sampled instrument (`sampler`, `oneshot`, `sample808`) that plays the bank's
+/// library of that index.
+pub fn sampled_for(instrument: &str, rate: f32, library: usize) -> Box<dyn Voice> {
+    match instrument {
+        "oneshot" => Box::new(OneShot {
+            rate: rate as f64,
+            library,
+            ..OneShot::default()
+        }),
+        "sample808" => Box::new(Sample808 {
+            rate: rate as f64,
+            library,
+            ..Sample808::default()
+        }),
+        _ => sampler_for(rate, library),
+    }
+}
+
 pub fn make(instrument: &str, rate: f32) -> Option<Box<dyn Voice>> {
-    (instrument == "sampler").then(|| sampler_for(rate, 0))
+    matches!(instrument, "sampler" | "oneshot" | "sample808")
+        .then(|| sampled_for(instrument, rate, 0))
 }

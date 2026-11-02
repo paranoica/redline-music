@@ -1,4 +1,4 @@
-"""The owner's sample pack: a catalogue of the files dropped into `input/sounds/`.
+"""The owner's sample pack- a catalogue of the files dropped into `input/sounds/`.
 
 Each file is sorted into a category (kick, 808, snare, hat, loop, ...) by the words of its
 path first and by its sound when the words say nothing, and gets the MIDI root of a pitched
@@ -22,7 +22,7 @@ PACK = Path("input/sounds")
 CATALOG = Path("work/sounds/pack/catalog.json")
 FORMAT = 1
 AUDIO = (".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3")
-PREFIX = "pack:"
+PREFIX = "pack-"
 # a sound longer than this with no word for it is taken for a loop
 ONESHOT_MAX_S = 2.5
 # what is read of a file to judge its sound
@@ -334,7 +334,7 @@ def scan(root: Path = PACK, catalog: Path = CATALOG) -> tuple[list[PackSound], l
 
 
 def file_of(library: str, root: Path = PACK, catalog: Path = CATALOG) -> tuple[Path, PackSound]:
-    """The file and entry of a ``pack:<id>`` library, checked against the catalogue.
+    """The file and entry of a ``pack-<id>`` library, checked against the catalogue.
 
     Raises:
         PackError: Not a pack library, an id the catalogue lacks, or a file that moved or

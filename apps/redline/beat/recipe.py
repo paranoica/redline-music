@@ -8,12 +8,14 @@ source gave are marked as own choices in `invented`.
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import numpy as np
 
 from redline.beat import library
+from redline.beat.pack import PackSound
 
 BLOG = "blog, unverified"
 OWN = "own choice"
@@ -771,9 +773,11 @@ class Recipe:
     devices: tuple[str, ...]
     hats_per_bar: tuple[float, float]
     kicks_per_bar: tuple[float, float]
-    # recipes saved before the 808 styles and the character moves read back without them
+    # recipes saved before the 808 styles, the character moves and the kits read back without
     bass_style: str = ""
     character: tuple[str, ...] = ()
+    # "pack" when drums or the 808 come from the owner's pack, else ""
+    kit: str = ""
 
 
 KEY = re.compile(r"([A-G])([#b]?) ([a-z_]+)")
@@ -834,7 +838,11 @@ def _palette(rng: np.random.Generator, spec: Genre) -> tuple[Sound, ...]:
 
 
 def make_recipe(
-    seed: int, genre: str | None = None, bpm: float | None = None, key: str | None = None
+    seed: int,
+    genre: str | None = None,
+    bpm: float | None = None,
+    key: str | None = None,
+    pack: dict[str, list[PackSound]] | None = None,
 ) -> Recipe:
     """Draw a beat's recipe; the same seed and options draw the same.
 
@@ -846,6 +854,8 @@ def make_recipe(
         genre: A genre of `GENRES`, or None to draw one.
         bpm: The tempo, or None to draw one inside the genre's range.
         key: A key like `F# minor`, or None to draw one from the genre's modes.
+        pack: The owner's pack sounds by category (see `pack_kit`), or None for a synthesised
+            kit. Its sounds replace the drums and the 808 they have a category for.
 
     Raises:
         RecipeError: An option the score format cannot take.
@@ -869,6 +879,11 @@ def make_recipe(
     drawn = (style, *character)
     devices = _draw(rng, _fitting(spec.devices, sections, drawn), DEVICE_COUNT)
     total = sum(part.bars for part in structure)
+    sounds = _with_lead(_styled(sounds, style), lead, len(spec.sounds))
+    kit = ""
+    if pack:
+        sounds = _from_pack(rng, sounds, pack, name)
+        kit = "pack" if any(library.is_pack(s.library or "") for s in sounds) else ""
     return Recipe(
         seed=seed,
         genre=name,
@@ -876,7 +891,7 @@ def make_recipe(
         key=key or f"{tonic} {mode}",
         swing=swing,
         half_time=spec.half_time,
-        sounds=_with_lead(_styled(sounds, style), lead, len(spec.sounds)),
+        sounds=sounds,
         structure=structure,
         bars=(max(MIN_BARS, total - BARS_SLACK), total + BARS_SLACK),
         devices=devices,
@@ -884,7 +899,62 @@ def make_recipe(
         kicks_per_bar=spec.kicks_per_bar,
         bass_style=style,
         character=character,
+        kit=kit,
     )
+
+
+# the pack categories a synthesised instrument's sound may come from instead
+PACK_FOR = {
+    "kick": ("kick",),
+    "snare": ("snare",),
+    "clap": ("clap",),
+    "hat_closed": ("hat_closed",),
+    "hat_open": ("hat_open",),
+    "rim": ("perc",),
+    "perc": ("perc",),
+    "tom": ("perc",),
+    "shaker": ("perc",),
+    "snap": ("perc",),
+    "cowbell": ("perc",),
+    "crash": ("crash",),
+    "bass808": ("808",),
+}
+
+
+def pack_kit(sounds: Iterable[PackSound]) -> dict[str, list[PackSound]]:
+    """The pack's one-shots by category, each list in id order; an 808 needs a known root."""
+    kit: dict[str, list[PackSound]] = {}
+    for s in sorted(sounds, key=lambda s: s.id):
+        if s.category == "808" and s.note is None:
+            continue
+        kit.setdefault(s.category, []).append(s)
+    return kit
+
+
+def _from_pack(
+    rng: np.random.Generator,
+    sounds: tuple[Sound, ...],
+    kit: dict[str, list[PackSound]],
+    genre: str,
+) -> tuple[Sound, ...]:
+    """The sounds with each drum and the 808 drawn from the pack where it has the category.
+
+    Sounds whose path names the genre are drawn first; one draw per sound whatever the pack
+    holds, so a different pack changes only the pack's choices.
+    """
+    words = set(genre.split("_"))
+    out = []
+    for sound in sounds:
+        draw = int(rng.integers(1 << 30))
+        pool = [s for c in PACK_FOR.get(sound.instrument, ()) for s in kit.get(c, [])]
+        if not pool:
+            out.append(sound)
+            continue
+        named = [s for s in pool if words & set(re.split(r"[^a-z0-9]+", s.path.lower()))]
+        chosen = (named or pool)[draw % len(named or pool)]
+        instrument = "sample808" if sound.instrument == "bass808" else "oneshot"
+        out.append(Sound(sound.name, instrument, (), f"{library.PACK_PREFIX}{chosen.id}"))
+    return tuple(out)
 
 
 def _fitting(moves: tuple[str, ...], sections: set[str], drawn: tuple[str, ...]) -> tuple[str, ...]:

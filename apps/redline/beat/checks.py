@@ -21,6 +21,8 @@ RATE = 48000.0
 BPM_SLACK = 0.5
 BASS_RANGE = (24, 55)
 CLASH_S = 0.010
+# the 808s: synthesised and recorded
+BASSES = ("bass808", "sample808")
 # 808 styles that put the 808 on the kick on purpose
 DOUBLING = ("kick_double",)
 MAX_SAME = 8
@@ -123,7 +125,7 @@ def _notes(body: dict[str, Any], recipe: Recipe) -> list[str]:
     out = []
     for path, sname, row in _note_rows(body):
         instrument, tune = sounds.get(sname, ("", 0.0))
-        bass = tune if instrument == "bass808" else None
+        bass = tune if instrument in BASSES else None
         for i, note in enumerate(row):
             if isinstance(note, dict):
                 out += _note_errors(note, f"{path}[{i}].note", recipe.key, bass)
@@ -252,7 +254,7 @@ def _repeats(table: _Table) -> list[Caution]:
 def _clashes(table: _Table, recipe: Recipe) -> list[Caution]:
     if recipe.bass_style in DOUBLING:
         return []
-    starts = sorted(e["start"] for e in table.of(("bass808",)) if e["legato_from"] is None)
+    starts = sorted(e["start"] for e in table.of(BASSES) if e["legato_from"] is None)
     near = CLASH_S * RATE
     bars = []
     for kick in table.of(("kick",)):
