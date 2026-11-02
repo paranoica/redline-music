@@ -19,6 +19,7 @@ import { FxPane, type StudioLike } from "./fx.ts";
 import type { LyricLayout } from "./lyrics.ts";
 import type { Playback } from "./player.ts";
 import { addPicked, hitScore, loopedScore, patternPreview, stepAt, type Pick, type Preview, type StepAt } from "./pattern.ts";
+import { paintSections, uniqueClip, type PaintPlan } from "./playlist.ts";
 import { RackView } from "./rack.ts";
 import { FlipRoll, layerProblem, RollView, scoreRoll, SourceNotes, type NoteRowRef } from "./roll.ts";
 import { chooseShare, shareGate, type ShareChoice } from "./share.ts";
@@ -35,7 +36,7 @@ const hasText = (reply: SongReply): boolean => {
   return t.seed !== null && t.version !== undefined && t.version !== null;
 };
 
-export const BEAT_LANES: readonly LaneKind[] = ["beat", "bass", "drums"];
+export const BEAT_LANES: readonly LaneKind[] = ["beat", "bass", "drums", "patterns"];
 
 export interface EditorHost {
   base: string | undefined;
@@ -74,6 +75,8 @@ export interface EditorHost {
   say(text: string): void;
   // the block or the pattern started or stopped playing live
   liveChanged?(): void;
+  // another pattern picked in the rack
+  rackSwitched?(): void;
   overlay: HTMLElement;
 }
 
@@ -147,7 +150,10 @@ export class Editor {
       say: (text) => host.say(text),
       preview: (sound, pattern) => this.#preview(sound, pattern),
       previewPick: (pick, root) => this.#previewPick(pick, root),
-      switched: () => this.#retarget(),
+      switched: () => {
+        this.#retarget();
+        host.rackSwitched?.();
+      },
       confirm: (text) => host.confirm(text),
       pack: () => this.#packList(),
     });
@@ -273,6 +279,66 @@ export class Editor {
     else if (this.#auditioning) void this.#startAudition();
   }
 
+  // the pattern the rack shows, null before the score is loaded
+  get rackPattern(): string | null {
+    return this.#rack.current();
+  }
+
+  // a pattern's lane opened from its head: the rack shows it, the block stays
+  showPattern(pattern: string): void {
+    this.#notes = null;
+    this.#rack.choose(pattern);
+    if (this.patternPlaying) this.#retarget();
+  }
+
+  // a clip picked in the playlist: the editor works on its section, the rack shows its pattern
+  selectClip(pattern: string, section: number): void {
+    this.#block = section;
+    this.#notes = null;
+    this.#rack.choose(pattern);
+    this.#source.retry();
+    if (this.patternPlaying) this.#retarget();
+    else if (this.#auditioning) void this.#startAudition();
+  }
+
+  // One paint gesture over the playlist: the sections given get the pattern, one undo step for
+  // all of them; a refused section is said and left as it was. Null before the score is loaded.
+  paintPattern(pattern: string, sections: readonly number[]): PaintPlan | null {
+    const score = this.#draft.score;
+    if (!score) return null;
+    const plan = paintSections(score, pattern, sections, true);
+    if (plan.refused.length) this.#host.say(plan.refused.map((r) => r.reason).join(" "));
+    if (plan.painted.length) this.editPattern(plan.score);
+    return plan;
+  }
+
+  // the clip of a pattern in a section taken out; false when there was none
+  clearClip(pattern: string, section: number): boolean {
+    const score = this.#draft.score;
+    if (!score) return false;
+    const plan = paintSections(score, pattern, [section], false);
+    if (plan.refused.length) this.#host.say(plan.refused.map((r) => r.reason).join(" "));
+    if (!plan.painted.length) return false;
+    return this.editPattern(plan.score);
+  }
+
+  // the clip's section gets its own copy of the pattern, which the rack then shows; the new
+  // pattern's name, null when refused
+  uniqueClip(pattern: string, section: number): string | null {
+    const score = this.#draft.score;
+    if (!score) return null;
+    const made = uniqueClip(score, { pattern, section });
+    if (!made.ok) {
+      this.#host.say(made.reason);
+      return null;
+    }
+    // picked first: the edit draws the rack again at once
+    this.#block = section;
+    this.#rack.choose(made.name);
+    this.editPattern(made.score);
+    return made.name;
+  }
+
   // the own beat's score is read once the beat lane is on screen, so block ops have it
   prepare(): void {
     this.#syncSeed();
@@ -364,19 +430,24 @@ export class Editor {
     }
   }
 
-  // Lights the rack's playing step. `songBars`: where the song plays, null when it does not; the
-  // live engine, when it plays, goes first.
+  // Lights the rack's playing step and turns its page to the playing bar. `songBars`: where the
+  // song plays, null when it does not; the live engine, when it plays, goes first.
   paintCursor(songBars: number | null): void {
     const score = this.#draft.score;
     const pattern = this.#rack.shown;
-    if (this.#tab !== "rack" || !score || pattern === null) return;
-    let at: StepAt | null = null;
     const live = this.#auditioning ? (this.#host.playback()?.auditionPosition() ?? null) : null;
+    const playing = live !== null || songBars !== null;
+    if (this.#tab !== "rack" || !score || pattern === null) {
+      // a play started or stopped while the rack is away still counts for its pager
+      this.#rack.playing(playing);
+      return;
+    }
+    let at: StepAt | null = null;
     if (live !== null) {
       const bars = (live * score.bpm) / 240;
       at = stepAt(this.#live === "pattern" ? loopedScore(score, pattern) : score, pattern, bars);
     } else if (songBars !== null) at = stepAt(score, pattern, songBars);
-    this.#rack.cursor(at);
+    this.#rack.cursor(at, playing);
   }
 
   #patternPreview(score: Score): Preview | null {

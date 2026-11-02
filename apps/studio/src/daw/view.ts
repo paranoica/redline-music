@@ -1,6 +1,6 @@
 // What the song screen shows, worked out from the server's song before any DOM: the facts it
 // acts on, the lanes for them, the take lanes it keeps on screen, what a press on the ruler
-// means, the chip's words and the marks drawn on the 808 and drum lanes.
+// means, the chip's words and the marks of an own beat's notes and drum hits.
 
 import { drumSteps, isNoteRow, notesOf, playingAt, STEPS_PER_BAR, type Score } from "../beat/model.ts";
 import type { BeatStation, Job, SongReply } from "../song/api.ts";
@@ -66,7 +66,8 @@ export function factsOf(reply: SongReply, jobs: readonly Job[], extra: { flipAna
 
 // ---------- lanes ----------
 
-export type LaneKind = "text" | "voice" | "takes" | "beat" | "bass" | "drums";
+// "patterns": an own beat's playlist, one lane per pattern
+export type LaneKind = "text" | "voice" | "takes" | "beat" | "bass" | "drums" | "patterns";
 // "analyse": one waveform and the offer to analyse; "file": one waveform block; "blocks": sections
 export type BeatMode = "analyse" | "file" | "blocks";
 
@@ -74,7 +75,7 @@ export function visibleLanes(f: Pick<ScreenFacts, "beatKind" | "beatAnalysed" | 
   const lanes: LaneKind[] = ["text", "voice"];
   if (f.voiceKind === "own") lanes.push("takes");
   lanes.push("beat");
-  if (f.beatKind === "own") lanes.push("bass", "drums");
+  if (f.beatKind === "own") lanes.push("patterns");
   const beat: BeatMode = f.beatKind === "file" ? (f.beatAnalysed ? "file" : "analyse") : "blocks";
   return { lanes, beat };
 }
@@ -163,6 +164,9 @@ export interface HitMark {
 
 const DRUM_ROW: Record<string, number> = { kick: 0, snare: 1, clap: 1, rim: 1, hat_closed: 2, hat_open: 2, cowbell: 2 };
 
+// the mark row of a drum instrument, null for one the 808 and drum marks leave out
+export const drumRow = (instrument: string): number | null => DRUM_ROW[instrument] ?? null;
+
 export function scoreMarks(score: Score): { bass: BassMark[]; drums: HitMark[] } {
   const total = score.sections.reduce((n, s) => n + (typeof s.bars === "number" ? s.bars : 0), 0);
   const bass: BassMark[] = [];
@@ -194,11 +198,13 @@ export function scoreMarks(score: Score): { bass: BassMark[]; drums: HitMark[] }
 
 // ---------- keys and the editor's tabs ----------
 
-const BEAT_LANE_KINDS: readonly LaneKind[] = ["beat", "bass", "drums"];
+const BEAT_LANE_KINDS: readonly LaneKind[] = ["beat", "bass", "drums", "patterns"];
+// the pattern lanes' Delete is a clip's, never a section's
+const SECTION_LANE_KINDS: readonly LaneKind[] = ["beat", "bass", "drums"];
 
 // the block a Delete or Ctrl+D acts on: the picked one, while a beat lane is selected and it exists
 export function keyedBlock(selected: LaneKind | null, picked: number | null, blocks: number): number | null {
-  if (selected === null || !BEAT_LANE_KINDS.includes(selected)) return null;
+  if (selected === null || !SECTION_LANE_KINDS.includes(selected)) return null;
   return picked !== null && picked >= 0 && picked < blocks ? picked : null;
 }
 
@@ -208,7 +214,7 @@ export function pickAfterUndo(picked: number | null, editorBlock: number | null)
   return picked === null ? null : editorBlock;
 }
 
-export type DawKey = "play" | "record" | "loop" | "home" | "undo" | "redo" | "duplicate" | "delete";
+export type DawKey = "play" | "record" | "loop" | "home" | "undo" | "redo" | "duplicate" | "delete" | "deselect";
 
 export interface KeyLike {
   code: string;
@@ -237,6 +243,8 @@ export function dawKey(e: KeyLike, typing: boolean): DawKey | null {
       return "home";
     case "Delete":
       return "delete";
+    case "Escape":
+      return "deselect";
     default:
       return null;
   }

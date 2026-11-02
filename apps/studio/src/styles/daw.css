@@ -223,6 +223,22 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .daw .clipbar__btn:hover:not(:disabled) { background: var(--raised-hover); color: var(--text); }
 .daw .clipbar__btn:disabled { opacity: 0.4; cursor: default; }
+.daw .head--pat, .daw .lane--pat { height: 44px; }
+.daw .lane--pat { cursor: copy; }
+.daw .secline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--line-strong); pointer-events: none; }
+.daw .pclip { cursor: pointer; }
+.daw .pclip--on { box-shadow: 0 0 0 2px var(--text); }
+.daw .pclip__x {
+  position: absolute; right: 2px; top: 2px; z-index: 2; width: 16px; height: 16px; padding: 0; display: none; place-items: center;
+  border: 0; border-radius: 3px; background: var(--surface); color: var(--text-dim); font-size: 10px; cursor: pointer;
+}
+.daw .pclip:hover .pclip__x, .daw .pclip--on .pclip__x { display: grid; }
+.daw .pclip__x:hover { color: var(--text); background: var(--red-soft); }
+.daw .pfill {
+  position: absolute; bottom: 4px; height: 14px; border-radius: 3px; pointer-events: none; z-index: 1;
+  border: 1px dashed var(--edge); color: var(--edge); font-size: 10px; line-height: 12px; text-align: center;
+}
+.daw .pghosts { position: absolute; inset: 0; pointer-events: none; }
 .daw .analyse { position: sticky; left: 16px; top: 11px; margin-left: 16px; margin-top: 11px; height: 32px; z-index: 2; background: var(--raised-hover); }
 .daw .lyric {
   position: absolute; top: 6px; bottom: 6px; padding: 3px 8px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;

@@ -33,6 +33,7 @@ import { dismissable, h } from "../ui/dom.ts";
 import { ROLL_NAMES, toggleHit } from "./drums.ts";
 import { KnobControl } from "./knob.ts";
 import { addPicked, cursorColumn, PACK_CATEGORY_NAMES, packSound, soundUsed, synthMenu, type Pick, type StepAt } from "./pattern.ts";
+import { PagerFollow } from "./playlist.ts";
 
 // ---------- the pattern shown ----------
 
@@ -202,6 +203,7 @@ export class RackView {
   readonly #rows: HTMLElement;
   readonly #host: RackHost;
   readonly #pick = new RackPick();
+  readonly #pager = new PagerFollow();
   #shown: string | null = null;
   #bar = 0;
   #roll = 0;
@@ -235,8 +237,19 @@ export class RackView {
     return this.#pick.current(score, this.#host.seed(), this.#host.section(), this.#host.wants?.() ?? null);
   }
 
-  // lights the playing step when it is in the bar shown; only the classes change
-  cursor(at: StepAt | null): void {
+  // Lights the playing step when it is in the bar shown; only the classes change. While it plays
+  // the page follows the playing bar, unless it was turned by hand since the play started.
+  cursor(at: StepAt | null, playing = false): void {
+    const bar = this.#pager.next(playing, at);
+    if (bar !== null && bar !== this.#bar && this.#shown !== null) {
+      const score = this.#host.score();
+      const bars = Math.max(1, score?.patterns[this.#shown]?.bars ?? 1);
+      if (bar < bars) {
+        this.#bar = bar;
+        this.#now = null;
+        this.show();
+      }
+    }
     const col = cursorColumn(at, this.#bar);
     if (col === this.#now) return;
     this.#now = col;
@@ -253,6 +266,16 @@ export class RackView {
 
   follow(): void {
     this.#pick.follow();
+  }
+
+  // a pattern picked outside the rack, a clip in the playlist
+  choose(pattern: string): void {
+    this.#pick.choose(pattern);
+  }
+
+  // a play started or stopped while the rack is not on screen
+  playing(on: boolean): void {
+    this.#pager.next(on, null);
   }
 
   show(): void {
@@ -344,6 +367,7 @@ export class RackView {
   }
 
   #turn(by: number): void {
+    this.#pager.turned();
     this.#bar += by;
     this.show();
   }

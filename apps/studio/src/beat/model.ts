@@ -756,7 +756,7 @@ export function placePattern(score: Score, pattern: string, i: number, on: boole
   for (const other of play) {
     const q = patternOf(score, other);
     const sound = Object.keys(p.rows ?? {}).find((k) => hasRow(q, k));
-    if (sound !== undefined) return refuse(`В секции ${s.name} звук ${sound} уже играет паттерн ${other}.`);
+    if (sound !== undefined) return refuse(`В секции ${s.name} звук ${sound} уже играет «${shownName(score, other)}».`);
   }
   target.play = [...play, pattern];
   return { ok: true, score: out };
@@ -822,7 +822,7 @@ export function ensureRow(score: Score, specs: readonly InstrumentSpec[], patter
   const kind = kindOf(specs, s.instrument);
   if (!kind) return refuse(`Инструмента ${s.instrument} нет.`);
   const owner = rowOwner(score, pattern, sound);
-  if (owner) return refuse(`В секции ${owner.section} звук ${sound} уже играет паттерн ${owner.pattern}.`);
+  if (owner) return refuse(`В секции ${owner.section} звук ${sound} уже играет «${shownName(score, owner.pattern)}».`);
   const out = copy(score);
   const target = out.patterns[pattern] as PatternJson;
   target.rows ??= {};
@@ -870,6 +870,11 @@ export function rackRows(score: Score, specs: readonly InstrumentSpec[], pattern
     lockedBy: rowOwner(score, pattern, sound)?.pattern ?? null,
     muted: soundMuted(score, sound),
   }));
+}
+
+// a pattern as the page shows it, for a refusal to name it the same way
+function shownName(score: Score, pattern: string): string {
+  return patternLabel(score, pattern, Object.keys(score.patterns).indexOf(pattern));
 }
 
 export function patternLabel(score: Score, pattern: string, index: number): string {

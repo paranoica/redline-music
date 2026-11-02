@@ -83,9 +83,9 @@ test("a Suno voice has no takes to count", () => {
 
 const facts = (over = {}) => ({ beatKind: "file", beatAnalysed: true, voiceKind: "own", ...over });
 
-test("an own beat shows text, voice, takes, beat, 808 and drums in that order", () => {
+test("an own beat shows text, voice, takes, beat and its pattern lanes in that order", () => {
   const v = visibleLanes(facts({ beatKind: "own" }));
-  assert.deepEqual(v.lanes, ["text", "voice", "takes", "beat", "bass", "drums"]);
+  assert.deepEqual(v.lanes, ["text", "voice", "takes", "beat", "patterns"]);
   assert.equal(v.beat, "blocks");
 });
 
@@ -104,7 +104,7 @@ test("a type beat not analysed shows one waveform lane with the analyse offer", 
 
 test("a Suno voice hides the take lanes and keeps the voice lane", () => {
   const v = visibleLanes(facts({ voiceKind: "suno", beatKind: "own" }));
-  assert.deepEqual(v.lanes, ["text", "voice", "beat", "bass", "drums"]);
+  assert.deepEqual(v.lanes, ["text", "voice", "beat", "patterns"]);
 });
 
 // ---------- the take lanes ----------

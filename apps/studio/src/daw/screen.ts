@@ -2,7 +2,7 @@
 // and the bottom editor under them, collapsed until a tab is opened.
 
 import { createApi as createBeatApi, type Library } from "../beat/api.ts";
-import { deleteSection, duplicateSection, moveSection, type Score, type SectionEdit } from "../beat/model.ts";
+import { deleteSection, duplicateSection, moveSection, patternLabel, splitSection, usage, type Score, type SectionEdit } from "../beat/model.ts";
 import { History } from "../core/history.ts";
 import { KeySurface, Scope } from "../core/lifecycle.ts";
 import type { Loop } from "../core/loop.ts";
@@ -23,16 +23,18 @@ import { drawHits, drawNotes, drawWave, sizedCanvas, type PeakData } from "./dra
 import { BEAT_LANES, Editor } from "./editor.ts";
 import { exportPlan, exportText, type ExportPhase } from "./export.ts";
 import { FlipDraft, flipLayout, StaleDraft, withBlocks } from "./flipdraft.ts";
+import { clipAlive, clipMarks, deleteTarget, dragSections, paintSections, patternClips, patternColour, sectionAtBar, sectionCutAt, type ClipPick } from "./playlist.ts";
 import { layerProblem } from "./roll.ts";
 import { DEFAULT_LAYOUT, lineAt, placeLines, type LinePlace, type LyricLayout } from "./lyrics.ts";
 import { onNewKey, Playback, SimplePlayer, StudioPlayer, TAKE_LEAD, type BackendMakers, type LaneId, type LaneState } from "./player.ts";
 import { barBeat, barSeconds, clockText, grid, toBars, toSeconds, type Grid } from "./time.ts";
 import { BLOCKER_TEXT, commitPlan, exportBlockers, IDLE, nextStep, recordBlockers, step, stopAction, stopSettled, takeEnded, type Effect, type Pending, type Transport, type TransportEvent } from "./transport.ts";
-import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, keyedBlock, pickAfterUndo, playbackKey, rulerGesture, scoreMarks, TAB_NAMES, visibleLanes } from "./view.ts";
-import type { BassMark, EditorTab, HitMark, LaneKind, ScreenFacts } from "./view.ts";
+import { beatKindOf, capTakes, chipText, dawKey, editorOpenAfter, editorTabs, factsOf, keyedBlock, pickAfterUndo, playbackKey, rulerGesture, TAB_NAMES, visibleLanes } from "./view.ts";
+import type { EditorTab, LaneKind, ScreenFacts } from "./view.ts";
 import { takeLabel } from "./words.ts";
 
 export const BAR_PX = 60;
+const PATTERN_LANE_PX = 44;
 const FALLBACK_BPM = 120;
 const FALLBACK_BARS = 64;
 const DEFAULT_LOOP_BARS = 4;
@@ -111,6 +113,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   let flip: FlipState | null = null;
   // the block picked on the beat lane by a click, which the block bar belongs to
   let picked: number | null = null;
+  // the clip picked in a pattern's lane; it owns Delete over the picked block
+  let clipSel: ClipPick | null = null;
   // a click right after a drag is not a pick
   let suppressClick = false;
   let beatLaneEl: HTMLElement | null = null;
@@ -125,7 +129,6 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   let g: Grid = grid(FALLBACK_BPM);
   let total = FALLBACK_BARS;
   let clips: Clip[] = [];
-  let marks: { bass: BassMark[]; drums: HitMark[] } = { bass: [], drums: [] };
   let places: LinePlace[] = [];
   let beatPeaks: PeakData | null = null;
   const takePeaks = new Map<string, PeakData | "loading" | "failed">();
@@ -250,6 +253,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     liveChanged: () => {
       if (ready && !scope.closed) paintTop();
     },
+    rackSwitched: () => {
+      if (!ready || scope.closed) return;
+      if (clipSel !== null && clipSel.pattern !== bottom.rackPattern) clipSel = null;
+      render();
+    },
     overlay: root,
   });
 
@@ -280,22 +288,20 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       g = grid(score.bpm);
       clips = ownClips(score);
       total = Math.max(1, clips.reduce((n, c) => n + c.bars, 0));
-      marks = scoreMarks(score);
     } else if (facts.beatKind === "flip" && (flipDraft.doc ?? flip?.draft)) {
       const doc = (flipDraft.doc ?? flip?.draft) as NonNullable<FlipState["draft"]>;
       // until the first render the beat plays the source itself, whose first bar starts at its downbeat
       g = grid(doc.grid.bpm, beatKindOf(reply.stations.beat) === "file" ? doc.grid.downbeat_s : 0);
       clips = flipClips(doc);
       total = Math.max(1, flipBars(doc.arrangement));
-      marks = { bass: [], drums: [] };
     } else {
       g = grid(analysis?.bpm ?? facts.bpm ?? FALLBACK_BPM, facts.beatKind === "file" ? (analysis?.downbeat_s ?? 0) : 0);
       const duration = beatPeaks?.duration ?? analysis?.duration_s ?? 0;
       clips = fileClips(g, duration, facts.beatKind === "flip" ? "флип" : "бит");
       total = duration > 0 ? Math.max(1, Math.ceil(toBars(g, duration) - 1e-6)) : FALLBACK_BARS;
-      marks = { bass: [], drums: [] };
     }
     if (picked !== null && (facts.beatKind === "file" || picked >= clips.length)) picked = null;
+    if (clipSel !== null && (facts.beatKind !== "own" || !score || !clipAlive(score, clipSel))) clipSel = null;
     const sections = lyric.map((p) => ({ kind: p.part ?? "", lines: p.lines.length }));
     places = placeLines(sections, total, lyricLayout());
   }
@@ -899,7 +905,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       if (flipDraft.undo(redo)) picked = pickAfterUndo(picked, bottom.ownBlock());
       return;
     }
-    if (bottom.undo(redo)) return;
+    if (bottom.undo(redo)) {
+      clipSel = null;
+      render();
+      return;
+    }
     if (!history) return;
     const to = redo ? history.redo() : history.undo();
     if (!to) return;
@@ -1099,18 +1109,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       } else if (kind === "beat") {
         headEls.push(head("beat", "Бит", beatSub(), "--beat", laneControls("beat")));
         laneEls.push(pickable(beatLane(view.beat), "beat"));
-      } else if (kind === "bass") {
-        headEls.push(head("bass", "808", "ноты", "--bass", []));
-        const el = lane("bass");
-        for (const c of clips) el.append(clipOf(c, block(c.fromBar, c.bars, "", "--bass", 60, (ctx, _w, hgt) => drawNotes(ctx, marks.bass, c.fromBar, c.bars, BAR_PX, hgt, color("--bass")))));
-        pickable(el, "bass");
-        laneEls.push(el);
-      } else if (kind === "drums") {
-        headEls.push(head("drums", "Барабаны", "удары", "--drum", []));
-        const el = lane("drums");
-        for (const c of clips) el.append(clipOf(c, block(c.fromBar, c.bars, "", "--drum", 60, (ctx, _w, hgt) => drawHits(ctx, marks.drums, c.fromBar, c.bars, BAR_PX, hgt, color("--drum")))));
-        pickable(el, "drums");
-        laneEls.push(el);
+      } else if (kind === "patterns") {
+        patternRows(headEls, laneEls);
       }
     }
     headList.replaceChildren(...headEls);
@@ -1134,6 +1134,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       if (suppressClick) return;
       const target = (e.target as HTMLElement).closest<HTMLElement>(".clip[data-clip]");
       if (!target || (facts.beatKind !== "own" && facts.beatKind !== "flip")) return;
+      if (e.altKey && kind === "beat" && facts.beatKind === "own") {
+        cutBlock(Number(target.dataset["clip"]), barOf(e));
+        return;
+      }
+      clipSel = null;
       picked = Number(target.dataset["clip"]);
       bottom.selectBlock(picked);
       editorOpen = true;
@@ -1185,6 +1190,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       return;
     }
     if (!bottom.editScore(out.score)) return;
+    // the sections moved under it: a picked clip may name another one now
+    clipSel = null;
     picked = out.selected;
     bottom.selectBlock(out.selected);
     rebuildModel();
@@ -1221,10 +1228,15 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     else flipBlocks((l) => moveBlock(l, i, dir));
   }
 
-  function cutBlock(i: number): void {
+  function cutBlock(i: number, pointerBar: number | null = hoverBar): void {
     const clip = clips[i];
-    if (!blocksEditable() || !clip || facts.beatKind !== "flip") return;
-    const at = splitAt(clip, hoverBar);
+    if (!blocksEditable() || !clip) return;
+    if (facts.beatKind === "own") {
+      ownSections((s) => splitSection(s, i, sectionCutAt(clip.fromBar, clip.bars, pointerBar)));
+      return;
+    }
+    if (facts.beatKind !== "flip") return;
+    const at = splitAt(clip, pointerBar);
     if (at === null) {
       say("Разрезать можно блок от двух тактов.");
       return;
@@ -1249,6 +1261,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       btn("▶", "Сдвинуть правее", () => stepBlock(i, 1), i === clips.length - 1),
       btn("Копия", "Копия после блока (Ctrl+D)", () => duplicateBlock(i)),
       ...(facts.beatKind === "flip" ? [btn("Разрезать", "Разрезать по такту под курсором, без него — посередине", () => cutBlock(i), (c.source?.toBar ?? 0) - (c.source?.fromBar ?? 0) < 2)] : []),
+      ...(facts.beatKind === "own" ? [btn("Разрезать", "Разрезать по такту под курсором, без него — посередине (Alt+клик по секции)", () => cutBlock(i), c.bars < 2)] : []),
       btn("Удалить", "Удалить блок (Delete)", () => removeBlock(i)),
     );
     bar.style.setProperty("left", `${c.fromBar * BAR_PX + 4}px`);
@@ -1457,6 +1470,206 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     return el;
   }
 
+  // ---------- the playlist of an own beat ----------
+  const barOf = (e: { clientX: number }): number => (e.clientX - inner.getBoundingClientRect().left) / BAR_PX;
+
+  const barsWord = (n: number): string => `${n} ${n === 1 ? "такт" : n < 5 ? "такта" : "тактов"}`;
+
+  function patternRows(headEls: HTMLElement[], laneEls: HTMLElement[]): void {
+    const s = score;
+    const names = s ? Object.keys(s.patterns) : [];
+    if (!s || !names.length) {
+      headEls.push(head("patterns", "Паттерны", s ? "нет: ＋ в «Каналах»" : "загружаю партитуру…", "--beat", [], { "data-pattern": "" }));
+      laneEls.push(lane("patterns", "lane--pat"));
+      return;
+    }
+    const shown = selected === "patterns" ? bottom.rackPattern : null;
+    const borders = clips.slice(1).map((c) => c.fromBar);
+    names.forEach((name, i) => {
+      const colour = patternColour(i);
+      const label = patternLabel(s, name, i);
+      const bars = s.patterns[name]?.bars ?? 1;
+      const sub = `${barsWord(bars)}${usage(s, name).length ? "" : " · не играет"}`;
+      const el = h(
+        "div",
+        { class: "head head--pat", "data-kind": "patterns", "data-pattern": name, "aria-selected": String(shown === name), title: `${label}: открыть в «Каналах»` },
+        h("span", { class: "head__color", "aria-hidden": "true" }),
+        h("div", { class: "head__name" }, label, h("small", {}, sub)),
+        h("div", { class: "head__ctl" }),
+      );
+      el.style.setProperty("--c", `var(${colour})`);
+      el.addEventListener("click", () => pickPattern(name, null));
+      headEls.push(el);
+      laneEls.push(patternLane(s, name, label, colour, borders));
+    });
+  }
+
+  function patternLane(s: Score, name: string, label: string, colour: string, borders: readonly number[]): HTMLElement {
+    const el = lane("patterns", "lane--pat");
+    el.dataset["pattern"] = name;
+    for (const at of borders) {
+      const line = h("i", { class: "secline", "aria-hidden": "true" });
+      line.style.setProperty("left", `${at * BAR_PX}px`);
+      el.append(line);
+    }
+    const marks = clipMarks(s, name);
+    for (const c of patternClips(s, name)) {
+      const section = s.sections[c.section]?.name ?? "";
+      if (c.fill) {
+        const mark = h("div", { class: "pfill", title: `Сбивка секции ${section}` }, "сб");
+        mark.style.setProperty("left", `${c.fromBar * BAR_PX + 1}px`);
+        mark.style.setProperty("width", `${BAR_PX - 2}px`);
+        mark.style.setProperty("--edge", `var(${colour})`);
+        el.append(mark);
+        continue;
+      }
+      const ink = color(colour);
+      const clip = block(c.fromBar, c.bars, label, colour, PATTERN_LANE_PX, (ctx, _w, hgt) => {
+        drawHits(ctx, marks.hits, c.fromBar, c.bars, BAR_PX, hgt, ink);
+        drawNotes(ctx, marks.notes, c.fromBar, c.bars, BAR_PX, hgt, ink);
+      });
+      const on = clipSel?.pattern === name && clipSel.section === c.section;
+      clip.classList.add("pclip");
+      clip.classList.toggle("pclip--on", on);
+      clip.dataset["section"] = String(c.section);
+      clip.title = `${label} · ${section}: клик — открыть, правый клик — убрать`;
+      clip.append(h("button", { class: "pclip__x", type: "button", title: "Убрать из секции", "aria-label": `Убрать ${label} из секции ${section}` }, "✕"));
+      el.append(clip);
+      if (on && transport.mode !== "recording") el.append(clipToolbar(s, name, c.section, c.fromBar));
+    }
+    el.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const clip = target.closest<HTMLElement>(".pclip");
+      if (!clip) return;
+      const section = Number(clip.dataset["section"]);
+      if (target.closest(".pclip__x")) removeClip(name, section);
+      else pickPattern(name, section);
+    });
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const clip = (e.target as HTMLElement).closest<HTMLElement>(".pclip");
+      if (clip) removeClip(name, Number(clip.dataset["section"]));
+    });
+    paintable(el, name);
+    return el;
+  }
+
+  function clipToolbar(s: Score, name: string, section: number, fromBar: number): HTMLElement {
+    const btn = (text: string, title: string, act: () => void, disabled = false): HTMLButtonElement => {
+      const b = h("button", { class: "clipbar__btn", type: "button", title, "aria-label": title, disabled }, text);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        act();
+      });
+      return b;
+    };
+    const shared = usage(s, name).length > 1;
+    const bar = h(
+      "div",
+      { class: "clipbar", role: "toolbar", "aria-label": "Клип паттерна" },
+      btn("Сделать уникальной", shared ? "Своя копия паттерна для этой секции" : "Паттерн играет только здесь", () => uniqueClip(name, section), !shared),
+      btn("Убрать", "Убрать паттерн из секции (Delete)", () => removeClip(name, section)),
+    );
+    bar.style.setProperty("left", `${fromBar * BAR_PX + 4}px`);
+    bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+    return bar;
+  }
+
+  // the playlist edits wait for the score and stay away from a take being recorded
+  function playlistReady(): boolean {
+    if (transport.mode === "recording") {
+      say("Во время записи бит не правится.");
+      return false;
+    }
+    if (!bottom.score) {
+      say("Партитура ещё грузится.");
+      return false;
+    }
+    return true;
+  }
+
+  // a pattern opened from its head, or a clip of it picked: the rack shows it
+  function pickPattern(name: string, section: number | null): void {
+    if (section === null) {
+      clipSel = null;
+      bottom.showPattern(name);
+    } else {
+      clipSel = { pattern: name, section };
+      bottom.selectClip(name, section);
+    }
+    picked = null;
+    tab = "rack";
+    editorOpen = true;
+    select("patterns");
+    render();
+  }
+
+  function removeClip(name: string, section: number): void {
+    if (!playlistReady()) return;
+    if (clipSel?.pattern === name && clipSel.section === section) clipSel = null;
+    if (!bottom.clearClip(name, section)) render();
+  }
+
+  function uniqueClip(name: string, section: number): void {
+    if (!playlistReady()) return;
+    const made = bottom.uniqueClip(name, section);
+    if (made === null) return;
+    clipSel = { pattern: made, section };
+    render();
+  }
+
+  // a press on an empty cell paints the pattern there; a drag paints every section it covers, in one step
+  function paintable(el: HTMLElement, name: string): void {
+    el.addEventListener("pointerdown", (e: PointerEvent) => {
+      if (e.button !== 0 || (e.target as HTMLElement).closest(".pclip, .clipbar")) return;
+      const s = bottom.score;
+      if (!s || transport.mode === "recording") {
+        playlistReady();
+        return;
+      }
+      const from = sectionAtBar(s, barOf(e));
+      if (from === null) return;
+      e.preventDefault();
+      const doc = el.ownerDocument;
+      const box = h("div", { class: "pghosts", "aria-hidden": "true" });
+      el.append(box);
+      let range = [from];
+      const show = (): void => {
+        const plan = paintSections(s, name, range);
+        const cell = (section: number, refused: boolean): HTMLElement => {
+          const c = clips[section];
+          const ghost = h("div", { class: `clip-ghost${refused ? " clip-ghost--refused" : ""}` });
+          ghost.style.setProperty("left", `${(c?.fromBar ?? 0) * BAR_PX}px`);
+          ghost.style.setProperty("width", `${(c?.bars ?? 1) * BAR_PX}px`);
+          return ghost;
+        };
+        box.replaceChildren(...plan.painted.map((i) => cell(i, false)), ...plan.refused.map((r) => cell(r.section, true)));
+      };
+      show();
+      const move = (ev: PointerEvent): void => {
+        const next = dragSections(s, from, barOf(ev));
+        if (next.length === range.length && next[0] === range[0]) return;
+        range = next;
+        show();
+      };
+      const end = (): void => {
+        doc.removeEventListener("pointermove", move);
+        doc.removeEventListener("pointerup", up);
+        doc.removeEventListener("pointercancel", end);
+        box.remove();
+      };
+      const up = (ev: PointerEvent): void => {
+        end();
+        range = dragSections(s, from, barOf(ev));
+        if (!playlistReady()) return;
+        bottom.paintPattern(name, range);
+      };
+      doc.addEventListener("pointermove", move);
+      doc.addEventListener("pointerup", up);
+      doc.addEventListener("pointercancel", end);
+    });
+  }
+
   function paintTakeButtons(): void {
     for (const b of headList.querySelectorAll<HTMLElement>(".tplay")) b.setAttribute("aria-pressed", String(b.dataset["take"] === takePlayer.name));
   }
@@ -1491,10 +1704,15 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     if (!tab || !tabs.includes(tab)) tab = tabs[0] ?? null;
     for (const el of headList.querySelectorAll<HTMLElement>(".head[aria-selected]")) el.setAttribute("aria-selected", String(el.dataset["kind"] === kind));
     paintEditor();
+    // a clip picked stays with the pattern lanes: Delete elsewhere must not take it
+    if (kind !== "patterns" && clipSel !== null) {
+      clipSel = null;
+      render();
+    }
   }
 
   function paintEditor(): void {
-    const names: Record<LaneKind, string> = { text: "Текст", voice: "Голос", takes: "Голос", beat: "Бит", bass: "808", drums: "Барабаны" };
+    const names: Record<LaneKind, string> = { text: "Текст", voice: "Голос", takes: "Голос", beat: "Бит", bass: "808", drums: "Барабаны", patterns: "Паттерны" };
     editor.classList.toggle("collapsed", !editorOpen || selected === null);
     collapse.hidden = selected === null;
     collapse.textContent = editorOpen ? "свернуть ▾" : "развернуть ▴";
@@ -1780,6 +1998,13 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     if (e.defaultPrevented || modal) return;
     const action = dawKey(e, typing(e.target));
     if (!action) return;
+    if (action === "deselect") {
+      if (clipSel === null) return;
+      e.preventDefault();
+      clipSel = null;
+      render();
+      return;
+    }
     // a focused button would take Space as a click too
     e.preventDefault();
     switch (action) {
@@ -1810,8 +2035,10 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       case "delete":
         // a Delete inside the editor belongs to what is edited there, a roll note
         {
-          const at = keyedBlock(selected, picked, clips.length);
-          if (at !== null && !editor.contains(e.target as Node | null) && !bottom.notePicked) removeBlock(at);
+          if (editor.contains(e.target as Node | null) || bottom.notePicked) return;
+          const at = deleteTarget(clipSel, facts.beatKind === "own" ? bottom.score : null, selected, picked, clips.length);
+          if (at?.kind === "clip") removeClip(at.pattern, at.section);
+          else if (at?.kind === "section") removeBlock(at.index);
         }
         return;
     }

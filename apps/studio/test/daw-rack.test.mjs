@@ -192,7 +192,7 @@ test("a click on a sound the pattern has no row for makes the row, then sets the
 test("a row another pattern of the same section holds is refused with the reason", () => {
   const s = score();
   const made = rackStep(s, SPECS, "a", "hat", 0, "click", 0);
-  assert.deepEqual(made, { ok: false, reason: "В секции verse звук hat уже играет паттерн d." });
+  assert.deepEqual(made, { ok: false, reason: "В секции verse звук hat уже играет «Паттерн 4 · verse»." });
   assert.equal(lockedText(s, "d"), "в паттерне 4 · verse");
   assert.equal(lockedText(s, "c"), "в паттерне 1");
   // with no instrument list the sound's kind is unknown and no row is made

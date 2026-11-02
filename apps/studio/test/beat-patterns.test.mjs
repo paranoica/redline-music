@@ -397,9 +397,12 @@ test("placePattern adds a pattern to a section's play when its bars fit and its 
   assert.deepEqual(ok(placePattern(s, "drums", 0, true)).score, s);
 });
 
+// a pattern as a refusal names it: as the page shows it
+const shown = (s, p) => patternLabel(s, p, Object.keys(s.patterns).indexOf(p));
+
 test("placePattern refuses a sound another played pattern has, naming both, and bars that do not fit", () => {
   const s = base();
-  refused(pure(s, (x) => placePattern(x, "alt", 0, true)), "drums", "kick");
+  refused(pure(s, (x) => placePattern(x, "alt", 0, true)), shown(s, "drums"), "kick");
   // a four-bar pattern in the two-bar last section
   refused(placePattern(s, "lead", 2, true), "lead");
   refused(placePattern(s, "nothing", 0, true));
@@ -555,9 +558,9 @@ test("ensureRow: a fill may share sounds with the patterns of its section", () =
 
 test("ensureRow refuses a sound another pattern of a shared section has, naming that pattern", () => {
   const s = base();
-  refused(pure(s, (x) => ensureRow(x, SPECS, "lead", "bass")), "low");
-  refused(ensureRow(s, SPECS, "low", "keys"), "lead");
-  refused(ensureRow(s, SPECS, "lead", "snare"), "drums");
+  refused(pure(s, (x) => ensureRow(x, SPECS, "lead", "bass")), shown(s, "low"));
+  refused(ensureRow(s, SPECS, "low", "keys"), shown(s, "lead"));
+  refused(ensureRow(s, SPECS, "lead", "snare"), shown(s, "drums"));
   refused(ensureRow(s, SPECS, "nothing", "kick"));
   refused(ensureRow(s, SPECS, "alt", "nothing"));
   const odd = base();
