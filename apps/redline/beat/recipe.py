@@ -252,8 +252,8 @@ BASS_STYLES = {
     "constant_glide": (
         Device(
             "the 808 slides almost all the time: most notes overlap the next, slides of 2 to 12 "
-            "semitones and octave drops; it is the hook's melody, so the general advice to "
-            "glide sparingly does not apply",
+            "semitones and octave drops; it is the melody of the main sections, so the "
+            "general advice to glide sparingly does not apply",
             BLOG,
         ),
         (("decay", 4.0), ("drive", 0.5), ("glide_ms", 160.0)),
@@ -406,10 +406,11 @@ NEEDS = {
 CLASHES = {
     "glide_sparingly": ("constant_glide", "lead_808", "blown_out", "short_sub", "kick_double"),
     "hat_rolls": ("triplet_hats",),
-    "bass_answers": ("kick_double", "lead_808", "constant_glide"),
+    "bass_answers": ("kick_double", "lead_808", "constant_glide", "short_sub", "staccato_slides"),
 }
 ALL_DEVICES = tuple(DEVICES)
 NO_ROLLS = tuple(d for d in ALL_DEVICES if d not in ("hat_rolls", "glide_sparingly"))
+NO_SPARING_GLIDE = tuple(d for d in ALL_DEVICES if d != "glide_sparingly")
 ALL_CHARACTER = tuple(CHARACTER)
 CALM_CHARACTER = tuple(
     c for c in ALL_CHARACTER if c not in ("triplet_hats", "pitched_rolls", "chopped_lead")
@@ -562,7 +563,7 @@ GENRES: dict[str, Genre] = {
         structures=(DRILL,),
         hats_per_bar=(4, 24),
         kicks_per_bar=(1, 6),
-        devices=ALL_DEVICES,
+        devices=NO_SPARING_GLIDE,
         bass_styles=("staccato_slides", "constant_glide"),
         character=ALL_CHARACTER,
         source=BLOG,
@@ -664,7 +665,7 @@ GENRES: dict[str, Genre] = {
         leads=(STRINGS, PIANO, HARP, FM_KEYS, VIBES, GLOCK),
         extras=(SAMPLE, RIM, OPEN_HAT),
         hats="simple soft eighths with an occasional roll or triplet",
-        bass="a soft 808 or sine sub, understated, a glide for flair",
+        bass="a soft 808 or sine sub, understated",
         kick="a soft deep kick, snare or clap on 2 and 4",
         modes=("major", "minor", "lydian", "dorian"),
         structures=(LOOP, SHORT_INTRO),
@@ -704,7 +705,7 @@ GENRES: dict[str, Genre] = {
         leads=(PIANO, EPIANO, VIBES, CELLO_PIZZ, HARP, FM_KEYS),
         extras=(SAMPLE, RIM, OPEN_HAT),
         hats="straight eighths with swing, an open hat on the 'and' of 2 or 4",
-        bass="a short bass right after the kick in C1..C2; little glide",
+        bass="a short bass right after the kick in C1..C2, no glide",
         kick="kicks on beat 1, the 'and' of 2, sometimes beat 3, a ghost on the 'and' of 4; "
         "snare on 2 and 4, in the verses with ghost snares (0.5-0.6) on the 16ths before them",
         modes=("minor", "dorian"),
