@@ -92,8 +92,9 @@ above G3 (counting its `tune`), a bar count outside the recipe's range, a tempo 
 recipe's, a library that is not in the manifest.
 
 Warnings never refuse; they go into the next request and onto the page: hit density per genre,
-the same bar repeated more than eight times, the same set of sounds for more than eight bars, a
-kick within 10 ms of an 808 note start. Each says where its limit comes from: production blogs,
+the same bar repeated more than eight times, the same set of sounds for more than eight bars,
+an 808 off the kick (fewer than half the kicks that land on a playing 808 start a note within
+20 ms of it). Each says where its limit comes from: production blogs,
 unverified, or our own choice.
 
 Genres: trap, dark_trap, rage, plugg, pluggnb, uk_drill, ny_drill, chicago_drill, jersey_club,

@@ -281,7 +281,7 @@ BASS_STYLES = {
         (("decay", 0.6), ("drive", 0.3)),
     ),
     "short_sub": (
-        Device("a short round sub (decay under 0.6 s) right after the kick, no glide", BLOG),
+        Device("a short round sub (decay under 0.6 s) starting with the kick, no glide", BLOG),
         (("decay", 0.5), ("drive", 0.05), ("tone", 600.0)),
     ),
     "blown_out": (
@@ -451,8 +451,8 @@ GENRES: dict[str, Genre] = {
         extras=(OPEN_HAT, CLAP, PAD, RIM, SAMPLE, CRASH, BLOCK),
         hats="eighths or sixteenths; the last two hats of a phrase become a 32nd or triplet "
         "roll with its middle hits softer; one open hat off the beat, choked",
-        bass="the 808 follows the melody's roots, mostly within an octave: notes just after "
-        "the kicks plus a few in the gaps",
+        bass="the 808 follows the melody's roots, mostly within an octave: a note on every "
+        "kick plus a few in the gaps",
         kick="kick on step 0 and one or two syncopated hits (around steps 6, 10 or 14); snare "
         "or clap on beat 3",
         modes=("minor", "harmonic_minor", "phrygian"),
@@ -593,8 +593,8 @@ GENRES: dict[str, Genre] = {
         extras=(SAMPLE, PAD, OPEN_HAT, CLAP, TOM, CRASH),
         hats="a bouncy pattern with holes, triplet rolls with velocity changes, sparse open hats",
         bass="sliding 808 that answers the melody, a slide on every 4th or 8th note, short decay",
-        kick="the drill two-bar pocket with more kicks after the snare; a kick just before an 808 "
-        "note, never on its start",
+        kick="the drill two-bar pocket with more kicks after the snare; a kick on or just before "
+        "each 808 note start",
         modes=("minor", "harmonic_minor", "phrygian"),
         structures=(DRILL,),
         hats_per_bar=(4, 24),
@@ -655,7 +655,7 @@ GENRES: dict[str, Genre] = {
         leads=(FM_BELL, PIANO, STRINGS, TUBULAR, VOX_LEAD, FM_BRASS),
         extras=(OPEN_HAT, RIM, CLAP, PAD, SAMPLE, CHOIR),
         hats="simple swung eighths, one open hat accent, a 32nd or triplet burst into the snare",
-        bass="an 808 note right after most kicks, mostly the root, octave glides, distorted",
+        bass="an 808 note on every kick, mostly the root, octave glides, distorted",
         kick="kick on step 0 with one or two syncopated hits; snare on 2 and 4, the clap a few ms "
         "late",
         modes=("minor", "phrygian"),
@@ -741,7 +741,7 @@ GENRES: dict[str, Genre] = {
         leads=(PIANO, EPIANO, VIBES, CELLO_PIZZ, HARP, FM_KEYS, FLUTE, FM_BRASS),
         extras=(SAMPLE, RIM, OPEN_HAT, SHAKER, BLOCK),
         hats="straight eighths with swing, an open hat on the 'and' of 2 or 4",
-        bass="a short bass right after the kick in C1..C2, no glide",
+        bass="a short bass starting with the kick in C1..C2, no glide",
         kick="kicks on beat 1, the 'and' of 2, sometimes beat 3, a ghost on the 'and' of 4; "
         "snare on 2 and 4, in the verses with ghost snares (0.5-0.6) on the 16ths before them",
         modes=("minor", "dorian"),

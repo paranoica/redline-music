@@ -30,9 +30,10 @@ SNARE = "........x......."
 HAT = "x.x.x.x.x.x.x.x."
 # the open hat only in the last bar of 8, so which sounds play changes every 8 bars
 OPEN_LAST = "." * 16 * 7 + ".............x.."
+# on the two kicks of KICK
 BASS = [
-    {"step": 2, "len": 6, "note": "A1", "vel": 0.9},
-    {"step": 10, "len": 4, "note": "E2", "vel": 0.8},
+    {"step": 0, "len": 6, "note": "A1", "vel": 0.9},
+    {"step": 6, "len": 4, "note": "E2", "vel": 0.8},
 ]
 BELL = [
     {"step": 0, "len": 4, "note": "A4", "vel": 0.7},
@@ -256,14 +257,18 @@ def test_a_move_that_speaks_of_hooks_or_verses_needs_them():
             assert spoken <= set(NEEDS.get(name, ())), name
 
 
-def test_only_an_808_style_that_doubles_the_kick_asks_for_the_808_on_it():
+def test_no_text_puts_the_808_after_the_kick():
     texts = [(name, device.text) for name, (device, _) in BASS_STYLES.items()]
     texts += [(name, spec.bass) for name, spec in GENRES.items()]
     texts += [(name, spec.kick) for name, spec in GENRES.items()]
     for name, text in texts:
-        if name == "kick_double":
-            continue
-        for words in ("under the kick", "on every kick", "alongside"):
+        for words in (
+            "after the kick",
+            "after each kick",
+            "after most kicks",
+            "just after",
+            "never on",
+        ):
             assert words not in text, (name, words)
 
 
@@ -475,37 +480,93 @@ def test_the_same_bar_8_times_is_not_a_warning():
     assert warnings_of(body) == ()
 
 
-def test_a_kick_on_an_808_note_start_is_a_warning():
+def off_kick(body, recipe=None):
+    return [w for w in warnings_of(body, recipe) if w.kind == "off_kick"]
+
+
+def test_808_notes_after_the_kicks_are_a_warning_with_the_bars():
     body = score()
-    body["patterns"]["groove"]["rows"]["kick"] = "x.x...x........." * 8
-    warned = [w for w in warnings_of(body) if w.kind == "clash"]
-    assert len(warned) == 1
-    assert warned[0].source == "blog, unverified"
+    body["patterns"]["low"]["rows"]["bass"] = [
+        {"step": 2, "len": 6, "note": "A1", "vel": 0.9},
+        {"step": 10, "len": 4, "note": "E2", "vel": 0.8},
+    ]
+    (warned,) = off_kick(body)
+    assert warned.source == "blog, unverified"
+    assert warned.message.startswith("0 of 48 kicks under the 808 start an 808 note")
+    assert warned.where == "bars 1, 2, 3, 4, 5, 6, 7, 8 ..."
 
 
-def test_an_808_style_that_doubles_the_kick_is_no_clash_and_others_still_are():
+def test_808_notes_on_the_kicks_with_more_in_the_gaps_are_no_warning():
     body = score()
-    body["patterns"]["groove"]["rows"]["kick"] = "x.x...x........." * 8
-    doubling = replace(trap(), bass_style="kick_double")
-    assert "clash" not in kinds(warnings_of(body, doubling))
-    assert "clash" in kinds(warnings_of(body, replace(trap(), bass_style="clean_long")))
+    body["patterns"]["low"]["rows"]["bass"] = [
+        {"step": 0, "len": 3, "note": "A1", "vel": 0.9},
+        {"step": 3, "len": 3, "note": "C2", "vel": 0.7},
+        {"step": 6, "len": 6, "note": "E2", "vel": 0.8},
+        {"step": 12, "len": 4, "note": "G1", "vel": 0.7},
+    ]
+    assert off_kick(body) == []
 
 
-@pytest.mark.parametrize(("bass_swing", "clash"), [(52, True), (55, False)])
-def test_a_clash_is_a_kick_within_10_ms_of_the_808(bass_swing, clash):
-    # at 140 BPM the 808's own swing moves its odd-step note 4.3 ms (52) or 10.7 ms (55) late
+def test_half_the_kicks_on_the_808_is_no_warning_and_fewer_is():
+    body = score()
+    # kick 0 starts the 808, kick 6 lands inside its long note
+    body["patterns"]["low"]["rows"]["bass"] = [{"step": 0, "len": 12, "note": "A1", "vel": 0.9}]
+    assert off_kick(body) == []
+    body["patterns"]["groove"]["rows"]["kick"] = "x.....x...x....." * 8
+    assert len(off_kick(body)) == 1
+
+
+def test_kicks_where_the_808_rests_do_not_count():
+    body = score()
+    # a short 808 on kick 0; kicks 6 and 10 land after it has stopped
+    body["patterns"]["low"]["rows"]["bass"] = [{"step": 0, "len": 2, "note": "A1", "vel": 0.9}]
+    body["patterns"]["groove"]["rows"]["kick"] = "x.....x...x....." * 8
+    assert off_kick(body) == []
+    body["sections"][0]["play"] = ["groove", "melody"]
+    assert off_kick(body) == []
+
+
+def test_an_808_half_a_beat_after_the_kick_follows_it_and_later_is_a_gap_note():
+    body = score()
+    body["patterns"]["groove"]["rows"]["kick"] = "x..............." * 8
+    body["patterns"]["low"]["rows"]["bass"] = [{"step": 2, "len": 2, "note": "A1", "vel": 0.9}]
+    assert len(off_kick(body)) == 1
+    body["patterns"]["low"]["rows"]["bass"] = [{"step": 3, "len": 2, "note": "A1", "vel": 0.9}]
+    assert off_kick(body) == []
+
+
+def test_a_kick_roll_is_one_kick():
+    body = score()
+    body["patterns"]["groove"]["rows"]["kick"] = "x.....4........." * 8
+    assert off_kick(body) == []
+
+
+def test_a_note_held_into_the_next_bar_makes_its_kicks_count():
+    body = score()
+    body["patterns"]["low"] = {
+        "bars": 2,
+        "rows": {"bass": [{"step": 0, "len": 32, "note": "A1", "vel": 0.9}]},
+    }
+    # 24 bars of 2 kicks; only kick 0 of every other bar starts the note, the rest fall inside it
+    (warned,) = off_kick(body)
+    assert warned.message.startswith("12 of 48 kicks")
+
+
+@pytest.mark.parametrize(("bass_swing", "warned"), [(59, False), (60, True)])
+def test_an_808_within_20_ms_of_the_kick_is_on_it(bass_swing, warned):
+    # at 140 BPM the 808's own swing moves its odd-step note 19.3 ms (59) or 21.4 ms (60) late
     body = score()
     body["sounds"]["kick"]["swing"] = 50
     body["sounds"]["bass"]["swing"] = bass_swing
-    body["patterns"]["groove"]["rows"]["kick"] = "x..x..x........." * 8
+    body["patterns"]["groove"]["rows"]["kick"] = "...x............" * 8
     body["patterns"]["low"]["rows"]["bass"] = [{"step": 3, "len": 4, "note": "A1", "vel": 0.9}]
-    assert ("clash" in kinds(warnings_of(body))) == clash
+    assert bool(off_kick(body)) == warned
 
 
-def test_a_kick_well_off_an_808_note_is_no_clash():
+def test_an_808_style_that_doubles_the_kick_is_held_to_the_kick_too():
     body = score()
-    body["patterns"]["groove"]["rows"]["kick"] = "x..x..x........." * 8
-    assert "clash" not in kinds(warnings_of(body))
+    body["patterns"]["low"]["rows"]["bass"] = [{"step": 2, "len": 8, "note": "A1", "vel": 0.9}]
+    assert off_kick(body, replace(trap(), bass_style="kick_double"))
 
 
 def test_more_than_8_bars_with_the_same_sounds_is_a_warning():

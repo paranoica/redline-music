@@ -1,7 +1,7 @@
 """A playable first score for a new own beat, written without the agent.
 
 The owner builds the beat from it on the page: two bars of drums in the genre's habit, an 808
-on the key's root just after each kick, an empty melody pattern on the lead, and the recipe's
+on the key's root starting with each kick, an empty melody pattern on the lead, and the recipe's
 sections. It is a starting point, not a finished beat.
 """
 
@@ -47,8 +47,6 @@ FAMILY_OF = {
     "cloud": "straight",
     "memphis": "straight",
 }
-# the steps of the two bars the 808 starts on, and how long it holds
-BASS_NOTES = ((2, 6), (12, 4), (18, 6), (28, 4))
 # the roles a recipe's sound names play in the starter, first match wins
 ROLES = {"kick": ("kick",), "snare": ("snare", "clap"), "hat": ("hat",), "open_hat": ("open_hat",)}
 
@@ -78,12 +76,18 @@ def starter_score(recipe: Recipe) -> dict[str, Any]:
         raise ValueError(f"recipe of seed {recipe.seed} has no 808 to start from")
     # the root in the 808's lowest octave: C1..B1, MIDI 24..35
     root = _note(24 + tonic)
+    kick = "".join(family["kick"])
+    kicks = [i for i, c in enumerate(kick) if c != "."]
+    lengths = [b - a for a, b in zip(kicks, [*kicks[1:], len(kick)], strict=True)]
     patterns: dict[str, Any] = {
         "drums": {"bars": 2, "rows": rows},
         "bass": {
             "bars": 2,
             "rows": {
-                bass: [{"step": s, "len": n, "note": root, "vel": 0.9} for s, n in BASS_NOTES]
+                bass: [
+                    {"step": s, "len": n, "note": root, "vel": 0.9}
+                    for s, n in zip(kicks, lengths, strict=True)
+                ]
             },
         },
     }

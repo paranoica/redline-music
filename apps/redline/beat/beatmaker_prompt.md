@@ -105,8 +105,10 @@ run past the pattern's end (`step + len` ≤ 16 × `bars`). At most 512 notes a 
 - Verses are thinner than hooks: fewer sounds or simpler patterns, so the hook lifts.
 - Drop the 808 (or most of the beat) for the bar before a hook, so the hook lands.
 - Glide the 808 at phrase ends, not on every note, unless the 808 style says otherwise.
-- Keep kick and 808 note starts apart, or let one replace the other; a kick on an 808 start
-  muddies the low end. An 808 style that doubles the kick is the exception.
+- Start an 808 note on most kicks: the kick's click on the 808's body is the sound. Add a few
+  808 notes in the gaps between kicks, and duck the 808 a few dB from the kick. A kick that
+  lands inside a held 808 note, with no new note, sounds off the beat; fewer than half the
+  kicks under the 808 starting a note comes back as a warning.
 - Hat rolls belong at phrase ends; velocity and ghost notes keep hats from sounding stiff.
 - Write the melody in the key; let it leave space for a vocal in the verses.
 
@@ -137,10 +139,12 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
    "open_hat": "......x.........|......x........."
   }},
   "low": {"bars": 2, "rows": {"bass": [
-   {"step": 2, "len": 10, "note": "A1", "vel": 0.9},
-   {"step": 10, "len": 6, "note": "E2", "vel": 0.9},
-   {"step": 18, "len": 8, "note": "C2", "vel": 0.9},
-   {"step": 28, "len": 4, "note": "G1", "vel": 0.8}
+   {"step": 0, "len": 6, "note": "A1", "vel": 0.9},
+   {"step": 6, "len": 6, "note": "A1", "vel": 0.9},
+   {"step": 12, "len": 6, "note": "E2", "vel": 0.7},
+   {"step": 16, "len": 10, "note": "C2", "vel": 0.9},
+   {"step": 26, "len": 3, "note": "G1", "vel": 0.8},
+   {"step": 29, "len": 3, "note": "G1", "vel": 0.8}
   ]}},
   "melody": {"bars": 2, "rows": {"bell": [
    {"step": 0, "len": 4, "note": "E5", "vel": 0.7},
@@ -176,8 +180,9 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
 ```
 
 In the hook the fill `turn` replaces the 8th bar for the hat, the snare and the bass (its empty
-note list silences the 808 there); kick, open hat and bell play on. The bass notes at steps 2
-and 10 overlap (2 + 10 > 10), so the 808 glides from A1 to E2.
+note list silences the 808 there); kick, open hat and bell play on. Every 808 note but one
+starts with a kick; the one at step 12 fills the gap and overlaps the next (12 + 6 > 16), so
+the 808 glides from E2 to C2.
 
 ## Your answer
 

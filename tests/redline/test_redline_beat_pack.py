@@ -548,9 +548,10 @@ def test_a_pack_kit_score_is_checked_like_a_synthesised_one(tmp_path, monkeypatc
         known = {s.library for s in recipe.sounds if s.library}
         return {w.kind for w in check_score(json.dumps(body(kick)), recipe, known).warnings}
 
-    # a recorded kick on the recorded 808's start is still a clash, and a busy one too dense
-    assert "clash" in kinds("x...............")
-    assert "clash" not in kinds("..x.............")
+    # a recorded kick counts as a kick: on the 808's start it is on, inside the note it is off;
+    # a busy one is too dense
+    assert "off_kick" not in kinds("x...............")
+    assert "off_kick" in kinds("..x.............")
     assert "density" in kinds("xxxxxxxxxxxxxxxx")
 
 

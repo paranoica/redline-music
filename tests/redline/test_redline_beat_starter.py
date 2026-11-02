@@ -33,11 +33,19 @@ def test_the_intro_plays_the_808_alone_and_the_808_sits_on_the_root_in_its_octav
     assert score["patterns"]["melody"]["rows"] == {"lead": []}
 
 
-def test_the_808_starts_just_after_each_kick_not_on_it():
-    recipe = make_recipe(4, genre="trap")
+@pytest.mark.parametrize("genre", sorted(GENRES))
+def test_the_808_starts_on_each_kick(genre):
+    recipe = make_recipe(4, genre=genre)
     score = starter_score(recipe)
-    kinds = {w.kind for w in check_score(json.dumps(score), recipe, set()).warnings}
-    assert "clash" not in kinds
+    kick = score["patterns"]["drums"]["rows"]["kick"].replace("|", "")
+    kicks = [i for i, c in enumerate(kick) if c != "."]
+    notes = score["patterns"]["bass"]["rows"]["bass"]
+    assert [n["step"] for n in notes] == kicks
+    # each note holds to the next kick, the last to the end of the pattern
+    assert [n["step"] + n["len"] for n in notes] == [*kicks[1:], len(kick)]
+    known = {s.library for s in recipe.sounds if s.library}
+    kinds = {w.kind for w in check_score(json.dumps(score), recipe, known).warnings}
+    assert "off_kick" not in kinds
 
 
 def test_a_pack_starter_plays_the_packs_drums_and_808(tmp_path):

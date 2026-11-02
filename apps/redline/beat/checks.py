@@ -21,11 +21,12 @@ from redline.beat.recipe import BLOG, LETTERS, OWN, Recipe, parse_key, scale
 RATE = 48000.0
 BPM_SLACK = 0.5
 BASS_RANGE = (24, 55)
-CLASH_S = 0.010
+# an 808 note this close to a kick starts with it
+ON_KICK_S = 0.020
+# the least share of kicks under the 808 that start a note of it
+ON_KICK_SHARE = 0.5
 # the 808s: synthesised and recorded
 BASSES = ("bass808", "sample808")
-# 808 styles that put the 808 on the kick on purpose
-DOUBLING = ("kick_double",)
 MAX_SAME = 8
 HATS = ("hat_closed", "hat_open", "oneshot_hat", "oneshot_open_hat")
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d{1,2})")
@@ -279,26 +280,43 @@ def _repeats(table: _Table) -> list[Caution]:
     return out
 
 
-def _clashes(table: _Table, recipe: Recipe) -> list[Caution]:
-    if recipe.bass_style in DOUBLING:
-        return []
-    starts = sorted(e["start"] for e in table.of(BASSES) if e["legato_from"] is None)
-    near = CLASH_S * RATE
-    bars = []
+def _off_kick(table: _Table) -> list[Caution]:
+    notes = table.of(BASSES)
+    starts = sorted(e["start"] for e in notes)
+    # a note sounds to its written end; a one-shot 808 played as a drum to where it is cut
+    spans = [
+        (e["start"], e["off"] if e["off"] is not None else e["end"])
+        for e in notes
+        if e["off"] is not None or e["end"] is not None
+    ]
+    near = ON_KICK_S * RATE
+    # an 808 note starting this soon after a kick follows it instead of landing with it
+    late = table.step * 2 + near
+    on = 0
+    off_bars = []
     for kick in table.of(("kick",)):
-        i = bisect_left(starts, kick["start"] - near)
-        if i < len(starts) and starts[i] <= kick["start"] + near:
-            bars.append(kick["bar"] + 1)
-    if not bars:
+        if kick["roll"] > 0:
+            continue
+        at = kick["start"]
+        i = bisect_left(starts, at - near)
+        if i < len(starts) and starts[i] <= at + near:
+            on += 1
+        elif any(start <= at < stop for start, stop in spans) or (
+            i < len(starts) and starts[i] <= at + late
+        ):
+            off_bars.append(kick["bar"] + 1)
+    counted = on + len(off_bars)
+    if not counted or on >= ON_KICK_SHARE * counted:
         return []
-    shown = ", ".join(map(str, sorted(set(bars))[:SHOWN_BARS]))
-    more = " ..." if len(set(bars)) > SHOWN_BARS else ""
+    bars = sorted(set(off_bars))
+    shown = ", ".join(map(str, bars[:SHOWN_BARS]))
+    more = " ..." if len(bars) > SHOWN_BARS else ""
     return [
         Caution(
-            "clash",
+            "off_kick",
             f"bars {shown}{more}",
-            f"a kick starts within {CLASH_S * 1000:g} ms of an 808 note {len(bars)} times; "
-            "move the kick or the note",
+            f"{on} of {counted} kicks under the 808 start an 808 note; start the 808 on most "
+            "kicks, extra notes in the gaps",
             BLOG,
         )
     ]
@@ -338,6 +356,4 @@ def check_score(
     if not rust_ok:
         return Checked(tuple(errors), ())
     table = _Table(score_json, body, catalog)
-    return Checked(
-        tuple(errors), (*_density(table, recipe), *_repeats(table), *_clashes(table, recipe))
-    )
+    return Checked(tuple(errors), (*_density(table, recipe), *_repeats(table), *_off_kick(table)))

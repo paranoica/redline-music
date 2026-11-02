@@ -32,9 +32,9 @@ export function warningText(w: WarningLike): string {
       m = /^the same sounds \((.*)\) play for (\d+) bars/.exec(w.message);
       if (m) return `одни и те же звуки (${m[1]}) ${m[2]} тактов подряд — вводи или убирай звук хотя бы раз в 8 тактов`;
       break;
-    case "clash":
-      m = /^a kick starts within ([\d.]+) ms of an 808 note (\d+) times/.exec(w.message);
-      if (m) return `бочка ближе ${m[1]} мс к началу ноты 808 — ${m[2]} ${times(Number(m[2]))}; сдвинь бочку или ноту`;
+    case "off_kick":
+      m = /^(\d+) of (\d+) kicks under the 808 start an 808 note/.exec(w.message);
+      if (m) return `808 начинается с бочкой только ${m[1]} ${times(Number(m[1]))} из ${m[2]} — ставь ноту 808 на большинство бочек, дополнительные ноты — в паузы`;
       break;
   }
   return w.message;

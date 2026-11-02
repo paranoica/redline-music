@@ -555,8 +555,8 @@ test("the check's warnings read in Russian; what the page does not know stays as
     "одни и те же звуки (bass, hat) 15 тактов подряд — вводи или убирай звук хотя бы раз в 8 тактов",
   );
   assert.equal(
-    warningText({ kind: "clash", where: "bars 3, 5", message: "a kick starts within 30 ms of an 808 note 4 times; move the kick or the note", source: "blog, unverified" }),
-    "бочка ближе 30 мс к началу ноты 808 — 4 раза; сдвинь бочку или ноту",
+    warningText({ kind: "off_kick", where: "bars 3, 5", message: "2 of 12 kicks under the 808 start an 808 note; start the 808 on most kicks, extra notes in the gaps", source: "blog, unverified" }),
+    "808 начинается с бочкой только 2 раза из 12 — ставь ноту 808 на большинство бочек, дополнительные ноты — в паузы",
   );
   // a known kind with a message of another shape, and an unknown kind, come through as sent
   assert.equal(warningText({ kind: "repeat", where: "", message: "something new", source: "" }), "something new");
