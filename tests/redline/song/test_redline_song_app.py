@@ -247,11 +247,13 @@ def test_an_unknown_field_in_a_new_song_is_refused(served, root):
 # sources
 
 
-def test_sources_list_only_what_exists_and_no_lyric_text(served, root):
-    status, empty = api(served, "GET", "/api/songs/sources")
-    assert status == 200 and empty["pack_kit"] is False
+def test_sources_list_only_what_exists_and_no_lyric_text(served, root, monkeypatch, tmp_path):
     from redline.beat import pack
 
+    # the owner's own scanned pack stays out
+    monkeypatch.setattr(pack, "CATALOG", tmp_path / "nopack" / "catalog.json")
+    status, empty = api(served, "GET", "/api/songs/sources")
+    assert status == 200 and empty["pack_kit"] is False
     pack.CATALOG.parent.mkdir(parents=True, exist_ok=True)
     pack.CATALOG.write_text("[]")
     status, broken = api(served, "GET", "/api/songs/sources")

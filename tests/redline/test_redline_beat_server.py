@@ -11,6 +11,7 @@ import soundfile as sf
 
 redline_dsp = pytest.importorskip("redline_dsp")
 
+from packguard import no_owners_pack  # noqa: E402, F401
 from redline.beat import server as beat_server  # noqa: E402
 from redline.beat.library import git_sha1  # noqa: E402
 from redline.beat.recipe import make_recipe, recipe_json  # noqa: E402

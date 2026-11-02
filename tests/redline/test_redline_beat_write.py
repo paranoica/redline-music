@@ -8,6 +8,7 @@ import pytest
 
 redline_dsp = pytest.importorskip("redline_dsp")
 
+from packguard import no_owners_pack  # noqa: E402, F401
 from redline.beat import handoff, library  # noqa: E402
 from redline.beat.checks import check_score  # noqa: E402
 from redline.beat.recipe import (  # noqa: E402

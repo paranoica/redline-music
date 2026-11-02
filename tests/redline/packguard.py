@@ -1,3 +1,5 @@
+"""The owner's scanned pack kept out of a test: import `no_owners_pack` into a test module."""
+
 from pathlib import Path
 
 import pytest

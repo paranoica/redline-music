@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import soundfile as sf
+from packguard import no_owners_pack  # noqa: F401
 from redline.beat import pack
 from redline.beat.pack import PackError
 
