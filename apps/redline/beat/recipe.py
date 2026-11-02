@@ -404,9 +404,9 @@ NEEDS = {
 # a move the drawn 808 style (or, for a device, a drawn character move) contradicts is not
 # drawn with it
 CLASHES = {
-    "glide_sparingly": ("constant_glide", "lead_808", "blown_out"),
+    "glide_sparingly": ("constant_glide", "lead_808", "blown_out", "short_sub", "kick_double"),
     "hat_rolls": ("triplet_hats",),
-    "bass_answers": ("kick_double", "lead_808"),
+    "bass_answers": ("kick_double", "lead_808", "constant_glide"),
 }
 ALL_DEVICES = tuple(DEVICES)
 NO_ROLLS = tuple(d for d in ALL_DEVICES if d not in ("hat_rolls", "glide_sparingly"))
@@ -556,8 +556,8 @@ GENRES: dict[str, Genre] = {
         extras=(SAMPLE, PAD, OPEN_HAT, CLAP),
         hats="a bouncy pattern with holes, triplet rolls with velocity changes, sparse open hats",
         bass="sliding 808 that answers the melody, a slide on every 4th or 8th note, short decay",
-        kick="the drill two-bar pocket with more kicks after the snare; a kick alongside or just "
-        "before the 808",
+        kick="the drill two-bar pocket with more kicks after the snare; a kick just before an 808 "
+        "note, never on its start",
         modes=("minor", "harmonic_minor", "phrygian"),
         structures=(DRILL,),
         hats_per_bar=(4, 24),
@@ -644,7 +644,7 @@ GENRES: dict[str, Genre] = {
         "triplet bursts at the end of a four-bar phrase",
         bass="a blown-out 808 under a clean sub, gliding on the last note of a bar; the line holds "
         "the root and touches the flat second",
-        kick="sparse kicks, clap on beat 3; four on the floor in a switch section",
+        kick="sparse kicks, clap on beat 3; a later drop may go four on the floor",
         modes=("phrygian", "minor"),
         structures=(DRIFT, DRIFT_SWITCH),
         hats_per_bar=(4, 32),
@@ -706,7 +706,7 @@ GENRES: dict[str, Genre] = {
         hats="straight eighths with swing, an open hat on the 'and' of 2 or 4",
         bass="a short bass right after the kick in C1..C2; little glide",
         kick="kicks on beat 1, the 'and' of 2, sometimes beat 3, a ghost on the 'and' of 4; "
-        "snare on 2 and 4 with ghost snares (0.5-0.6) on the 16ths before them",
+        "snare on 2 and 4, in the verses with ghost snares (0.5-0.6) on the 16ths before them",
         modes=("minor", "dorian"),
         structures=(BOOM_BAP, SHORT_INTRO),
         hats_per_bar=(4, 16),

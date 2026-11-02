@@ -258,10 +258,12 @@ def test_a_move_that_speaks_of_hooks_or_verses_needs_them():
 def test_only_an_808_style_that_doubles_the_kick_asks_for_the_808_on_it():
     texts = [(name, device.text) for name, (device, _) in BASS_STYLES.items()]
     texts += [(name, spec.bass) for name, spec in GENRES.items()]
+    texts += [(name, spec.kick) for name, spec in GENRES.items()]
     for name, text in texts:
         if name == "kick_double":
             continue
-        assert "under the kick" not in text and "on every kick" not in text, name
+        for words in ("under the kick", "on every kick", "alongside"):
+            assert words not in text, (name, words)
 
 
 def test_a_genre_with_its_own_feel_says_it_instead_of_the_default():
