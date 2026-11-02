@@ -240,10 +240,28 @@ def test_no_move_needs_a_section_the_structure_lacks_or_clashes_with_the_style(g
         sections = {part.name for part in recipe.structure}
         drawn = (recipe.bass_style, *recipe.character)
         for move in recipe.devices + recipe.character:
-            assert NEEDS.get(move, "intro") in sections, (seed, move)
+            assert set(NEEDS.get(move, ())) <= sections, (seed, move)
         for device in recipe.devices:
             assert not set(CLASHES.get(device, ())) & set(drawn), (seed, device, drawn)
+        for move in recipe.character:
+            assert recipe.bass_style not in CLASHES.get(move, ()), (seed, move)
         assert recipe.devices and recipe.character
+
+
+def test_a_move_that_speaks_of_hooks_or_verses_needs_them():
+    for table in (DEVICES, CHARACTER):
+        for name, move in table.items():
+            spoken = {word for word in ("hook", "verse") if word in move.text}
+            assert spoken <= set(NEEDS.get(name, ())), name
+
+
+def test_only_an_808_style_that_doubles_the_kick_asks_for_the_808_on_it():
+    texts = [(name, device.text) for name, (device, _) in BASS_STYLES.items()]
+    texts += [(name, spec.bass) for name, spec in GENRES.items()]
+    for name, text in texts:
+        if name == "kick_double":
+            continue
+        assert "under the kick" not in text and "on every kick" not in text, name
 
 
 def test_a_genre_with_its_own_feel_says_it_instead_of_the_default():

@@ -279,7 +279,7 @@ BASS_STYLES = {
         (("decay", 0.6), ("drive", 0.3)),
     ),
     "short_sub": (
-        Device("a short round sub (decay under 0.6 s) under the kick, no glide", BLOG),
+        Device("a short round sub (decay under 0.6 s) right after the kick, no glide", BLOG),
         (("decay", 0.5), ("drive", 0.05), ("tone", 600.0)),
     ),
     "blown_out": (
@@ -389,20 +389,24 @@ LOFI = _parts(("intro", 4), ("a", 8), ("break", 4), ("b", 8), ("outro", 4))
 LOOP = _parts(("intro", 4), ("a", 8), ("b", 8), ("a", 8), ("b", 8), ("outro", 4))
 # the sections a move speaks of; a structure without one does not draw it
 NEEDS = {
-    "drop_808": "hook",
-    "stop_before_hook": "hook",
-    "thin_verse": "verse",
-    "ghost_snares": "verse",
-    "kick_switch": "verse",
-    "sparse_808": "verse",
-    "no_hats_verse": "verse",
-    "silent_beat": "hook",
-    "counter_melody": "hook",
+    "drop_808": ("hook",),
+    "stop_before_hook": ("hook",),
+    "thin_verse": ("verse", "hook"),
+    "ghost_snares": ("verse", "hook"),
+    "kick_switch": ("verse",),
+    "build_by_subtraction": ("hook",),
+    "sparse_808": ("verse",),
+    "no_hats_verse": ("verse",),
+    "silent_beat": ("hook",),
+    "counter_melody": ("hook",),
+    "chopped_lead": ("hook",),
 }
-# a device the drawn 808 style or character move contradicts is not drawn with it
+# a move the drawn 808 style (or, for a device, a drawn character move) contradicts is not
+# drawn with it
 CLASHES = {
-    "glide_sparingly": ("constant_glide", "lead_808"),
+    "glide_sparingly": ("constant_glide", "lead_808", "blown_out"),
     "hat_rolls": ("triplet_hats",),
+    "bass_answers": ("kick_double", "lead_808"),
 }
 ALL_DEVICES = tuple(DEVICES)
 NO_ROLLS = tuple(d for d in ALL_DEVICES if d not in ("hat_rolls", "glide_sparingly"))
@@ -700,7 +704,7 @@ GENRES: dict[str, Genre] = {
         leads=(PIANO, EPIANO, VIBES, CELLO_PIZZ, HARP, FM_KEYS),
         extras=(SAMPLE, RIM, OPEN_HAT),
         hats="straight eighths with swing, an open hat on the 'and' of 2 or 4",
-        bass="a short bass under the kick in C1..C2; little glide",
+        bass="a short bass right after the kick in C1..C2; little glide",
         kick="kicks on beat 1, the 'and' of 2, sometimes beat 3, a ghost on the 'and' of 4; "
         "snare on 2 and 4 with ghost snares (0.5-0.6) on the 16ths before them",
         modes=("minor", "dorian"),
@@ -826,7 +830,7 @@ def make_recipe(
     sections = {part.name for part in structure}
     lead = spec.leads[int(rng.integers(len(spec.leads)))]
     style = spec.bass_styles[int(rng.integers(len(spec.bass_styles)))]
-    character = _draw(rng, _fitting(spec.character, sections, ()), CHARACTER_COUNT)
+    character = _draw(rng, _fitting(spec.character, sections, (style,)), CHARACTER_COUNT)
     drawn = (style, *character)
     devices = _draw(rng, _fitting(spec.devices, sections, drawn), DEVICE_COUNT)
     total = sum(part.bars for part in structure)
@@ -853,8 +857,7 @@ def _fitting(moves: tuple[str, ...], sections: set[str], drawn: tuple[str, ...])
     return tuple(
         m
         for m in moves
-        if NEEDS.get(m, next(iter(sections))) in sections
-        and not set(CLASHES.get(m, ())) & set(drawn)
+        if set(NEEDS.get(m, ())) <= sections and not set(CLASHES.get(m, ())) & set(drawn)
     )
 
 
