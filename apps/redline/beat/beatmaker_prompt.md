@@ -87,12 +87,17 @@ run past the pattern's end (`step + len` ≤ 16 × `bars`). At most 512 notes a 
 
 - Take `bpm`, `key`, `seed` and `swing` from the recipe as they are.
 - Build the sounds from the recipe's palette: the names, instruments, params and libraries
-  given. You may add a sound the devices need (a copy of a sound with another rack).
+  given. You may add a sound the devices or the character need (a copy of a sound with another
+  rack, an open hat, a second melodic sound for a counter-melody).
+- `lead` is the beat's main melodic voice: write the melody on it. Do not swap it for a bell.
 - Lay the sections out as the recipe's structure: its names and bars. The total bars must stay
   inside the recipe's bar range.
 - Follow the genre's hats, 808 and kick notes, and keep the hat and kick hits a bar inside the
   recipe's ranges.
 - Do every device the recipe lists.
+- Play the 808 in the recipe's 808 style.
+- Do every character move the recipe lists. They are what makes this beat its own; where one
+  clashes with the advice below, the move wins.
 
 ## Making it musical
 
@@ -100,7 +105,7 @@ run past the pattern's end (`step + len` ≤ 16 × `bars`). At most 512 notes a 
   kick variation. The same bar more than 8 times in a row comes back as a warning.
 - Verses are thinner than hooks: fewer sounds or simpler patterns, so the hook lifts.
 - Drop the 808 (or most of the beat) for the bar before a hook, so the hook lands.
-- Glide the 808 at phrase ends, not on every note: constant glide removes contrast.
+- Glide the 808 at phrase ends, not on every note, unless the 808 style says otherwise.
 - Keep kick and 808 note starts apart, or let one replace the other; a kick on an 808 start
   muddies the low end.
 - Hat rolls belong at phrase ends; velocity and ghost notes keep hats from sounding stiff.

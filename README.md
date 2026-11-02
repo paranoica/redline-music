@@ -247,8 +247,9 @@ performance is still for you to judge.
 ## Beats
 
 A beat starts as a seed. `redline beat write` draws a recipe from it (genre, tempo, key,
-swing, sounds, structure, a few moves such as dropping the 808 before a hook) and hands a
-request to the `beatmaker` agent, which answers with a score in JSON. Run the command again and
+swing, sounds with one lead voice, structure, a few devices such as dropping the 808 before a
+hook, the 808's style and one or two character moves against the textbook, like an off-grid kick
+or a beat switch; fourteen genres) and hands a request to the `beatmaker` agent, which answers with a score in JSON. Run the command again and
 it checks the score: the format to the step, notes in the key, the 808's range, the bar count.
 A score that fails goes back with every problem named by its place, up to four rounds.
 

@@ -1,12 +1,14 @@
-"""The recipe of a new beat, drawn by seed: genre, tempo, key, sounds, structure and devices.
+"""The recipe of a new beat, drawn by seed: genre, tempo, key, sounds, structure and moves.
 
-The genre facts come from blogs (research of block b21, section B) and are unverified; the
-numbers no blog gave are marked as own choices in `invented`.
+The moves are the devices, the 808's style and the beat's character.
+
+The genre facts come from producer blogs and tutorials and are unverified; the numbers no
+source gave are marked as own choices in `invented`.
 """
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -15,6 +17,7 @@ from redline.beat import library
 
 BLOG = "blog, unverified"
 OWN = "own choice"
+MEASURED = "measured on the owner's tracks"
 # the score's limits, the same as Rust's
 BPM = (40.0, 220.0)
 MAX_SEED = 2**32 - 1
@@ -32,6 +35,7 @@ MODES = {
 }
 EXTRAS = (1, 3)
 DEVICE_COUNT = (2, 3)
+CHARACTER_COUNT = (1, 2)
 # how far the score's bars may stray from the drawn structure
 BARS_SLACK = 8
 MIN_BARS = 8
@@ -69,6 +73,7 @@ class Genre:
         half_time: The snare lands on beat 3, so the groove feels at half the tempo.
         swing: The swing range, percent of the sixteenth pair.
         sounds: The core palette, always drawn.
+        leads: The melodic sounds of which one is drawn, named `lead`.
         extras: Sounds of which one to three are added.
         hats: How the hats move.
         bass: How the 808 behaves.
@@ -78,6 +83,8 @@ class Genre:
         hats_per_bar: Hat hits a bar a section should stay inside, rolls counted per hit.
         kicks_per_bar: Kick hits a bar a section should stay inside.
         devices: The devices this genre draws from.
+        bass_styles: The 808 styles of `BASS_STYLES` this genre draws one from.
+        character: The moves of `CHARACTER` this genre draws one or two from.
         source: Where the facts come from.
         invented: The fields set by own choice.
     """
@@ -86,6 +93,7 @@ class Genre:
     half_time: bool
     swing: tuple[float, float]
     sounds: tuple[Sound, ...]
+    leads: tuple[Sound, ...]
     extras: tuple[Sound, ...]
     hats: str
     bass: str
@@ -95,6 +103,8 @@ class Genre:
     hats_per_bar: tuple[float, float]
     kicks_per_bar: tuple[float, float]
     devices: tuple[str, ...]
+    bass_styles: tuple[str, ...]
+    character: tuple[str, ...]
     source: str
     invented: tuple[str, ...]
 
@@ -116,7 +126,7 @@ DEVICES = {
     "filtered_intro": Device(
         "the intro plays the melody through a low-pass: a copy of the melody sound with a "
         "filter rack, played only in the intro",
-        OWN,
+        BLOG,
     ),
     "glide_sparingly": Device(
         "808 glides (overlapping notes) only at phrase ends; constant glide removes contrast",
@@ -132,6 +142,160 @@ DEVICES = {
         "verses play fewer sounds than hooks: the melody or the hats thinned in verses", BLOG
     ),
     "call_response": Device("the melody plays a phrase in one bar and answers it in the next", OWN),
+    "mute_return": Device(
+        "the 808 and the hats are muted for one whole bar inside a section, then come back", BLOG
+    ),
+    "build_by_subtraction": Device(
+        "the hook is the full loop; every other section is that loop with parts taken out", BLOG
+    ),
+}
+
+# Moves against the textbook: each beat draws one or two, and they outrank the general advice.
+CHARACTER = {
+    "off_grid_kick": Device(
+        "one kick a bar sits on an unusual step (3, 6, 7, 11, 13 or 15) and the groove leans on "
+        "it; the kick is never only on steps 0 and 8",
+        BLOG,
+    ),
+    "kick_pickup": Device(
+        "kicks work as pickups: a kick on step 14 or 15 leads into the next bar, and some phrases "
+        "start without a kick on step 0",
+        OWN,
+    ),
+    "snare_shift": Device(
+        "the backbeat moves: in a two-bar pocket the second bar's snare lands a beat late (step "
+        "12), or a second snare answers the main one off the beat",
+        BLOG,
+    ),
+    "triplet_hats": Device(
+        "the hats lean triplet against straight kicks: '3' rolls on the off-beats of beats 2 and "
+        "4, or a '6' closing every second beat",
+        BLOG,
+    ),
+    "pitched_rolls": Device(
+        "hat rolls bend: their pitch lane rises or falls 3 to 12 semitones across the roll",
+        BLOG,
+    ),
+    "hats_swing_alone": Device(
+        "only the hats swing (the hat sound's own swing 58 to 64) while kick and snare stay "
+        "straight",
+        BLOG,
+    ),
+    "silent_beat": Device(
+        "in the hooks one beat a bar is nearly empty, and whole bars drop out and return "
+        "without warning",
+        BLOG,
+    ),
+    "sparse_808": Device(
+        "the 808 plays in only half to three quarters of the verse bars and is silent in the "
+        "rest, so each return hits",
+        MEASURED,
+    ),
+    "beat_switch": Device(
+        "the last third of the beat switches: a new drum pattern and a new 808 rhythm for at "
+        "least 8 bars, the snare moved (half time against double time)",
+        BLOG,
+    ),
+    "no_hats_verse": Device(
+        "the first half of each verse has no hats at all; they come in at its middle", OWN
+    ),
+    "counter_melody": Device(
+        "the second and later hooks add a counter-melody on another sound that the first hook "
+        "lacks",
+        OWN,
+    ),
+    "loop_endings": Device(
+        "the loop ends differently in its 4th and 8th bars: the melody's last two notes change "
+        "and the drums break",
+        BLOG,
+    ),
+    "velocity_tiers": Device(
+        "hats and snares use three velocity tiers (main about 1.0, ghosts 0.5-0.6, the quietest "
+        "0.3-0.4), and no two bars repeat the same velocities",
+        BLOG,
+    ),
+    "chopped_lead": Device(
+        "the lead is chopped in the hooks: a copy of it with a stutter or trance_gate rack",
+        BLOG,
+    ),
+    "detuned_lead": Device(
+        "the lead is detuned on purpose: a drift rack (15 to 30 cents, slow) and a tape_delay",
+        BLOG,
+    ),
+    "bass_answers": Device(
+        "the 808 answers the melody: it moves in the melody's gaps and holds while the melody "
+        "plays",
+        OWN,
+    ),
+}
+
+# The 808's character: a text for the beatmaker and the bass808 params it starts from.
+BASS_STYLES = {
+    "clean_long": (
+        Device(
+            "a clean long 808 (decay 2-4 s) ringing under the melody; glides only into accents, "
+            "one or two a bar at most",
+            BLOG,
+        ),
+        (("decay", 3.0), ("drive", 0.15)),
+    ),
+    "distorted": (
+        Device(
+            "a distorted 808 that reads on a phone speaker: drive high, grit above the sub, "
+            "long notes",
+            BLOG,
+        ),
+        (("decay", 3.0), ("drive", 0.75), ("tone", 3500.0)),
+    ),
+    "constant_glide": (
+        Device(
+            "the 808 slides almost all the time: most notes overlap the next, slides of 2 to 12 "
+            "semitones and octave drops; it is the hook's melody, so the general advice to "
+            "glide sparingly does not apply",
+            BLOG,
+        ),
+        (("decay", 4.0), ("drive", 0.5), ("glide_ms", 160.0)),
+    ),
+    "staccato_slides": (
+        Device(
+            "short 808 stabs (1 to 3 steps) on plain roots for three bars, slides in the fourth; "
+            "staccato against sliding is the contrast",
+            BLOG,
+        ),
+        (("decay", 1.2), ("drive", 0.4), ("glide_ms", 110.0)),
+    ),
+    "octave_bounce": (
+        Device(
+            "a clean 808 that jumps an octave on the loop's first note and moves between root "
+            "and fifth",
+            BLOG,
+        ),
+        (("decay", 1.8), ("drive", 0.1)),
+    ),
+    "kick_double": (
+        Device("the 808 doubles the kick's rhythm on one held pitch, short notes", BLOG),
+        (("decay", 0.6), ("drive", 0.3)),
+    ),
+    "short_sub": (
+        Device("a short round sub (decay under 0.6 s) under the kick, no glide", BLOG),
+        (("decay", 0.5), ("drive", 0.05), ("tone", 600.0)),
+    ),
+    "blown_out": (
+        Device(
+            "a blown-out 808 pushed into clipping, gliding into the last note of each bar; the "
+            "pitch stays readable",
+            BLOG,
+        ),
+        (("decay", 2.5), ("drive", 1.0), ("tone", 5000.0), ("glide_ms", 100.0)),
+    ),
+    "lead_808": (
+        Device(
+            "the 808 is the lead: it carries the melody in its upper octave (C2..G3) with "
+            "glides, and the melodic sounds play sparse stabs around it",
+            BLOG,
+        ),
+        (("decay", 3.5), ("drive", 0.8), ("tone", 4000.0), ("glide_ms", 130.0)),
+    ),
 }
 
 KICK = Sound("kick", "kick")
@@ -142,194 +306,392 @@ HAT = Sound("hat", "hat_closed")
 OPEN_HAT = Sound("open_hat", "hat_open")
 RIM = Sound("rim", "rim")
 COWBELL = Sound("cowbell", "cowbell")
-BELL = Sound("bell", "fm", (("preset", "bell"),))
-KEYS = Sound("keys", "fm", (("preset", "keys"),))
-PLUCK = Sound("pluck", "pluck")
 PAD = Sound("pad", "saw", (("attack", 0.3), ("release", 1.0)))
-LEAD = Sound("lead", "saw", (("voices", 1.0), ("cutoff", 2500.0)))
 SAMPLE = Sound("sample", "sampler")
+KEYS = Sound("keys", "fm", (("preset", "keys"),))
+
+
+def _lead(instrument: str, *params: tuple[str, str | float], library: str | None = None) -> Sound:
+    return Sound("lead", instrument, params, library)
+
+
+# the leads a genre draws one from; the sampled ones are the CC0 instruments of library.json
+FM_BELL = _lead("fm", ("preset", "bell"))
+FM_KEYS = _lead("fm", ("preset", "keys"))
+PLUCK = _lead("pluck")
+SAW_LEAD = _lead("saw", ("voices", 1.0), ("cutoff", 2500.0))
+SUPERSAW = _lead("saw", ("voices", 9.0), ("detune", 35.0), ("cutoff", 7000.0))
+STRINGS = _lead(
+    "saw", ("voices", 7.0), ("detune", 18.0), ("cutoff", 2200.0), ("attack", 0.25), ("release", 0.8)
+)
+BRASS = _lead("saw", ("voices", 3.0), ("detune", 10.0), ("cutoff", 1800.0), ("attack", 0.03))
+PIANO = _lead("sampler", library="vsco-upright-piano")
+EPIANO = _lead("sampler", library="vcsl-fm-piano")
+HARP = _lead("sampler", library="vsco-harp")
+PIZZ = _lead("sampler", library="vsco-violin-pizz")
+CELLO_PIZZ = _lead("sampler", library="vsco-cello-pizz")
+KALIMBA = _lead("sampler", library="vcsl-kalimba")
+GLOCK = _lead("sampler", library="vcsl-glock")
+VIBES = _lead("sampler", library="vcsl-vibes-hard")
+MARIMBA = _lead("sampler", library="vcsl-marimba")
+TUBULAR = _lead("sampler", library="vcsl-tubular-bells")
 
 
 def _parts(*pairs: tuple[str, int]) -> tuple[Part, ...]:
     return tuple(Part(name, bars) for name, bars in pairs)
 
 
-# intro 4-8, hook 8, verse 16 (blogs)
 SONG = _parts(("intro", 8), ("hook", 8), ("verse", 16), ("hook", 8), ("verse", 16), ("hook", 8))
 SHORT_INTRO = _parts(
     ("intro", 4), ("verse", 16), ("hook", 8), ("verse", 16), ("hook", 8), ("outro", 4)
 )
-# the drill template of the blogs, 8/8/16/8/16/8/8/8
+TRAP_BRIDGE = _parts(
+    ("intro", 8),
+    ("verse", 16),
+    ("hook", 8),
+    ("verse", 16),
+    ("hook", 8),
+    ("bridge", 8),
+    ("hook", 8),
+)
+DARK = _parts(("intro", 8), ("hook", 16), ("verse", 16), ("hook", 16), ("bridge", 8), ("outro", 8))
 DRILL = _parts(
     ("intro", 8),
     ("hook", 8),
     ("verse", 16),
     ("hook", 8),
     ("verse", 16),
+    ("bridge", 8),
     ("hook", 8),
-    ("break", 8),
     ("outro", 8),
 )
+RAGE = _parts(("intro", 4), ("hook", 16), ("verse", 16), ("hook", 16), ("verse", 16), ("hook", 16))
+PLUGGNB = _parts(("intro", 8), ("build", 16), ("hook", 16), ("verse", 16), ("hook", 16))
+MEMPHIS = _parts(
+    ("intro", 8), ("verse", 16), ("hook", 8), ("verse", 16), ("break", 8), ("hook", 16)
+)
+DRIFT = _parts(("intro", 4), ("build", 8), ("drop", 16), ("break", 8), ("drop", 16), ("outro", 8))
+DRIFT_SWITCH = _parts(
+    ("intro", 8),
+    ("drop", 16),
+    ("switch", 8),
+    ("drop", 16),
+    ("switch", 16),
+    ("outro", 4),
+)
+JERSEY = _parts(("intro", 8), ("a", 8), ("b", 8), ("a", 8), ("break", 8), ("b", 8), ("outro", 8))
+BOOM_BAP = _parts(
+    ("intro", 8), ("verse", 16), ("hook", 8), ("verse", 16), ("hook", 8), ("outro", 4)
+)
+LOFI = _parts(("intro", 4), ("a", 8), ("break", 4), ("b", 8), ("outro", 4))
 LOOP = _parts(("intro", 4), ("a", 8), ("b", 8), ("a", 8), ("b", 8), ("outro", 4))
 ALL_DEVICES = tuple(DEVICES)
 NO_ROLLS = tuple(d for d in ALL_DEVICES if d not in ("hat_rolls", "glide_sparingly"))
+ALL_CHARACTER = tuple(CHARACTER)
+CALM_CHARACTER = tuple(
+    c for c in ALL_CHARACTER if c not in ("triplet_hats", "pitched_rolls", "chopped_lead")
+)
 
 GENRES: dict[str, Genre] = {
     "trap": Genre(
         bpm=(130, 160),
         half_time=True,
-        swing=(50.0, 54.0),
+        swing=(50.0, 55.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        extras=(OPEN_HAT, CLAP, BELL, PAD, PLUCK, SAMPLE),
-        hats="sixteenths or eighths, triplet and 1/32 rolls; one open hat off the beat",
-        bass="the 808 is the bass line; keep kick and 808 starts apart",
-        kick="sparse kicks; snare (or clap) on beat 3 of the bar",
+        leads=(PIANO, FM_KEYS, PLUCK, SAW_LEAD, STRINGS, HARP, PIZZ, FM_BELL, GLOCK),
+        extras=(OPEN_HAT, CLAP, PAD, RIM, SAMPLE),
+        hats="eighths or sixteenths; the last two hats of a phrase become a 32nd or triplet "
+        "roll with its middle hits softer; one open hat off the beat, choked",
+        bass="the 808 follows the melody's roots, mostly within an octave, an 808 under most "
+        "kicks plus a few notes in the gaps",
+        kick="kick on step 0 and one or two syncopated hits (around steps 6, 10 or 14); snare "
+        "or clap on beat 3",
         modes=("minor", "harmonic_minor", "phrygian"),
-        structures=(SONG, SHORT_INTRO),
+        structures=(SONG, SHORT_INTRO, TRAP_BRIDGE),
         hats_per_bar=(8, 40),
         kicks_per_bar=(1, 6),
         devices=ALL_DEVICES,
+        bass_styles=("clean_long", "distorted", "constant_glide", "staccato_slides"),
+        character=ALL_CHARACTER,
         source=BLOG,
-        invented=("swing", "modes", "hats_per_bar", "kicks_per_bar", "extras"),
+        invented=("hats_per_bar", "kicks_per_bar", "extras"),
     ),
-    "uk_drill": Genre(
-        bpm=(140, 150),
+    "dark_trap": Genre(
+        bpm=(130, 148),
         half_time=True,
-        swing=(50.0, 56.0),
-        sounds=(KICK, BASS, SNARE, HAT),
-        extras=(RIM, OPEN_HAT, PAD, BELL, SAMPLE),
-        hats="eighths with gaps and short bursts, a two-bar pocket",
-        bass="808 slides to the root, fifth or octave; constant glide removes contrast",
-        kick="two-bar pocket: snare on beat 3 of bar 1, then beat 4 of bar 2",
-        modes=("minor", "harmonic_minor"),
-        structures=(DRILL,),
-        hats_per_bar=(4, 24),
+        swing=(50.0, 53.0),
+        sounds=(KICK, BASS, CLAP, HAT),
+        leads=(FM_BELL, TUBULAR, GLOCK, KALIMBA, PIANO, STRINGS, SAW_LEAD),
+        extras=(PAD, OPEN_HAT, SNARE, RIM, SAMPLE),
+        hats="eighths with the middle hats turned down, the last two of a phrase as a "
+        "32nd-triplet roll; hats drop out for the bar before a hook",
+        bass="a long 808 on the chord roots, grit above a clean sub; it slides down into the "
+        "root at a phrase start",
+        kick="sparse kicks; clap (or snare) on beat 3; keep the drums sparse so the space stays",
+        modes=("minor", "harmonic_minor", "phrygian"),
+        structures=(DARK, SONG),
+        hats_per_bar=(6, 32),
+        kicks_per_bar=(1, 4),
+        devices=ALL_DEVICES,
+        bass_styles=("distorted", "clean_long", "lead_808"),
+        character=ALL_CHARACTER,
+        source=BLOG,
+        invented=("swing", "hats_per_bar", "kicks_per_bar", "extras"),
+    ),
+    "rage": Genre(
+        bpm=(150, 170),
+        half_time=True,
+        swing=(50.0, 54.0),
+        sounds=(KICK, BASS, CLAP, HAT),
+        leads=(SUPERSAW, SUPERSAW, SAW_LEAD, GLOCK),
+        extras=(OPEN_HAT, SNARE, PAD, SAMPLE),
+        hats="sparse in some sections and rapid in others; triplet or 32nd rolls only at the end "
+        "of a 2- or 4-bar phrase, velocity ramping up",
+        bass="a distorted, clipped 808 that follows the chords and glides; a clean sub under a "
+        "distorted layer",
+        kick="kick on step 0 (a punchy layered kick), clap on beat 3; at least one beat a bar "
+        "where almost nothing sounds",
+        modes=("minor", "phrygian"),
+        structures=(RAGE,),
+        hats_per_bar=(4, 40),
         kicks_per_bar=(1, 5),
         devices=ALL_DEVICES,
+        bass_styles=("lead_808", "distorted", "constant_glide"),
+        character=ALL_CHARACTER,
         source=BLOG,
-        invented=("swing", "modes", "hats_per_bar", "kicks_per_bar", "extras"),
-    ),
-    "ny_drill": Genre(
-        bpm=(140, 150),
-        half_time=True,
-        swing=(50.0, 56.0),
-        sounds=(KICK, BASS, SNARE, HAT),
-        extras=(SAMPLE, PAD, KEYS, OPEN_HAT),
-        hats="eighths with gaps and bursts, a two-bar pocket",
-        bass="sliding 808 that answers the melody; slides to root, fifth or octave",
-        kick="two-bar pocket like UK drill, with more kicks after the snare",
-        modes=("minor", "harmonic_minor", "phrygian"),
-        structures=(DRILL,),
-        hats_per_bar=(4, 24),
-        kicks_per_bar=(1, 6),
-        devices=ALL_DEVICES,
-        source=BLOG,
-        # the research has no facts of its own for it: the drill facts with own differences
-        invented=("bass", "kick", "swing", "modes", "hats_per_bar", "kicks_per_bar", "extras"),
+        invented=("structures", "hats_per_bar", "kicks_per_bar", "extras"),
     ),
     "plugg": Genre(
         bpm=(130, 150),
         half_time=True,
         swing=(50.0, 54.0),
-        sounds=(KICK, BASS, CLAP, HAT, KEYS),
-        extras=(BELL, LEAD, PAD, SAMPLE),
-        hats="restrained hats, few rolls",
-        bass="melodic 808 that follows the keys",
-        kick="sparse kicks, clap on beat 3",
+        sounds=(KICK, BASS, CLAP, HAT),
+        leads=(FM_BELL, FM_KEYS, VIBES, GLOCK, MARIMBA, SAW_LEAD),
+        extras=(PAD, KEYS, SAMPLE, SNARE),
+        hats="restrained hats, few rolls; a couple of snares as a counter-rhythm",
+        bass="a melodic 808 that follows the keys and rings out; foldback grit optional",
+        kick="sparse kicks, clap on beat 3, beat skips",
         modes=("major", "minor", "dorian"),
         structures=(SONG, SHORT_INTRO),
         hats_per_bar=(4, 20),
         kicks_per_bar=(1, 4),
         devices=NO_ROLLS,
+        bass_styles=("clean_long", "octave_bounce"),
+        character=CALM_CHARACTER,
         source=BLOG,
         invented=("swing", "modes", "hats_per_bar", "kicks_per_bar"),
     ),
-    "boom_bap": Genre(
-        bpm=(85, 95),
-        half_time=False,
-        swing=(54.0, 58.0),
-        sounds=(KICK, BASS, SNARE, HAT),
-        extras=(SAMPLE, KEYS, RIM, PLUCK),
-        hats="straight eighths with swing, a few ghost hits",
-        bass="a short bass under the kick; little glide",
-        kick="kicks around beat 1 and the 'and' of 2; snare on 2 and 4",
-        modes=("minor", "dorian"),
-        structures=(SHORT_INTRO, SONG),
-        hats_per_bar=(4, 16),
-        kicks_per_bar=(2, 6),
-        devices=NO_ROLLS,
-        source=BLOG,
-        invented=("bass", "modes", "hats_per_bar", "kicks_per_bar"),
-    ),
-    "phonk": Genre(
-        bpm=(130, 150),
+    "pluggnb": Genre(
+        bpm=(125, 145),
         half_time=True,
         swing=(50.0, 54.0),
-        sounds=(KICK, BASS, SNARE, HAT, COWBELL),
-        extras=(OPEN_HAT, CLAP, SAMPLE, PAD),
-        hats="busy hats with rolls",
-        bass="distorted gliding 808",
-        kick="kicks on the beat, snare or clap on beat 3",
-        modes=("phrygian", "minor"),
+        sounds=(KICK, BASS, CLAP, OPEN_HAT),
+        leads=(EPIANO, FM_KEYS, HARP, VIBES, PLUCK, STRINGS),
+        extras=(PAD, HAT, SNARE, SAMPLE),
+        hats="open hats on eighths with 16th and 32nd rolls, no closed hat; a snare with rolls",
+        bass="a clean 808 with octave jumps: the root on chords 1 and 3, the third on 2 and 4",
+        kick="a bouncy four-bar kick groove; clap on beat 3",
+        modes=("major", "dorian", "lydian", "minor"),
+        structures=(PLUGGNB, SONG),
+        hats_per_bar=(4, 24),
+        kicks_per_bar=(1, 5),
+        devices=ALL_DEVICES,
+        bass_styles=("octave_bounce", "clean_long"),
+        character=CALM_CHARACTER,
+        source=BLOG,
+        invented=("swing", "hats_per_bar", "kicks_per_bar"),
+    ),
+    "uk_drill": Genre(
+        bpm=(138, 146),
+        half_time=True,
+        swing=(50.0, 54.0),
+        sounds=(KICK, BASS, SNARE, HAT),
+        leads=(PIANO, PIZZ, CELLO_PIZZ, STRINGS, PLUCK, FM_BELL),
+        extras=(RIM, OPEN_HAT, PAD, CLAP, SAMPLE),
+        hats="the 16th grid 'x..x..x.' (two spaces, two spaces, one) with a ghost hat, holes "
+        "and short bursts; a 32nd roll into beat 4",
+        bass="sliding 808: plain roots for three bars, slides in the fourth, to the root, fifth "
+        "or octave",
+        kick="two-bar pocket: kick 'x.............x.' then 'x..x..x.......x.'; snare on beat 3 "
+        "of bar 1 and beat 4 (step 12) of bar 2",
+        modes=("minor", "harmonic_minor", "phrygian"),
+        structures=(DRILL,),
+        hats_per_bar=(4, 24),
+        kicks_per_bar=(1, 5),
+        devices=ALL_DEVICES,
+        bass_styles=("staccato_slides", "constant_glide", "distorted"),
+        character=ALL_CHARACTER,
+        source=BLOG,
+        invented=("swing", "hats_per_bar", "kicks_per_bar", "extras"),
+    ),
+    "ny_drill": Genre(
+        bpm=(140, 148),
+        half_time=True,
+        swing=(50.0, 54.0),
+        sounds=(KICK, BASS, SNARE, HAT),
+        leads=(PIANO, STRINGS, SAW_LEAD, PIZZ, FM_BELL),
+        extras=(SAMPLE, PAD, OPEN_HAT, CLAP),
+        hats="a bouncy pattern with holes, triplet rolls with velocity changes, sparse open hats",
+        bass="sliding 808 that answers the melody, a slide on every 4th or 8th note, short decay",
+        kick="the drill two-bar pocket with more kicks after the snare; a kick alongside or just "
+        "before the 808",
+        modes=("minor", "harmonic_minor", "phrygian"),
+        structures=(DRILL,),
+        hats_per_bar=(4, 24),
+        kicks_per_bar=(1, 6),
+        devices=ALL_DEVICES,
+        bass_styles=("staccato_slides", "constant_glide"),
+        character=ALL_CHARACTER,
+        source=BLOG,
+        invented=("swing", "hats_per_bar", "kicks_per_bar", "extras"),
+    ),
+    "chicago_drill": Genre(
+        bpm=(135, 150),
+        half_time=True,
+        swing=(50.0, 55.0),
+        sounds=(KICK, BASS, SNARE, HAT),
+        leads=(BRASS, FM_BELL, TUBULAR, PIANO),
+        extras=(OPEN_HAT, CLAP, PAD, RIM),
+        hats="skippy triplet hats with deleted hits and bursts at phrase ends; open hats rare",
+        bass="a heavy 808 with less sliding than UK drill, harmonics kept audible",
+        kick="sparse syncopated kicks; snare on beat 3 with busy snare fills",
+        modes=("minor", "harmonic_minor", "phrygian"),
         structures=(SONG, SHORT_INTRO),
+        hats_per_bar=(6, 32),
+        kicks_per_bar=(1, 5),
+        devices=ALL_DEVICES,
+        bass_styles=("distorted", "clean_long"),
+        character=ALL_CHARACTER,
+        source=BLOG,
+        invented=("hats_per_bar", "kicks_per_bar", "extras"),
+    ),
+    "jersey_club": Genre(
+        bpm=(130, 145),
+        half_time=False,
+        swing=(50.0, 52.0),
+        sounds=(KICK, BASS, SNARE, HAT),
+        leads=(SAW_LEAD, PLUCK, FM_KEYS, MARIMBA),
+        extras=(SAMPLE, OPEN_HAT, PAD, CLAP),
+        hats="closed hats on beats 2 and 4 only; busy hats turn it to mud",
+        bass="the 808 doubles the kick rhythm on a held pitch",
+        kick="five kicks a bar on steps 0, 4, 8, 11, 14, the 4th and 5th nudged and softer; "
+        "snare on steps 8 and 11 (and 10 in alternate bars)",
+        modes=("minor", "major"),
+        structures=(JERSEY,),
+        hats_per_bar=(0, 8),
+        kicks_per_bar=(4, 8),
+        devices=NO_ROLLS,
+        bass_styles=("kick_double",),
+        character=CALM_CHARACTER,
+        source=BLOG,
+        invented=("swing", "modes", "hats_per_bar", "structures"),
+    ),
+    "memphis": Genre(
+        bpm=(80, 100),
+        half_time=False,
+        swing=(54.0, 60.0),
+        sounds=(KICK, BASS, SNARE, HAT, COWBELL),
+        leads=(FM_BELL, PIANO, STRINGS, TUBULAR),
+        extras=(OPEN_HAT, RIM, CLAP, PAD, SAMPLE),
+        hats="simple swung eighths, one open hat accent, a 32nd or triplet burst into the snare",
+        bass="an 808 on every kick, mostly root, octave glides, distorted",
+        kick="kick on step 0 with one or two syncopated hits; snare on 2 and 4, the clap a few ms "
+        "late",
+        modes=("minor", "phrygian"),
+        structures=(MEMPHIS,),
+        hats_per_bar=(4, 20),
+        kicks_per_bar=(1, 5),
+        devices=ALL_DEVICES,
+        bass_styles=("blown_out", "distorted"),
+        character=ALL_CHARACTER,
+        source=BLOG,
+        # the blogs disagree on its tempo; the range kept is one tutorial's
+        invented=("bpm", "hats_per_bar", "kicks_per_bar"),
+    ),
+    "phonk": Genre(
+        bpm=(130, 160),
+        half_time=True,
+        swing=(50.0, 52.0),
+        sounds=(KICK, BASS, CLAP, HAT, COWBELL),
+        leads=(SAW_LEAD, STRINGS, PIANO, FM_BELL),
+        extras=(OPEN_HAT, SNARE, PAD, SAMPLE),
+        hats="the cowbell carries the melody: a 2-4 note motif on eighths or sixteenths (its "
+        "pitch lane), the last note an octave up; hats on straight eighths with 16th, 32nd or "
+        "triplet bursts at the end of a four-bar phrase",
+        bass="a blown-out 808 under a clean sub, gliding on the last note of a bar; the line holds "
+        "the root and touches the flat second",
+        kick="sparse kicks, clap on beat 3; four on the floor in a switch section",
+        modes=("phrygian", "minor"),
+        structures=(DRIFT, DRIFT_SWITCH),
         hats_per_bar=(4, 32),
         kicks_per_bar=(1, 6),
         devices=ALL_DEVICES,
+        bass_styles=("blown_out", "constant_glide"),
+        character=ALL_CHARACTER,
         source=BLOG,
-        # the blogs disagree on its tempo
-        invented=("bpm", "swing", "modes", "hats_per_bar", "kicks_per_bar"),
-    ),
-    "jersey_club": Genre(
-        bpm=(130, 140),
-        half_time=False,
-        swing=(50.0, 52.0),
-        sounds=(KICK, BASS, CLAP, HAT),
-        extras=(SAMPLE, LEAD, OPEN_HAT, PAD),
-        hats="light offbeat hats",
-        bass="short 808 hits, little glide",
-        kick="kicks on the 16ths 1, 5, 9, 12 and 15 (steps 0, 4, 8, 11, 14)",
-        modes=("minor", "major"),
-        structures=(SONG, SHORT_INTRO),
-        hats_per_bar=(0, 16),
-        kicks_per_bar=(4, 10),
-        devices=NO_ROLLS,
-        source=BLOG,
-        invented=("swing", "bass", "modes", "hats_per_bar", "kicks_per_bar"),
+        # the blogs disagree on its tempo; the range kept counts at full time
+        invented=("bpm", "hats_per_bar", "kicks_per_bar"),
     ),
     "cloud": Genre(
         bpm=(65, 85),
         half_time=False,
         swing=(50.0, 56.0),
         sounds=(KICK, BASS, SNARE, HAT, PAD),
-        extras=(BELL, PLUCK, SAMPLE, KEYS),
-        hats="soft eighths",
-        bass="long 808 notes under the pad",
-        kick="sparse kicks, snare on 2 and 4",
+        leads=(STRINGS, PIANO, HARP, FM_KEYS, VIBES, GLOCK),
+        extras=(SAMPLE, RIM, OPEN_HAT),
+        hats="simple soft eighths with an occasional roll or triplet",
+        bass="a soft 808 or sine sub, understated, a glide for flair",
+        kick="a soft deep kick, snare or clap on 2 and 4",
         modes=("major", "minor", "lydian", "dorian"),
         structures=(LOOP, SHORT_INTRO),
         hats_per_bar=(2, 16),
         kicks_per_bar=(1, 4),
         devices=NO_ROLLS,
+        bass_styles=("clean_long", "short_sub"),
+        character=CALM_CHARACTER,
         source=BLOG,
-        # the blogs disagree on its tempo; the range kept is one of them
-        invented=("swing", "bass", "kick", "modes", "hats_per_bar", "kicks_per_bar"),
+        invented=("swing", "modes", "hats_per_bar", "kicks_per_bar"),
     ),
     "lofi": Genre(
         bpm=(70, 90),
         half_time=False,
         swing=(54.0, 62.0),
-        sounds=(KICK, BASS, SNARE, HAT, KEYS),
-        extras=(SAMPLE, PLUCK, RIM, PAD),
-        hats="swung eighths, soft",
-        bass="a soft round bass, little drive",
-        kick="kick on 1 and around 3, snare on 2 and 4",
+        sounds=(KICK, BASS, SNARE, HAT),
+        leads=(EPIANO, PIANO, FM_KEYS, VIBES, HARP, PLUCK),
+        extras=(SAMPLE, RIM, PAD),
+        hats="swung eighths alternating soft and medium (about 0.4 and 0.7)",
+        bass="a soft round bass in C1..G2, an octave jump every 4 bars",
+        kick="kick on 1 and 3 with a ghost kick on the 'and' of 4; snare (or rim) on 2 and 4",
         modes=("major", "dorian", "minor"),
-        structures=(LOOP,),
+        structures=(LOFI, LOOP),
         hats_per_bar=(4, 16),
         kicks_per_bar=(2, 5),
         devices=NO_ROLLS,
+        bass_styles=("short_sub", "clean_long"),
+        character=CALM_CHARACTER,
         source=BLOG,
-        invented=("swing", "bass", "modes", "hats_per_bar", "kicks_per_bar"),
+        invented=("modes", "hats_per_bar", "kicks_per_bar"),
+    ),
+    "boom_bap": Genre(
+        bpm=(85, 95),
+        half_time=False,
+        swing=(54.0, 64.0),
+        sounds=(KICK, BASS, SNARE, HAT),
+        leads=(PIANO, EPIANO, VIBES, CELLO_PIZZ, HARP, FM_KEYS),
+        extras=(SAMPLE, RIM, OPEN_HAT),
+        hats="straight eighths with swing, an open hat on the 'and' of 2 or 4",
+        bass="a short bass under the kick in C1..C2; little glide",
+        kick="kicks on beat 1, the 'and' of 2, sometimes beat 3, a ghost on the 'and' of 4; "
+        "snare on 2 and 4 with ghost snares (0.5-0.6) on the 16ths before them",
+        modes=("minor", "dorian"),
+        structures=(BOOM_BAP, SHORT_INTRO),
+        hats_per_bar=(4, 16),
+        kicks_per_bar=(2, 6),
+        devices=NO_ROLLS,
+        bass_styles=("short_sub",),
+        character=CALM_CHARACTER,
+        source=BLOG,
+        invented=("modes", "hats_per_bar", "kicks_per_bar"),
     ),
 }
 
@@ -350,6 +712,9 @@ class Recipe:
     devices: tuple[str, ...]
     hats_per_bar: tuple[float, float]
     kicks_per_bar: tuple[float, float]
+    # recipes saved before the 808 styles and the character moves read back without them
+    bass_style: str = ""
+    character: tuple[str, ...] = ()
 
 
 KEY = re.compile(r"([A-G])([#b]?) ([a-z_]+)")
@@ -441,6 +806,11 @@ def make_recipe(
     count = int(rng.integers(DEVICE_COUNT[0], DEVICE_COUNT[1] + 1))
     devices = rng.choice(len(spec.devices), size=count, replace=False).tolist()
     total = sum(part.bars for part in structure)
+    # drawn after everything older, so a seed keeps the rest of what it drew
+    lead = spec.leads[int(rng.integers(len(spec.leads)))]
+    style = spec.bass_styles[int(rng.integers(len(spec.bass_styles)))]
+    moves = int(rng.integers(CHARACTER_COUNT[0], CHARACTER_COUNT[1] + 1))
+    character = rng.choice(len(spec.character), size=moves, replace=False).tolist()
     return Recipe(
         seed=seed,
         genre=name,
@@ -448,13 +818,24 @@ def make_recipe(
         key=key or f"{tonic} {mode}",
         swing=swing,
         half_time=spec.half_time,
-        sounds=sounds,
+        sounds=_with_lead(_styled(sounds, style), lead, len(spec.sounds)),
         structure=structure,
         bars=(max(MIN_BARS, total - BARS_SLACK), total + BARS_SLACK),
         devices=tuple(spec.devices[i] for i in sorted(devices)),
         hats_per_bar=spec.hats_per_bar,
         kicks_per_bar=spec.kicks_per_bar,
+        bass_style=style,
+        character=tuple(spec.character[i] for i in sorted(character)),
     )
+
+
+def _styled(sounds: tuple[Sound, ...], style: str) -> tuple[Sound, ...]:
+    params = BASS_STYLES[style][1]
+    return tuple(replace(s, params=params) if s.instrument == "bass808" else s for s in sounds)
+
+
+def _with_lead(sounds: tuple[Sound, ...], lead: Sound, core: int) -> tuple[Sound, ...]:
+    return (*sounds[:core], lead, *sounds[core:])
 
 
 def recipe_json(recipe: Recipe) -> str:

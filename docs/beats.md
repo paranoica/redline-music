@@ -6,8 +6,9 @@ can use, and what the numbers do and do not say.
 ## The loop
 
 1. `redline beat write --seed N` draws a recipe from the seed: genre, tempo, key and mode,
-   swing, a palette of sounds, a structure of sections and two or three moves. `--genre`,
-   `--bpm` and `--key` pin a field; the other draws stay the same.
+   swing, a palette of sounds with one lead voice, a structure of sections, two or three
+   devices, the 808's style and one or two character moves. `--genre`, `--bpm` and `--key` pin
+   a field; the other draws stay the same.
 2. The request goes to `private/beats/N/request-1.md`. The `beatmaker` agent reads only that
    file and writes the score to the draft path named at its end.
 3. The same command again checks the draft. A valid score becomes `score-1.json`; an invalid
@@ -95,8 +96,26 @@ the same bar repeated more than eight times, the same set of sounds for more tha
 kick within 10 ms of an 808 note start. Each says where its limit comes from: production blogs,
 unverified, or our own choice.
 
-Genres: trap, uk_drill, ny_drill, plugg, boom_bap, phonk, jersey_club, cloud, lofi. Their
-tempos, hat styles and 808 habits come from production blogs and are starting points, not rules.
+Genres: trap, dark_trap, rage, plugg, pluggnb, uk_drill, ny_drill, chicago_drill, jersey_club,
+memphis, phonk (the drift kind), cloud, lofi, boom_bap. Their tempos, structures, hat styles and
+808 habits come from producer blogs and tutorials and are starting points, not rules; where the
+blogs disagree (phonk's tempo, swing scales) the table keeps one and says so.
+
+What keeps two beats of a genre apart:
+
+- **Lead.** Each genre draws its melodic voice from several: the sampled CC0 instruments (upright
+  piano, FM piano, harp, violin and cello pizzicato, kalimba, glockenspiel, vibraphone, marimba,
+  tubular bells), FM keys and bell, a plucked string, a saw lead, a supersaw, strings, brass.
+  The FM bell leads about one beat in eight.
+- **808 style.** One of clean and long, distorted, constant glide, staccato with slides, octave
+  bounce, kick double, short sub, blown out, or the 808 as the lead; it sets the bass's starting
+  params and how the beatmaker plays it.
+- **Character.** One or two moves against the textbook: an off-grid kick, kick pickups, a shifted
+  snare, triplet or pitch-bent hats, hats that swing alone, a silent beat in the hook, a sparse
+  808, a beat switch, a verse that starts without hats, a counter-melody in later hooks,
+  different loop endings, velocity tiers, a chopped or detuned lead, an 808 that answers the
+  melody. A move outranks the general advice of the request. The sparse 808 comes from measuring
+  the owner's own tracks: in half of them the 808 is out for 13-26% of the bars.
 
 ## Instruments
 

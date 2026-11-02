@@ -17,6 +17,8 @@ import redline_dsp
 
 from redline.beat.checks import Caution, check_score
 from redline.beat.recipe import (
+    BASS_STYLES,
+    CHARACTER,
     DEVICES,
     GENRES,
     Recipe,
@@ -168,7 +170,8 @@ def _recipe(recipe: Recipe) -> list[str]:
         recipe_json(recipe),
         "```",
         "",
-        f"- Genre: {recipe.genre} ({feel}). Its facts are from blogs, unverified; "
+        f"- Genre: {recipe.genre} ({feel}). Its facts are from producer blogs and tutorials, "
+        "unverified; "
         f"own choices: {', '.join(genre.invented)}.",
         f"- Tempo {recipe.bpm:g} BPM, key {recipe.key}, swing {recipe.swing:g}, seed "
         f"{recipe.seed}.",
@@ -189,6 +192,15 @@ def _recipe(recipe: Recipe) -> list[str]:
         "- Devices, all of them:",
     ]
     out += [f"  - {DEVICES[d].text} ({DEVICES[d].source})" for d in recipe.devices]
+    if recipe.bass_style:
+        style = BASS_STYLES[recipe.bass_style][0]
+        out.append(f"- 808 style ({recipe.bass_style}): {style.text} ({style.source}).")
+    if recipe.character:
+        out.append(
+            "- Character, all of them: this beat's own moves; where one clashes with "
+            '"Making it musical", the move wins.'
+        )
+        out += [f"  - {CHARACTER[c].text} ({CHARACTER[c].source})" for c in recipe.character]
     return out
 
 

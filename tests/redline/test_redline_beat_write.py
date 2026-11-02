@@ -8,9 +8,12 @@ import pytest
 
 redline_dsp = pytest.importorskip("redline_dsp")
 
-from redline.beat import handoff  # noqa: E402
+from redline.beat import handoff, library  # noqa: E402
 from redline.beat.checks import check_score  # noqa: E402
 from redline.beat.recipe import (  # noqa: E402
+    BASS_STYLES,
+    CHARACTER,
+    DEVICES,
     GENRES,
     RecipeError,
     make_recipe,
@@ -113,6 +116,71 @@ def test_a_recipe_comes_back_from_its_json():
         assert recipe_from_json(recipe_json(recipe)) == recipe
 
 
+def lead_of(recipe):
+    (lead,) = [s for s in recipe.sounds if s.name == "lead"]
+    return lead
+
+
+def voice_of(sound):
+    return (sound.instrument, sound.library, dict(sound.params).get("preset"))
+
+
+@pytest.mark.parametrize("genre", sorted(GENRES))
+def test_every_genre_draws_its_lead_from_more_than_one_melodic_voice(genre):
+    spec = GENRES[genre]
+    notes = {
+        i["instrument"] for i in json.loads(redline_dsp.beat_instruments()) if i["kind"] == "note"
+    }
+    fetchable = {name for name, src in library.load().items() if src.kind == "fetch"}
+    assert len({voice_of(s) for s in spec.leads}) > 1
+    for sound in spec.leads:
+        assert sound.name == "lead"
+        assert sound.instrument in notes and sound.instrument != "bass808"
+        assert sound.instrument != "sampler" or sound.library in fetchable
+    assert not any(s.name == "lead" for s in spec.sounds + spec.extras)
+
+
+def test_the_bell_is_the_lead_of_under_a_quarter_of_the_beats():
+    leads = [voice_of(lead_of(make_recipe(seed))) for seed in range(400)]
+    assert leads.count(("fm", None, "bell")) < len(leads) / 4
+    assert len(set(leads)) >= 10
+
+
+def test_every_move_names_where_it_comes_from_and_every_genre_names_known_moves():
+    sources = {"blog, unverified", "own choice", "measured on the owner's tracks"}
+    for table in (DEVICES, CHARACTER):
+        assert all(move.source in sources for move in table.values())
+    assert all(device.source in sources for device, _ in BASS_STYLES.values())
+    for name, spec in GENRES.items():
+        assert set(spec.devices) <= set(DEVICES), name
+        assert spec.bass_styles and set(spec.bass_styles) <= set(BASS_STYLES), name
+        assert len(spec.character) >= 2 and set(spec.character) <= set(CHARACTER), name
+
+
+@pytest.mark.parametrize("genre", sorted(GENRES))
+def test_a_recipe_draws_one_or_two_moves_and_its_808_starts_from_its_style(genre):
+    spec = GENRES[genre]
+    counts = set()
+    for seed in range(30):
+        recipe = make_recipe(seed, genre=genre)
+        assert recipe.bass_style in spec.bass_styles
+        counts.add(len(recipe.character))
+        assert len(set(recipe.character)) == len(recipe.character)
+        assert set(recipe.character) <= set(spec.character)
+        (bass,) = [s for s in recipe.sounds if s.instrument == "bass808"]
+        assert bass.params == BASS_STYLES[recipe.bass_style][1]
+        assert lead_of(recipe) in spec.leads
+    assert counts == {1, 2}
+
+
+def test_a_recipe_saved_before_the_moves_reads_back_without_them():
+    raw = json.loads(recipe_json(make_recipe(3)))
+    del raw["bass_style"], raw["character"]
+    old = recipe_from_json(json.dumps(raw))
+    assert old.bass_style == "" and old.character == ()
+    assert old.sounds == make_recipe(3).sounds
+
+
 def test_options_override_only_what_they_name():
     drawn = make_recipe(21)
     by_bpm = make_recipe(21, bpm=123)
@@ -149,7 +217,7 @@ def test_every_genre_has_its_sounds_and_structures():
 
 @pytest.mark.parametrize(
     "options",
-    [{"genre": "rage"}, {"bpm": 300}, {"bpm": 10}, {"key": "H minor"}, {"key": "C blues"}],
+    [{"genre": "polka"}, {"bpm": 300}, {"bpm": 10}, {"key": "H minor"}, {"key": "C blues"}],
 )
 def test_options_outside_the_known_are_refused(options):
     with pytest.raises(RecipeError):
@@ -408,6 +476,22 @@ def fitting(root, seed=5):
     sections = (low + 7) // 8
     assert 8 * sections <= recipe.bars[1]
     return score(bars=(8,) * sections, seed=seed)
+
+
+def test_the_request_names_the_808_style_and_every_character_move(tmp_path):
+    request = start(tmp_path).request.read_text(encoding="utf-8")
+    recipe = recipe_from_json((tmp_path / "5" / "recipe.json").read_text(encoding="utf-8"))
+    style = BASS_STYLES[recipe.bass_style][0].text
+    assert f"- 808 style ({recipe.bass_style}): {style}" in request
+    for move in recipe.character:
+        assert f"  - {CHARACTER[move].text}" in request
+    assert "the move wins" in request
+
+
+def test_a_request_from_a_recipe_without_moves_has_no_style_or_character_lines():
+    old = replace(make_recipe(5, genre="trap"), bass_style="", character=())
+    lines = handoff._recipe(old)
+    assert not any(line.startswith(("- 808 style", "- Character")) for line in lines)
 
 
 def test_the_first_run_puts_out_a_request_and_waits(tmp_path):
