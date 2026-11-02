@@ -690,3 +690,23 @@ def test_the_beat_page_takes_a_score_on_pack_sounds(placed, tmp_path):
     }
     errors, _ = beat.check(score)
     assert not any("library" in e for e in errors), errors
+
+
+def test_the_page_lists_the_packs_one_shots_by_category_without_loops(placed, tmp_path):
+    pytest.importorskip("redline_dsp")
+    from redline.beat import server as beat_server
+
+    put(pack.PACK, "Loops/Dark 140bpm Cmin.wav", tone(200, 3.0))
+    pack.scan(pack.PACK, pack.CATALOG)
+    beat = beat_server.BeatStudio(1, tmp_path / "beats", tmp_path / "work")
+    listed = beat.pack_sounds()
+    assert listed["error"] is None
+    assert set(listed["categories"]) == {"kick", "808"}
+    (boom,) = listed["categories"]["808"]
+    assert boom == {
+        "library": f"pack-{placed['808s/808 Boom (F#).wav'].id}",
+        "name": "808 Boom (F#)",
+        "root": 30,
+    }
+    empty = beat_server.BeatStudio(1, tmp_path / "beats", tmp_path / "elsewhere")
+    assert empty.pack_sounds() == {"categories": {}, "error": None}

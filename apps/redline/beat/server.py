@@ -310,6 +310,28 @@ class BeatStudio:
             )
         return (*_pcm(data, f"{name} file {index}"), item.note)
 
+    def pack_sounds(self) -> dict[str, Any]:
+        """The scanned pack's playable one-shots by category, for adding a sound on the page.
+
+        Each with its library name, a cleaned name and the root of a pitched one; loops left out.
+        """
+        try:
+            found = pack.load(self.work / "sounds" / "pack" / "catalog.json").values()
+        except pack.PackError as error:
+            return {"categories": {}, "error": str(error)}
+        out: dict[str, list[dict[str, Any]]] = {}
+        for s in sorted(found, key=lambda s: (s.category, pack.display_name(s))):
+            if s.category == "loop" or s.duration_s > pack.ZONE_MAX_S:
+                continue
+            out.setdefault(s.category, []).append(
+                {
+                    "library": f"{library.PACK_PREFIX}{s.id}",
+                    "name": pack.display_name(s),
+                    "root": s.note,
+                }
+            )
+        return {"categories": out, "error": None}
+
     def _pack_zone(self, name: str, file_id: str) -> tuple[bytes, int, int, int, int]:
         if file_id != "0":
             raise BadRequest(HTTPStatus.NOT_FOUND, f"{name} has no file {file_id}")
@@ -609,6 +631,8 @@ def beat_get(beat: BeatStudio, path: str, query: dict[str, list[str]]) -> Reply:
         return reply_bytes(HTTPStatus.OK, pcm, "application/octet-stream", headers)
     if path == "/api/beat/render/status":
         return reply_json(HTTPStatus.OK, beat.render_status())
+    if path == "/api/beat/pack":
+        return reply_json(HTTPStatus.OK, beat.pack_sounds())
     if path == "/api/beat/render":
         data, kind = beat.render_file(_one(query, "file"))
         return reply_bytes(HTTPStatus.OK, data, kind)
