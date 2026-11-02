@@ -532,9 +532,13 @@ export function makeUnique(score: Score, section: number, pattern: string): { sc
 export const MAX_SONG_BARS = 512;
 const SECTION_NAME_MAX = 48;
 
-export type SectionEdit = { ok: true; score: Score; selected: number } | { ok: false; reason: string };
+export type Refusal = { ok: false; reason: string };
+export type SectionEdit = { ok: true; score: Score; selected: number } | Refusal;
+export type ScoreEdit = { ok: true; score: Score } | Refusal;
+export type NamedEdit = { ok: true; score: Score; name: string } | Refusal;
 
-const noSection = (): SectionEdit => ({ ok: false, reason: "Такой секции нет." });
+const refuse = (reason: string): Refusal => ({ ok: false, reason });
+const noSection = (): Refusal => refuse("Такой секции нет.");
 
 const sectionAt = (score: Score, i: number): SectionJson | undefined => (Number.isInteger(i) ? score.sections[i] : undefined);
 
@@ -584,6 +588,294 @@ export function deleteSection(score: Score, i: number): SectionEdit {
   const out = copy(score);
   out.sections.splice(i, 1);
   return { ok: true, score: out, selected: Math.min(i, out.sections.length - 1) };
+}
+
+function barsText(n: number): string {
+  const d = n % 10;
+  const h = n % 100;
+  const word = d === 1 && h !== 11 ? "такт" : d >= 2 && d <= 4 && (h < 12 || h > 14) ? "такта" : "тактов";
+  return `${n} ${word}`;
+}
+
+// Splits section i into its first atBar bars and the rest. Both halves play and mute the same;
+// the fill is heard on a section's last bar, so it stays with the second half.
+export function splitSection(score: Score, i: number, atBar: number): SectionEdit {
+  const s = sectionAt(score, i);
+  if (!s) return noSection();
+  if (s.bars < 2) return refuse(`Секцию ${s.name} из одного такта не разрезать.`);
+  if (!Number.isInteger(atBar) || atBar < 1 || atBar >= s.bars) {
+    return refuse(`Секцию ${s.name} можно разрезать после такта с 1 по ${s.bars - 1}.`);
+  }
+  const rest = s.bars - atBar;
+  for (const name of s.play ?? []) {
+    const pb = patternOf(score, name)?.bars;
+    if (pb && (atBar % pb !== 0 || rest % pb !== 0)) {
+      return refuse(`Паттерн ${name} длиной ${barsText(pb)}: части в ${barsText(atBar)} и ${barsText(rest)} на него не делятся.`);
+    }
+  }
+  const first = structuredClone(s);
+  first.bars = atBar;
+  delete first.fill;
+  const second = structuredClone(s);
+  second.bars = rest;
+  second.name = sectionName(score.sections.map((x) => x.name), s.name);
+  const out = copy(score);
+  out.sections.splice(i, 1, first, second);
+  return { ok: true, score: out, selected: i };
+}
+
+// ---------- patterns and sounds ----------
+
+export const MAX_SOUNDS = 16;
+export const MAX_PATTERNS = 64;
+const PATTERN_BARS: readonly number[] = [1, 2, 4, 8];
+const OBJECT_KEYS: readonly string[] = ["__proto__", "constructor"];
+
+// own keys only: "constructor" would otherwise be found on every object
+const patternOf = (score: Score, name: string): PatternJson | undefined =>
+  Object.hasOwn(score.patterns, name) ? score.patterns[name] : undefined;
+const soundOf = (score: Score, name: string): SoundJson | undefined => (Object.hasOwn(score.sounds, name) ? score.sounds[name] : undefined);
+const hasRow = (p: PatternJson | undefined, sound: string): boolean => !!p && Object.hasOwn(p.rows ?? {}, sound);
+
+const noPattern = (name: string): Refusal => refuse(`Паттерна ${name} нет.`);
+const noSound = (name: string): Refusal => refuse(`Звука ${name} нет.`);
+const badBars = (bars: number): Refusal => refuse(`В паттерне 1, 2, 4 или 8 тактов, не ${bars}.`);
+const tooManyPatterns = (): Refusal => refuse(`Паттернов не больше ${MAX_PATTERNS}.`);
+
+function kindOf(specs: readonly InstrumentSpec[], instrument: string): "drum" | "note" | null {
+  return specs.find((i) => i.instrument === instrument)?.kind ?? null;
+}
+
+// Another pattern played with this one in some section that already has a row for the sound. The
+// fill is not counted either way: on the last bar its rows replace the played ones.
+function rowOwner(score: Score, pattern: string, sound: string): { pattern: string; section: string } | null {
+  for (const s of score.sections) {
+    const play = s.play ?? [];
+    if (!play.includes(pattern)) continue;
+    for (const other of play) {
+      if (other !== pattern && hasRow(patternOf(score, other), sound)) return { pattern: other, section: s.name };
+    }
+  }
+  return null;
+}
+
+// the score for previewing one pattern: it alone, looped, every sound heard
+export function patternScore(score: Score, pattern: string, loops: number): ScoreEdit {
+  const p = patternOf(score, pattern);
+  if (!p) return noPattern(pattern);
+  if (!Number.isInteger(loops) || loops < 1) return refuse("Повторов — целое число от 1.");
+  const bars = p.bars * loops;
+  if (bars > MAX_SONG_BARS) return refuse(`${loops} повторов — это ${barsText(bars)}, а в песне не больше ${MAX_SONG_BARS}.`);
+  const out = copy(score);
+  out.sections = [{ name: "loop", bars, play: [pattern] }];
+  return { ok: true, score: out };
+}
+
+export function newPattern(score: Score, bars: number): NamedEdit {
+  if (!PATTERN_BARS.includes(bars)) return badBars(bars);
+  if (Object.keys(score.patterns).length >= MAX_PATTERNS) return tooManyPatterns();
+  let n = 1;
+  while (Object.hasOwn(score.patterns, `p_${n}`)) n++;
+  const name = `p_${n}`;
+  const out = copy(score);
+  out.patterns[name] = { bars, rows: {} };
+  return { ok: true, score: out, name };
+}
+
+export function clonePattern(score: Score, pattern: string): NamedEdit {
+  const p = patternOf(score, pattern);
+  if (!p) return noPattern(pattern);
+  if (Object.keys(score.patterns).length >= MAX_PATTERNS) return tooManyPatterns();
+  const name = freshName(Object.keys(score.patterns), pattern);
+  const out = copy(score);
+  out.patterns[name] = structuredClone(p);
+  return { ok: true, score: out, name };
+}
+
+function fitSteps(text: string, end: number): string {
+  const at = stepIndices(text);
+  if (at.length < end) return text + ".".repeat(end - at.length);
+  return text.slice(0, (at[end - 1] as number) + 1);
+}
+
+function fitRow(row: RowJson, end: number): RowJson {
+  if (isNoteRow(row)) {
+    return row.flatMap((n) => {
+      if (typeof n.step !== "number" || typeof n.len !== "number") return [n];
+      if (n.step >= end) return [];
+      return n.step + n.len > end ? [{ ...n, len: end - n.step }] : [n];
+    });
+  }
+  if (typeof row === "string") return fitSteps(row, end);
+  if (typeof row.steps !== "string") return row;
+  const obj: DrumJson = { ...row, steps: fitSteps(row.steps, end) };
+  for (const lane of LANES) {
+    const values = obj[lane];
+    if (!Array.isArray(values)) continue;
+    // the padded steps are rests, so any in-range value is silent
+    obj[lane] = values.length >= end ? values.slice(0, end) : [...values, ...Array<number>(end - values.length).fill(laneDefault(lane, "."))];
+  }
+  return obj;
+}
+
+export function setPatternBars(score: Score, pattern: string, bars: number): ScoreEdit {
+  const p = patternOf(score, pattern);
+  if (!p) return noPattern(pattern);
+  if (!PATTERN_BARS.includes(bars)) return badBars(bars);
+  for (const s of score.sections) {
+    if (s.fill === pattern && bars !== 1) return refuse(`Паттерн ${pattern} — сбивка в секции ${s.name}, а сбивка длиной в один такт.`);
+    if ((s.play ?? []).includes(pattern) && s.bars % bars !== 0) {
+      return refuse(`Секция ${s.name} длиной ${barsText(s.bars)} не делится на ${barsText(bars)} паттерна ${pattern}.`);
+    }
+  }
+  const out = copy(score);
+  const target = out.patterns[pattern] as PatternJson;
+  target.bars = bars;
+  const rows = target.rows ?? {};
+  for (const [sound, row] of Object.entries(rows)) rows[sound] = fitRow(row, bars * STEPS_PER_BAR);
+  return { ok: true, score: out };
+}
+
+// on adds the pattern to section i's play; off takes it out of play, a fill is left as it is
+export function placePattern(score: Score, pattern: string, i: number, on: boolean): ScoreEdit {
+  const s = sectionAt(score, i);
+  if (!s) return noSection();
+  const p = patternOf(score, pattern);
+  if (!p) return noPattern(pattern);
+  const play = s.play ?? [];
+  const out = copy(score);
+  const target = out.sections[i] as SectionJson;
+  if (!on) {
+    target.play = play.filter((x) => x !== pattern);
+    return { ok: true, score: out };
+  }
+  if (play.includes(pattern)) return { ok: true, score: out };
+  if (s.bars % p.bars !== 0) {
+    return refuse(`Паттерн ${pattern} длиной ${barsText(p.bars)} не ложится в секцию ${s.name} длиной ${barsText(s.bars)}.`);
+  }
+  for (const other of play) {
+    const q = patternOf(score, other);
+    const sound = Object.keys(p.rows ?? {}).find((k) => hasRow(q, k));
+    if (sound !== undefined) return refuse(`В секции ${s.name} звук ${sound} уже играет паттерн ${other}.`);
+  }
+  target.play = [...play, pattern];
+  return { ok: true, score: out };
+}
+
+const soundBase = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24);
+
+// the instruments that play a sound library's recordings, as the score's rules allow
+export const SAMPLED: readonly string[] = ["sampler", "oneshot", "oneshot_hat", "oneshot_open_hat", "sample808"];
+
+export function addSound(
+  score: Score,
+  specs: readonly InstrumentSpec[],
+  name: string,
+  instrument: string,
+  params?: Record<string, ParamValue>,
+  library?: string,
+): NamedEdit {
+  if (!kindOf(specs, instrument)) return refuse(`Инструмента ${instrument} нет.`);
+  if (library !== undefined && !SAMPLED.includes(instrument)) return refuse(`${instrument} не играет сэмплы.`);
+  const taken = Object.keys(score.sounds);
+  if (taken.length >= MAX_SOUNDS) return refuse(`Звуков не больше ${MAX_SOUNDS}.`);
+  const base = soundBase(name) || soundBase(instrument) || "sound";
+  const fresh = taken.includes(base) || OBJECT_KEYS.includes(base) ? freshName(taken, base) : base;
+  const sound: SoundJson = { instrument };
+  if (params !== undefined) sound.params = structuredClone(params);
+  if (library !== undefined) sound.library = library;
+  const out = copy(score);
+  out.sounds[fresh] = sound;
+  return { ok: true, score: out, name: fresh };
+}
+
+// a pattern left without rows stays: a section may still play it
+export function removeSound(score: Score, name: string): ScoreEdit {
+  if (!soundOf(score, name)) return noSound(name);
+  const out = copy(score);
+  delete out.sounds[name];
+  for (const p of Object.values(out.patterns)) if (p.rows) delete p.rows[name];
+  for (const s of out.sections) {
+    if (!s.mute?.includes(name)) continue;
+    s.mute = s.mute.filter((m) => m !== name);
+    if (!s.mute.length) delete s.mute;
+  }
+  const mix = out.mix?.sounds;
+  if (mix) {
+    delete mix[name];
+    for (const m of Object.values(mix)) if (m.sidechain === name) delete m.sidechain;
+  }
+  return { ok: true, score: out };
+}
+
+export function ensureRow(score: Score, specs: readonly InstrumentSpec[], pattern: string, sound: string): ScoreEdit {
+  const p = patternOf(score, pattern);
+  if (!p) return noPattern(pattern);
+  const s = soundOf(score, sound);
+  if (!s) return noSound(sound);
+  if (hasRow(p, sound)) return { ok: true, score: copy(score) };
+  const kind = kindOf(specs, s.instrument);
+  if (!kind) return refuse(`Инструмента ${s.instrument} нет.`);
+  const owner = rowOwner(score, pattern, sound);
+  if (owner) return refuse(`В секции ${owner.section} звук ${sound} уже играет паттерн ${owner.pattern}.`);
+  const out = copy(score);
+  const target = out.patterns[pattern] as PatternJson;
+  target.rows ??= {};
+  target.rows[sound] = kind === "drum" ? ".".repeat(p.bars * STEPS_PER_BAR) : [];
+  return { ok: true, score: out };
+}
+
+export function soundMuted(score: Score, sound: string): boolean {
+  return score.sections.length > 0 && score.sections.every((s) => (s.mute ?? []).includes(sound));
+}
+
+export function setSoundMuted(score: Score, sound: string, on: boolean): ScoreEdit {
+  if (!soundOf(score, sound)) return noSound(sound);
+  const out = copy(score);
+  for (const s of out.sections) {
+    const mute = s.mute ?? [];
+    if (on) {
+      if (!mute.includes(sound)) s.mute = [...mute, sound];
+    } else if (mute.includes(sound)) {
+      const left = mute.filter((m) => m !== sound);
+      if (left.length) s.mute = left;
+      else delete s.mute;
+    }
+  }
+  return { ok: true, score: out };
+}
+
+export interface RackRow {
+  sound: string;
+  instrument: string;
+  kind: "drum" | "note" | null;
+  inPattern: boolean;
+  // the pattern that has this sound's row in a section this pattern is played in
+  lockedBy: string | null;
+  muted: boolean;
+}
+
+export function rackRows(score: Score, specs: readonly InstrumentSpec[], pattern: string): RackRow[] {
+  const p = patternOf(score, pattern);
+  return Object.entries(score.sounds).map(([sound, s]) => ({
+    sound,
+    instrument: s.instrument,
+    kind: kindOf(specs, s.instrument),
+    inPattern: hasRow(p, sound),
+    lockedBy: rowOwner(score, pattern, sound)?.pattern ?? null,
+    muted: soundMuted(score, sound),
+  }));
+}
+
+export function patternLabel(score: Score, pattern: string, index: number): string {
+  const label = `Паттерн ${index + 1}`;
+  const first = usage(score, pattern)[0];
+  return first === undefined ? label : `${label} · ${(score.sections[first] as SectionJson).name}`;
 }
 
 // the score the engine hears: solo and mute as section mutes on a copy
