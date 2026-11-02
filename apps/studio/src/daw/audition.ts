@@ -50,18 +50,20 @@ export type ZoneClient = Pick<BeatClient, "loadZone" | "rebuildSamplers">;
 // One engine's zones: each is asked for once, whether it loaded or not, so an edit never fetches
 // again what the engine has; the samplers are rebuilt only after a new one.
 // Loads each zone into an engine once. A zone on its way is waited for by a second load rather
-// than skipped; one that failed is asked for again next time, so a passing error does not
-// silence a sound for the whole session.
+// than skipped. One that failed is asked for again only by a load that `retry`s (a start, not
+// every live edit) and is reported once, so a passing error does not silence a sound for the
+// session and a file that is gone does not fill the screen.
 export class ZoneLoader {
   readonly #fetch: (library: string, file: string) => Promise<ZoneData>;
   readonly #done = new Set<string>();
+  readonly #failed = new Set<string>();
   readonly #pending = new Map<string, Promise<string | null>>();
 
   constructor(fetch: (library: string, file: string) => Promise<ZoneData>) {
     this.#fetch = fetch;
   }
 
-  async load(client: ZoneClient, wanted: readonly ZoneRef[]): Promise<string[]> {
+  async load(client: ZoneClient, wanted: readonly ZoneRef[], retry = true): Promise<string[]> {
     const problems: string[] = [];
     const mine: Promise<string | null>[] = [];
     const theirs: Promise<string | null>[] = [];
@@ -69,7 +71,7 @@ export class ZoneLoader {
     let chain: Promise<unknown> = Promise.resolve();
     for (const z of wanted) {
       const key = `${z.library}\u0000${z.file}`;
-      if (this.#done.has(key)) continue;
+      if (this.#done.has(key) || (!retry && this.#failed.has(key))) continue;
       const pending = this.#pending.get(key);
       if (pending) {
         theirs.push(pending);
@@ -84,14 +86,22 @@ export class ZoneLoader {
     for (const job of mine) {
       const problem = await job;
       if (problem === null) loaded++;
-      else problems.push(problem);
+      else if (problem !== "") problems.push(problem);
     }
-    await Promise.all(theirs);
+    // a zone another load brought in still needs the samplers rebuilt before this one plays
+    for (const problem of await Promise.all(theirs)) if (problem === null) loaded++;
     if (loaded) {
       const rebuilt = await client.rebuildSamplers();
       if (!rebuilt.ok) problems.push(...rebuilt.errors);
     }
     return problems;
+  }
+
+  // the problem text the first time a zone fails, "" after
+  #fail(key: string, problem: string): string {
+    if (this.#failed.has(key)) return "";
+    this.#failed.add(key);
+    return problem;
   }
 
   async #one(client: ZoneClient, z: ZoneRef, key: string): Promise<string | null> {
@@ -106,11 +116,12 @@ export class ZoneLoader {
         samples: new Int16Array(data.pcm),
         channels: data.channels === 2 ? 2 : 1,
       });
-      if (!result.ok) return `${z.library} ${z.file}: ${result.errors.join("; ")}`;
+      if (!result.ok) return this.#fail(key, `${z.library} ${z.file}: ${result.errors.join("; ")}`);
       this.#done.add(key);
+      this.#failed.delete(key);
       return null;
     } catch (error) {
-      return `${z.library} ${z.file}: ${error instanceof Error ? error.message : String(error)}`;
+      return this.#fail(key, `${z.library} ${z.file}: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.#pending.delete(key);
     }
@@ -286,14 +297,14 @@ export class Audition {
     const text = serialize(score);
     if (!this.#check(await (this.#loaded ? client.update(text) : client.load(text)), what)) return false;
     this.#loaded = true;
-    await this.#loadZones(client, score);
+    await this.#loadZones(client, score, true);
     return true;
   }
 
-  async #loadZones(client: BeatClient, score: Score): Promise<void> {
+  async #loadZones(client: BeatClient, score: Score, retry: boolean): Promise<void> {
     const loader = this.#loader;
     if (!loader || !this.#zones) return;
-    const problems = await loader.load(client, this.#zones(score));
+    const problems = await loader.load(client, this.#zones(score), retry);
     if (problems.length) this.#onError(`Не все сэмплы загрузились: ${problems.slice(0, 3).join("; ")}`);
   }
 
@@ -301,7 +312,7 @@ export class Audition {
     const host = this.#ready;
     if (!host || !this.#playing) return;
     if (!this.#check(await host.client.update(serialize(score)), "Живой звук не обновился")) return;
-    await this.#loadZones(host.client, score);
+    await this.#loadZones(host.client, score, false);
     // a new tempo, a shorter song or another block moves the loop's frames
     let range: Range;
     try {

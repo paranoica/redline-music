@@ -161,6 +161,12 @@ def test_a_song_on_a_new_beat_gets_a_starter_on_a_free_seed(served, root):
     assert api(served, "POST", "/api/songs", {**body, "name": "fresh"})[0] == 409
     assert api(served, "POST", "/api/songs", {**body, "name": "other", "text_seed": 999})[0] == 422
     assert sorted(p.name for p in (root / "private" / "beats").iterdir()) == before
+    # nor does one stopped by the disk
+    from unittest import mock
+
+    with mock.patch.object(model, "create", side_effect=OSError("disk full")):
+        assert api(served, "POST", "/api/songs", {**body, "name": "third"})[0] == 500
+    assert sorted(p.name for p in (root / "private" / "beats").iterdir()) == before
 
 
 def test_a_song_is_created_with_every_reference_and_the_latest_text(served, root):

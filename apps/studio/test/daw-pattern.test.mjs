@@ -320,12 +320,17 @@ test("a zone that fails comes back as text, rebuilds nothing, and is asked for a
   assert.equal(problems.length, 1);
   assert.match(problems[0], /pack-9/);
   assert.equal(client.log.rebuilt, 0);
-  down = false;
+  // a live edit does not ask again; a failure that repeats is not reported again
+  assert.deepEqual(await loader.load(client, [z], false), []);
+  assert.equal(asked, 1);
   assert.deepEqual(await loader.load(client, [z]), []);
   assert.equal(asked, 2);
+  down = false;
+  assert.deepEqual(await loader.load(client, [z]), []);
+  assert.equal(asked, 3);
   assert.equal(client.log.rebuilt, 1);
   await loader.load(client, [z]);
-  assert.equal(asked, 2);
+  assert.equal(asked, 3);
 });
 
 test("a load that finds a zone still on its way waits for it before it returns", async () => {
@@ -345,6 +350,8 @@ test("a load that finds a zone still on its way waits for it before it returns",
   release();
   await Promise.all([first, later]);
   assert.deepEqual(client.log.loaded, ["pack-5"]);
+  // both loads leave the samplers rebuilt before they return
+  assert.equal(client.log.rebuilt, 2);
 });
 
 // ---------- the owner: a hit and a retarget ----------

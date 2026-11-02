@@ -371,15 +371,17 @@ class AppHost:
         refs = tuple(audio_in(REFS, self.root))
         try:
             saved = model.create(name, beat, None, refs, text_seed, self.root)
-        except (model.SongExists, model.SongError) as error:
-            # a starter made for this song alone goes with it
+        except BaseException as error:
+            # a starter made for this song alone goes with it, whatever stopped the song
             if "own" in beat and isinstance(body.get("beat"), dict) and "new" in body["beat"]:
                 shutil.rmtree(
                     self.root / "private" / "beats" / str(beat["own"]), ignore_errors=True
                 )
             if isinstance(error, model.SongExists):
                 raise ApiError(HTTPStatus.CONFLICT, str(error), "exists") from None
-            raise _unprocessable(str(error)) from None
+            if isinstance(error, model.SongError):
+                raise _unprocessable(str(error)) from None
+            raise
         return reply_json(HTTPStatus.CREATED, {"name": saved.name})
 
     def open_song(self, body: dict) -> Reply:
