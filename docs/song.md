@@ -55,7 +55,7 @@ The song screen:
 | Transport | play/pause (Space), stop, record (R), loop (L, or drag on the ruler), Home; the clock in m:ss.s and bar.beat; «дальше:» names the next step; ⋯ holds calibration (cup, cable, speakers), discard the last take, cancel the running job, the result folder; Export |
 | Text | the chosen text's lines over the bars they are sung on: two bars a line after a four-bar intro, as the writer fits them. The placement says «примерно» until it is nudged (start bar, one or two bars a line), which is kept in `private/songs/<name>/layout.json` |
 | Voice and takes | the chosen take, and every take under it; a star chooses one, ▶ plays one over the beat. Choosing a take starts its preparation (separation and measuring) |
-| Beat | an own beat's sections, its 808 notes and drums; a type beat's waveform, or its arrangement once split |
+| Beat | an own beat's sections and, under them, the playlist: a lane per pattern with a clip wherever a section plays it; a type beat's waveform, or its arrangement once split |
 | Editor | for the selected track: an own beat's channel rack and piano roll, the voice and beat knobs, the text and its versions |
 
 **Playback.** The main transport always plays the song from files through the studio engine,
@@ -72,6 +72,13 @@ the piano roll on it. A sound another pattern of the same section already plays 
 with that pattern's name (one sound, one pattern a section, as the score format wants). «＋ звук»
 adds a synthesised instrument or a sound from your scanned pack, heard before it is added; ✕
 removes one. Edits change the pattern everywhere it plays.
+
+**The playlist.** Click an empty cell of a pattern's lane to play that pattern in that section, or
+drag across sections to paint several in one step; a section that cannot take it (its bars, or a
+sound another pattern there already plays) is left and the reason shown. Click a clip to select
+it: the rack shows its pattern, Delete, ✕ or a right click takes it out of that section (never the
+section itself), «Сделать уникальной» gives a shared clip its own copy. A section splits at a bar
+with Alt+click or «Разрезать». A fill shows as a mark on its section's last bar.
 
 **Pattern / song.** The transport's «Паттерн | Песня» toggle (own beats): pattern mode loops the
 rack's pattern alone through the live engine, following every edit and a switched pattern at

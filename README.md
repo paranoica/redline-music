@@ -102,8 +102,8 @@ song opens on one screen, laid out like a DAW:
 - **Transport** across the top: play/pause (Space), stop, record (R), loop (L), the clock in
   time and bars, a hint of what to do next, and **Export**.
 - **Tracks** on a bar ruler: the text with its lines over the bars they are sung on, the voice
-  (the chosen take) with every take under it, the beat as its sections, and for an own beat its
-  808 notes and drums. A star picks the take; a small ▶ plays one take over the beat.
+  (the chosen take) with every take under it, the beat as its sections, and for an own beat a
+  lane per pattern. A star picks the take; a small ▶ plays one take over the beat.
 - **Editor** at the bottom, for the selected track. An own beat gets a **channel rack**, the FL
   way:
   - the pattern on top: pick, ＋ new, ⧉ copy, length 1/2/4/8 bars;
@@ -111,6 +111,9 @@ song opens on one screen, laid out like a DAW:
     hit, Shift for accent and ghost, right click to clear); a note sound shows a preview that
     opens the piano roll;
   - «＋ звук» adds a synthesised sound or one from your pack, ✕ removes one;
+  - a **playlist** on the timeline: under the beat's sections, a lane per pattern; a click or a
+    drag over empty sections puts the pattern there, a click on a clip opens it in the rack,
+    Delete or a right click takes a clip out of its section, a section splits at a bar;
   - a **Pattern | Song** toggle in the transport: pattern mode loops that pattern alone, every
     edit heard at once, the playing step lit.
 
