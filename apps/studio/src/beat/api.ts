@@ -80,6 +80,18 @@ export interface RenderStatus {
   non_commercial?: string[];
 }
 
+// a playable one-shot of the owner's pack: `library` is its pack-<id>, `name` cleaned by the server
+export interface PackSound {
+  library: string;
+  name: string;
+  root: number | null;
+}
+
+export interface PackList {
+  categories: Record<string, PackSound[]>;
+  error: string | null;
+}
+
 export interface ZoneData {
   pcm: ArrayBuffer;
   rate: number;
@@ -128,6 +140,7 @@ export function createApi({ base, token }: BeatApiOptions) {
       json<Mark>(call("POST", "/mark", { bar, verdict, note, base })),
     render: (scoreFile: string) => json<RenderStatus>(call("POST", "/render", { score_file: scoreFile })),
     renderStatus: () => json<RenderStatus>(call("GET", "/render/status")),
+    pack: () => json<PackList>(call("GET", "/pack")),
     renderFile: async (file: string): Promise<Blob> => (await call("GET", `/render?file=${encodeURIComponent(file)}`)).blob(),
     zone: async (library: string, file: string): Promise<ZoneData> => {
       const r = await call("GET", `/zone?library=${encodeURIComponent(library)}&file=${encodeURIComponent(file)}`);

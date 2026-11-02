@@ -195,6 +195,13 @@ class FakeAudition {
   update(score) {
     this.updates.push(score);
   }
+  retarget() {}
+  async hit() {
+    return true;
+  }
+  position() {
+    return 0;
+  }
   async stop() {
     this.playing = false;
     this.stops++;

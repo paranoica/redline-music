@@ -1,9 +1,10 @@
 // The bottom editor's contents for the selected lane: an own beat's channel rack and piano roll,
 // a flip's notes and drum grid, the effects, the text. Own-beat edits go to one draft per seed
 // after a quiet moment; the numbered score and its render happen at the commit points only
-// (commitBeat), and a small ▶ auditions the selected block live through the beat engine.
+// (commitBeat), and a small ▶ auditions the selected block live through the beat engine. In
+// pattern mode the transport's play loops the rack's pattern alone through the same engine.
 
-import type { Api as BeatApi } from "../beat/api.ts";
+import type { Api as BeatApi, PackList } from "../beat/api.ts";
 import { ModelError, type InstrumentSpec, type Score } from "../beat/model.ts";
 import { History } from "../core/history.ts";
 import { apiPath, apiRoot } from "../core/mount.ts";
@@ -17,6 +18,7 @@ import type { FlipDraft } from "./flipdraft.ts";
 import { FxPane, type StudioLike } from "./fx.ts";
 import type { LyricLayout } from "./lyrics.ts";
 import type { Playback } from "./player.ts";
+import { addPicked, hitScore, loopedScore, patternPreview, stepAt, type Pick, type Preview, type StepAt } from "./pattern.ts";
 import { RackView } from "./rack.ts";
 import { FlipRoll, layerProblem, RollView, scoreRoll, SourceNotes, type NoteRowRef } from "./roll.ts";
 import { chooseShare, shareGate, type ShareChoice } from "./share.ts";
@@ -70,6 +72,8 @@ export interface EditorHost {
   // the editor wants another of the lane's tabs on screen
   openTab(tab: EditorTab): void;
   say(text: string): void;
+  // the block or the pattern started or stopped playing live
+  liveChanged?(): void;
   overlay: HTMLElement;
 }
 
@@ -99,6 +103,10 @@ export class Editor {
   // the note row the roll edits, picked in the rack
   #notes: NoteRowRef | null = null;
   #auditioning = false;
+  // what the live engine loops while #auditioning: the selected block, or the rack's pattern alone
+  #live: "block" | "pattern" = "block";
+  #patternMode = false;
+  #pack: Promise<PackList> | null = null;
   #auditionSeq = 0;
   #scoreKey: string | null = null;
   #lane: LaneKind | null = null;
@@ -137,6 +145,11 @@ export class Editor {
         if (open) host.openTab("roll");
       },
       say: (text) => host.say(text),
+      preview: (sound, pattern) => this.#preview(sound, pattern),
+      previewPick: (pick, root) => this.#previewPick(pick, root),
+      switched: () => this.#retarget(),
+      confirm: (text) => host.confirm(text),
+      pack: () => this.#packList(),
     });
     this.#source = new SourceNotes(host.flipApi, () => host.flipDraft.flush(), () => host.repaint());
     const flipEditing = {
@@ -256,7 +269,8 @@ export class Editor {
     this.#notes = null;
     this.#rack.follow();
     this.#source.retry();
-    if (this.#auditioning) void this.#startAudition();
+    if (this.patternPlaying) this.#retarget();
+    else if (this.#auditioning) void this.#startAudition();
   }
 
   // the own beat's score is read once the beat lane is on screen, so block ops have it
@@ -281,7 +295,7 @@ export class Editor {
     if (!this.#draft.score) return false;
     this.#ask = null;
     if (opts.live) {
-      this.#host.playback()?.updateAudition(next);
+      this.#sendLive(next);
       return true;
     }
     this.#apply(next, true);
@@ -290,8 +304,148 @@ export class Editor {
 
   // the song's playback took over
   auditionOff(): void {
+    const was = this.#auditioning;
     this.#auditioning = false;
     this.#paintAudition();
+    if (was) this.#host.liveChanged?.();
+  }
+
+  // ---------- pattern mode ----------
+
+  get patternMode(): boolean {
+    return this.#patternMode;
+  }
+
+  get patternPlaying(): boolean {
+    return this.#auditioning && this.#live === "pattern";
+  }
+
+  // song mode stops a pattern that plays; the song's playback is the screen's to stop
+  setPatternMode(on: boolean): void {
+    if (on === this.#patternMode) return;
+    this.#patternMode = on;
+    if (!on && this.patternPlaying) void this.#stopLive();
+  }
+
+  // the transport's play in pattern mode: the rack's pattern alone, round and round, or a stop
+  async togglePattern(): Promise<void> {
+    const pb = this.#host.playback();
+    if (!pb) return;
+    if (this.patternPlaying) return this.#stopLive();
+    const score = this.#draft.score;
+    if (!score) {
+      this.prepare();
+      this.#host.say("Партитура ещё загружается.");
+      return;
+    }
+    const preview = this.#patternPreview(score);
+    if (!preview) {
+      this.#host.say("В бите нет паттерна, чтобы его играть.");
+      return;
+    }
+    this.#host.stopSong();
+    this.#auditioning = true;
+    this.#live = "pattern";
+    this.#paintAudition();
+    this.#host.liveChanged?.();
+    const seq = ++this.#auditionSeq;
+    try {
+      await pb.audition(preview.score, 0, preview.bars);
+    } catch (error) {
+      if (seq !== this.#auditionSeq) return;
+      this.#auditioning = false;
+      this.#paintAudition();
+      this.#host.liveChanged?.();
+      this.#host.say(`Паттерн не играет: ${message(error)}`);
+    }
+  }
+
+  // Lights the rack's playing step. `songBars`: where the song plays, null when it does not; the
+  // live engine, when it plays, goes first.
+  paintCursor(songBars: number | null): void {
+    const score = this.#draft.score;
+    const pattern = this.#rack.shown;
+    if (this.#tab !== "rack" || !score || pattern === null) return;
+    let at: StepAt | null = null;
+    const live = this.#auditioning ? (this.#host.playback()?.auditionPosition() ?? null) : null;
+    if (live !== null) {
+      const bars = (live * score.bpm) / 240;
+      at = stepAt(this.#live === "pattern" ? loopedScore(score, pattern) : score, pattern, bars);
+    } else if (songBars !== null) at = stepAt(score, pattern, songBars);
+    this.#rack.cursor(at);
+  }
+
+  #patternPreview(score: Score): Preview | null {
+    const pattern = this.#rack.current(score);
+    return pattern === null ? null : patternPreview(score, pattern);
+  }
+
+  async #stopLive(): Promise<void> {
+    this.#auditioning = false;
+    this.#paintAudition();
+    this.#host.liveChanged?.();
+    await this.#host.playback()?.stopAudition();
+  }
+
+  // the rack shows another pattern: a pattern that plays follows it
+  #retarget(): void {
+    const score = this.#draft.score;
+    if (!this.patternPlaying || !score) return;
+    const preview = this.#patternPreview(score);
+    if (!preview) {
+      void this.#stopLive();
+      return;
+    }
+    this.#host.playback()?.retargetAudition(preview.score, 0, preview.bars);
+  }
+
+  // an edit heard at once: the pattern alone in pattern mode, else the whole song
+  #sendLive(next: Score): void {
+    const pb = this.#host.playback();
+    if (!pb) return;
+    if (!this.patternPlaying) {
+      pb.updateAudition(next);
+      return;
+    }
+    const preview = this.#patternPreview(next);
+    if (preview) pb.retargetAudition(preview.score, 0, preview.bars);
+  }
+
+  // ---------- hearing one sound ----------
+
+  #preview(sound: string, pattern: string | null): void {
+    const score = this.#draft.score;
+    const hit = score ? hitScore(score, this.#draft.instruments, sound, pattern) : null;
+    if (hit) void this.#hit(hit);
+  }
+
+  #previewPick(pick: Pick, root: number | null): void {
+    const score = this.#draft.score;
+    if (!score) return;
+    // heard alone: a full score or another sound's mix under the same name has no say
+    const bare: Score = { ...score, sounds: {} };
+    delete bare.mix;
+    const made = addPicked(bare, this.#draft.instruments, null, pick);
+    if (!made.ok) return this.#host.say(made.reason);
+    const hit = hitScore(made.score, this.#draft.instruments, made.name, null, root ?? undefined);
+    if (hit) void this.#hit(hit);
+  }
+
+  async #hit(score: Score): Promise<void> {
+    try {
+      await this.#host.playback()?.hit(score);
+    } catch (error) {
+      this.#host.say(`Звук не играет: ${message(error)}`);
+    }
+  }
+
+  // asked once; a failed read is asked again at the next menu
+  #packList(): Promise<PackList> {
+    if (!this.#pack) {
+      this.#pack = this.#host.beatApi.pack();
+      this.#pack.catch(() => (this.#pack = null));
+    }
+    return this.#pack;
   }
 
   // the panes for the lane, the active tab drawn
@@ -408,7 +562,7 @@ export class Editor {
   #apply(next: Score, push: boolean): void {
     this.#draft.apply(next);
     if (push) this.#history?.push(next);
-    this.#host.playback()?.updateAudition(next);
+    this.#sendLive(next);
     this.#host.scoreChanged(next);
     this.#host.beatState();
   }
@@ -495,12 +649,7 @@ export class Editor {
   async #toggleAudition(): Promise<void> {
     const pb = this.#host.playback();
     if (!pb) return;
-    if (this.#auditioning) {
-      this.#auditioning = false;
-      this.#paintAudition();
-      await pb.stopAudition();
-      return;
-    }
+    if (this.#auditioning) return this.#stopLive();
     await this.#startAudition();
   }
 
@@ -544,7 +693,9 @@ export class Editor {
     if (!block || (!flip && !score)) return;
     this.#host.stopSong();
     this.#auditioning = true;
+    this.#live = "block";
     this.#paintAudition();
+    this.#host.liveChanged?.();
     const seq = ++this.#auditionSeq;
     try {
       if (flip) {
@@ -556,6 +707,7 @@ export class Editor {
     } catch (error) {
       this.#auditioning = false;
       this.#paintAudition();
+      this.#host.liveChanged?.();
       this.#host.say(`Кусок не играет: ${message(error)}`);
     }
   }

@@ -90,6 +90,10 @@ button:disabled { cursor: default; opacity: 0.45; }
 .daw .tbtn--rec[aria-pressed="true"] .tbtn__icon { fill: var(--red-ink); }
 .daw .tbtn--toggle { color: var(--muted); }
 .daw .tbtn--toggle[aria-pressed="true"] { border-color: var(--text-dim); color: var(--text); background: var(--raised-hover); }
+.daw .mode { display: flex; padding: 2px; background: var(--well); border: 1px solid var(--line); border-radius: 8px; }
+.daw .mode[hidden] { display: none; }
+.daw .mode__btn { padding: 5px 12px; border: 0; border-radius: 6px; background: none; color: var(--text-dim); cursor: pointer; font-size: 13px; }
+.daw .mode__btn[aria-pressed="true"] { background: var(--raised-hover); color: var(--text); }
 .daw .clock {
   display: flex; gap: 14px; align-items: baseline; margin-left: 10px; padding: 6px 14px; flex: none;
   background: var(--well); border: 1px solid var(--line); border-radius: 8px; font-family: var(--font-num);

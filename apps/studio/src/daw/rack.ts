@@ -1,7 +1,9 @@
 // The channel rack of an own beat: every sound of the score as a row over one pattern, FL style.
 // A drum row is the 16 steps of the bar shown, a note row a small picture of its notes that opens
-// the piano roll. An edit here changes the pattern wherever it plays, so nothing is asked.
+// the piano roll. An edit here changes the pattern wherever it plays, so nothing is asked. Sounds
+// are added from the synths or the pack under the rows and taken away by a row's ✕.
 
+import type { PackList } from "../beat/api.ts";
 import { instrumentLabel } from "../beat/labels.ts";
 import {
   clonePattern,
@@ -13,6 +15,7 @@ import {
   notesOf,
   patternLabel,
   rackRows,
+  removeSound,
   setGain,
   setHit,
   setPan,
@@ -26,9 +29,10 @@ import {
   type Score,
   type ScoreEdit,
 } from "../beat/model.ts";
-import { h } from "../ui/dom.ts";
+import { dismissable, h } from "../ui/dom.ts";
 import { ROLL_NAMES, toggleHit } from "./drums.ts";
 import { KnobControl } from "./knob.ts";
+import { addPicked, cursorColumn, PACK_CATEGORY_NAMES, packSound, soundUsed, synthMenu, type Pick, type StepAt } from "./pattern.ts";
 
 // ---------- the pattern shown ----------
 
@@ -160,8 +164,15 @@ export interface RackHost {
   // the note row the piano roll edits; `open` switches to the roll
   notes(pattern: string, sound: string, open: boolean): void;
   say(text: string): void;
-  // hearing one sound on its own; not offered yet
-  preview?(sound: string): void;
+  // one hit of a sound of the score, from the pattern shown
+  preview?(sound: string, pattern: string | null): void;
+  // one hit of a sound the menu offers, before it is added; `root` is a pack sound's own pitch
+  previewPick?(pick: Pick, root: number | null): void;
+  // another pattern picked in the rack
+  switched?(): void;
+  confirm?(text: string): boolean;
+  // the pack's one-shots by category
+  pack?(): Promise<PackList>;
 }
 
 const COLOURS: Record<string, string> = {
@@ -198,12 +209,40 @@ export class RackView {
   // a knob is held: the rows are not drawn again under it
   #dragging = false;
   #stale = false;
+  // the lit step column of the bar shown
+  #now: number | null = null;
+  readonly #addBtn: HTMLButtonElement;
+  #menu: { close: () => void } | null = null;
 
   constructor(host: RackHost) {
     this.#host = host;
     this.#head = h("div", { class: "rhead" });
     this.#rows = h("div", { class: "rack" });
     this.root = h("div", { class: "kpane" }, this.#head, this.#rows);
+    // made once: a menu open over it outlives the rows drawn again
+    this.#addBtn = h("button", { class: "radd__btn", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" }, "＋ звук");
+    this.#addBtn.addEventListener("click", () => (this.#menu ? this.#menu.close() : this.#openMenu()));
+  }
+
+  // the pattern on screen, null before the rack is drawn
+  get shown(): string | null {
+    return this.#shown;
+  }
+
+  // the pattern the rack shows for this score, drawn or not
+  current(score: Score | null = this.#host.score()): string | null {
+    if (!score) return null;
+    return this.#pick.current(score, this.#host.seed(), this.#host.section(), this.#host.wants?.() ?? null);
+  }
+
+  // lights the playing step when it is in the bar shown; only the classes change
+  cursor(at: StepAt | null): void {
+    const col = cursorColumn(at, this.#bar);
+    if (col === this.#now) return;
+    this.#now = col;
+    for (const box of this.#rows.querySelectorAll<HTMLElement>(".rsteps")) {
+      Array.from(box.children).forEach((cell, i) => cell.classList.toggle("now", i === col));
+    }
   }
 
   // another beat: nothing picked
@@ -227,7 +266,7 @@ export class RackView {
       this.#rows.replaceChildren(h("p", { class: "epane__empty" }, "Загружаю партитуру…"));
       return;
     }
-    const pattern = this.#pick.current(score, this.#host.seed(), this.#host.section(), this.#host.wants?.() ?? null);
+    const pattern = this.current(score);
     if (pattern !== this.#shown) {
       this.#shown = pattern;
       this.#bar = 0;
@@ -240,7 +279,7 @@ export class RackView {
       return;
     }
     const specs = this.#host.specs();
-    this.#rows.replaceChildren(...rackRows(score, specs, pattern).map((row) => this.#row(score, specs, pattern, row)));
+    this.#rows.replaceChildren(...rackRows(score, specs, pattern).map((row) => this.#row(score, specs, pattern, row)), h("div", { class: "radd" }, this.#addBtn));
   }
 
   // ---------- the head ----------
@@ -252,6 +291,7 @@ export class RackView {
     select.addEventListener("change", () => {
       this.#pick.choose(select.value);
       this.show();
+      this.#host.switched?.();
     });
     const add = h("button", { class: "rhead__btn", type: "button", title: "Новый паттерн", "aria-label": "Новый паттерн" }, "＋");
     add.addEventListener("click", () => {
@@ -340,12 +380,100 @@ export class RackView {
     name.addEventListener("click", () => {
       this.#selected = row.sound;
       if (kind === "note" && row.inPattern) this.#host.notes(pattern, row.sound, false);
-      this.#host.preview?.(row.sound);
+      this.#host.preview?.(row.sound, pattern);
       this.show();
     });
+    const del = h("button", { class: "ch__del", type: "button", title: "Убрать звук", "aria-label": `Убрать ${label} · ${row.sound}` }, "✕");
+    del.addEventListener("click", () => this.#remove(row.sound, label));
 
-    el.append(led, volume, pan, name, this.#body(score, specs, pattern, row, kind, label, locked));
+    el.append(led, volume, pan, h("div", { class: "ch__label" }, name, del), this.#body(score, specs, pattern, row, kind, label, locked));
     return el;
+  }
+
+  #remove(sound: string, label: string): void {
+    const current = this.#host.score();
+    if (!current) return;
+    // a sound with nothing in it goes without a question
+    if (soundUsed(current, sound) && !(this.#host.confirm?.(`Убрать ${label} (${sound})? Его удары и ноты пропадут из всех паттернов.`) ?? false)) return;
+    const made = removeSound(current, sound);
+    if (!made.ok) return this.#host.say(made.reason);
+    if (this.#selected === sound) this.#selected = null;
+    this.#host.edit(made.score);
+  }
+
+  // ---------- adding a sound ----------
+
+  #openMenu(): void {
+    const synth = synthMenu(this.#host.specs());
+    const column = (title: string, list: readonly InstrumentSpec[]): HTMLElement =>
+      h("div", { class: "smenu__col" }, h("p", { class: "smenu__sub" }, title), ...list.map((spec) => this.#menuItem(instrumentLabel(spec.instrument), { name: spec.instrument, instrument: spec.instrument }, null)));
+    const pack = h("div", { class: "smenu__pack" }, h("p", { class: "smenu__note" }, "Читаю пак…"));
+    const menu = h(
+      "div",
+      { class: "menu smenu", role: "menu", "aria-label": "Добавить звук" },
+      h("p", { class: "menu__group" }, "Синтез"),
+      h("div", { class: "smenu__cols" }, column("барабаны", synth.drums), column("с нотами", synth.notes)),
+      h("p", { class: "menu__group" }, "Из пака"),
+      pack,
+    );
+    this.root.append(menu);
+    this.#addBtn.setAttribute("aria-expanded", "true");
+    const close = dismissable(menu, this.#addBtn, () => {
+      menu.remove();
+      this.#menu = null;
+      this.#addBtn.setAttribute("aria-expanded", "false");
+    });
+    this.#menu = { close };
+    void this.#fillPack(pack);
+  }
+
+  async #fillPack(box: HTMLElement): Promise<void> {
+    const note = (text: string): HTMLElement => h("p", { class: "smenu__note" }, text);
+    const load = this.#host.pack;
+    if (!load) {
+      box.replaceChildren(note("Пак недоступен."));
+      return;
+    }
+    let list: PackList;
+    try {
+      list = await load.call(this.#host);
+    } catch (error) {
+      box.replaceChildren(note(`Пак не прочитался: ${error instanceof Error ? error.message : String(error)}`));
+      return;
+    }
+    const order = Object.keys(PACK_CATEGORY_NAMES);
+    const rank = (c: string): number => (order.includes(c) ? order.indexOf(c) : order.length);
+    const found = Object.entries(list.categories)
+      .filter(([, sounds]) => sounds.length > 0)
+      .sort(([a], [b]) => rank(a) - rank(b));
+    if (!found.length) {
+      box.replaceChildren(note(list.error ? `Пак не прочитался: ${list.error}` : "В паке нет звуков: его ещё не сканировали."));
+      return;
+    }
+    box.replaceChildren(
+      ...found.map(([category, sounds]) =>
+        h("details", { class: "smenu__cat" }, h("summary", {}, `${PACK_CATEGORY_NAMES[category] ?? category} · ${sounds.length}`), ...sounds.map((s) => this.#menuItem(s.name, packSound(category, s), s.root))),
+      ),
+    );
+  }
+
+  #menuItem(text: string, pick: Pick, root: number | null): HTMLElement {
+    const play = h("button", { class: "smenu__play", type: "button", title: "Послушать", "aria-label": `Послушать: ${text}` }, "▶");
+    play.addEventListener("click", () => this.#host.previewPick?.(pick, root));
+    const add = h("button", { class: "menu__item", type: "button", role: "menuitem", title: `Добавить: ${text}` }, text);
+    add.addEventListener("click", () => this.#add(pick));
+    return h("div", { class: "smenu__item" }, play, add);
+  }
+
+  #add(pick: Pick): void {
+    const current = this.#host.score();
+    if (!current) return;
+    const made = addPicked(current, this.#host.specs(), this.#shown, pick);
+    if (!made.ok) return this.#host.say(made.reason);
+    if (!this.#host.edit(made.score)) return;
+    this.#selected = made.name;
+    this.#menu?.close();
+    this.show();
   }
 
   #body(score: Score, specs: readonly InstrumentSpec[], pattern: string, row: RackRow, kind: "drum" | "note" | null, label: string, locked: boolean): HTMLElement {
@@ -378,7 +506,7 @@ export class RackView {
     hits.forEach((hit, col) => {
       const rolls = hit === "2" || hit === "3" || hit === "4" || hit === "6";
       const cell = h("button", {
-        class: `st${hit !== "." ? " on" : ""}${hit === "X" ? " accent" : ""}${hit === "g" ? " ghost" : ""}${rolls ? " roll" : ""}`,
+        class: `st${col === this.#now ? " now" : ""}${hit !== "." ? " on" : ""}${hit === "X" ? " accent" : ""}${hit === "g" ? " ghost" : ""}${rolls ? " roll" : ""}`,
         type: "button",
         "aria-pressed": String(hit !== "."),
         "aria-label": `${label}, шаг ${base + col + 1}`,

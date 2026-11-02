@@ -125,6 +125,10 @@ export interface AuditionLike {
   readonly playing: boolean;
   start(score: Score, fromBar: number, bars: number): Promise<void>;
   update(score: Score): void;
+  retarget(score: Score, fromBar: number, bars: number): void;
+  hit(score: Score): Promise<boolean>;
+  // the song second heard
+  position(): number;
   stop(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -310,6 +314,23 @@ export class Playback {
 
   updateAudition(score: Score): void {
     if (this.#deps.audition.playing) this.#deps.audition.update(score);
+  }
+
+  // another score and loop for the audition that plays, without a restart
+  retargetAudition(score: Score, fromBar: number, bars: number): void {
+    if (this.#deps.audition.playing) this.#deps.audition.retarget(score, fromBar, bars);
+  }
+
+  // One hit of a sound. It plays over the song, which is another engine; while the audition
+  // loops it is skipped rather than cut in.
+  async hit(score: Score): Promise<boolean> {
+    if (this.#closed || this.#deps.audition.playing) return false;
+    return this.#deps.audition.hit(score);
+  }
+
+  // the audition's song second, null when it does not play
+  auditionPosition(): number | null {
+    return this.#deps.audition.playing ? this.#deps.audition.position() : null;
   }
 
   async stopAudition(): Promise<void> {

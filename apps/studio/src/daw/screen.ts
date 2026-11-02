@@ -16,7 +16,7 @@ import { CALIBRATION, meterLevel, PeakHold, recPhase, recPollMs, stageRows, star
 import { TakePlayer } from "../song/takes.ts";
 import { parseLyric, type LyricPart } from "../song/text.ts";
 import { dismissable, h, icon } from "../ui/dom.ts";
-import { Audition, loadZones } from "./audition.ts";
+import { Audition, wantedZones } from "./audition.ts";
 import { fileClips, flipClips, ownClips, splitAt, type Clip } from "./clips.ts";
 import { isDrag, planDrag } from "./drag.ts";
 import { drawHits, drawNotes, drawWave, sizedCanvas, type PeakData } from "./draw.ts";
@@ -169,11 +169,15 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   recBtn.setAttribute("aria-pressed", "false");
   const loopBtn = tbtn("tbtn--toggle", "Повтор куска (L)", PATHS.loop);
   loopBtn.setAttribute("aria-pressed", "false");
+  // what play plays for an own beat: the rack's pattern alone, or the song
+  const patBtn = h("button", { class: "mode__btn", type: "button", "aria-pressed": "false", title: "Play играет паттерн из «Каналов» по кругу" }, "Паттерн");
+  const songBtn = h("button", { class: "mode__btn", type: "button", "aria-pressed": "true", title: "Play играет всю песню" }, "Песня");
+  const modeBox = h("div", { class: "mode", role: "group", "aria-label": "Что играет play", hidden: true }, patBtn, songBtn);
   const time = h("span", { class: "clock__time" }, "0:00.0");
   const barPos = h("span", { class: "clock__bar" }, "такт 1.1");
   const bpmText = h("span", { class: "clock__bpm" }, "— BPM");
   const strip = h("div", { class: "strip", role: "status", hidden: true });
-  const transportBox = h("div", { class: "transport" }, home, play, stopBtn, recBtn, loopBtn, h("div", { class: "clock" }, time, barPos, bpmText), strip);
+  const transportBox = h("div", { class: "transport" }, home, play, stopBtn, recBtn, loopBtn, modeBox, h("div", { class: "clock" }, time, barPos, bpmText), strip);
   const chip = h("button", { class: "nextchip", type: "button" });
   const meterFill = h("i", {});
   const meter = h("div", { class: "meter", title: "Общий уровень", role: "meter", "aria-label": "Общий уровень" }, meterFill);
@@ -243,6 +247,9 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       paintEditor();
     },
     say: (text) => say(text),
+    liveChanged: () => {
+      if (ready && !scope.closed) paintTop();
+    },
     overlay: root,
   });
 
@@ -325,7 +332,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     }
     const next = new Playback({
       ...make,
-      audition: new Audition({ onError: say, prepare: (client) => loadZones(client, beatLibraries, (library, file) => beatApi.zone(library, file)) }),
+      audition: new Audition({ onError: say, zones: (s) => wantedZones(beatLibraries, s), fetchZone: (library, file) => beatApi.zone(library, file) }),
     });
     playback = next;
     for (const lane of ["beat", "voice"] as const) next.setLane(lane, lanes[lane]);
@@ -415,7 +422,24 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     }
   }
 
+  // the live engine plays the draft, so a render under way does not hold the pattern back
+  function patternPress(): boolean {
+    return bottom.patternMode && facts.beatKind === "own" && (transport.mode === "idle" || (transport.mode === "rendering" && transport.then !== "play"));
+  }
+
+  function setPatternMode(on: boolean): void {
+    if (on === bottom.patternMode) return;
+    if (on && transport.mode === "playing") dispatch({ type: "pause" });
+    bottom.setPatternMode(on);
+    paintTop();
+  }
+
   function pressPlay(): void {
+    if (patternPress()) {
+      takePlayer.stop();
+      void bottom.togglePattern();
+      return;
+    }
     if (transport.mode === "playing") dispatch({ type: "pause" });
     else if (transport.mode === "rendering" && transport.then === "play") dispatch({ type: "pause" });
     else if (transport.mode === "idle" || transport.mode === "rendering") {
@@ -445,6 +469,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       return;
     }
     takePlayer.stop();
+    // a take is made over the song
+    setPatternMode(false);
     dispatch({ type: "record", render: needsRender("record"), held: rec?.recording === true });
   }
 
@@ -893,9 +919,15 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   // ---------- painting: the top bar ----------
   function paintTop(): void {
     songName.replaceChildren(reply.song.name, h("small", {}, "все песни"));
-    const playingNow = transport.mode === "playing" || (transport.mode === "rendering" && transport.then === "play");
-    play.replaceChildren(icon(playingNow ? PATHS.pause : PATHS.play, "tbtn__icon"));
-    play.setAttribute("aria-label", playingNow ? "Пауза" : "Играть");
+    const own = facts.beatKind === "own";
+    if (!own && bottom.patternMode) bottom.setPatternMode(false);
+    modeBox.hidden = !own;
+    patBtn.setAttribute("aria-pressed", String(bottom.patternMode));
+    songBtn.setAttribute("aria-pressed", String(!bottom.patternMode));
+    const pattern = bottom.patternPlaying;
+    const playingNow = pattern || transport.mode === "playing" || (transport.mode === "rendering" && transport.then === "play");
+    play.replaceChildren(icon(pattern ? PATHS.stop : playingNow ? PATHS.pause : PATHS.play, "tbtn__icon"));
+    play.setAttribute("aria-label", pattern ? "Остановить паттерн" : playingNow ? "Пауза" : bottom.patternMode && own ? "Играть паттерн" : "Играть");
     const suno = facts.voiceKind === "suno";
     recBtn.hidden = suno;
     const recording = transport.mode === "recording";
@@ -1444,7 +1476,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       if (flipDraft.wantsCommit && transport.mode !== "recording") commitInBackground();
       return;
     }
-    if (facts.beatKind !== "own" || !bottom.beatDirty || transport.mode !== "idle") return;
+    // a render would rebuild the playback and cut the pattern being played; play, record and export commit later
+    if (facts.beatKind !== "own" || !bottom.beatDirty || transport.mode !== "idle" || bottom.patternPlaying) return;
     dispatch({ type: "renderStarted" });
     void commitBeat();
   }
@@ -1525,6 +1558,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       return lin > 0 ? 20 * Math.log10(lin) : null;
     })();
     meterFill.style.setProperty("--v", `${(hold.push(meterLevel(peak), performance.now()) * 100).toFixed(1)}%`);
+    if (facts.beatKind === "own") bottom.paintCursor(transport.mode === "playing" ? bars : null);
     if (transport.mode === "playing" && playback && !playback.playing && performance.now() - playStarted > 800) dispatch({ type: "pause" });
   }
 
@@ -1719,6 +1753,8 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   });
   recBtn.addEventListener("click", pressRecord);
   loopBtn.addEventListener("click", toggleLoop);
+  patBtn.addEventListener("click", () => setPatternMode(true));
+  songBtn.addEventListener("click", () => setPatternMode(false));
   moreBtn.addEventListener("click", () => void openMenu());
   exportBtn.addEventListener("click", pressExport);
   chip.addEventListener("click", () => {

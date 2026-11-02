@@ -1,5 +1,6 @@
-// One block of an own beat played live from its score, round and round, in its own 48 kHz
-// context through BeatEngine: an edit sent while it plays is heard at once.
+// A block or a pattern of an own beat played live from its score, round and round, in its own
+// 48 kHz context through BeatEngine: an edit sent while it plays is heard at once. Between them
+// the same engine plays one hit of a sound.
 
 import type { Library, ZoneData } from "../beat/api.ts";
 import { startBeat, type BeatClient, type BeatHost, type BeatResult } from "../beat/client.ts";
@@ -24,61 +25,112 @@ export function auditionRange(bpm: number, fromBar: number, bars: number, rate: 
   return { start, end };
 }
 
-// the sampler zones of the fetched libraries into the engine; the problems come back as text
-export async function loadZones(client: BeatClient, libraries: readonly Library[], zone: (library: string, file: string) => Promise<ZoneData>): Promise<string[]> {
-  const problems: string[] = [];
-  const zones = libraries.filter((l) => l.fetched).flatMap((l) => l.zones);
-  if (!zones.length) return problems;
-  for (const z of zones) {
-    try {
-      const data = await zone(z.library, z.file);
-      const result = await client.loadZone({
-        library: z.library,
-        root: data.root,
-        velLo: z.vel[0],
-        velHi: z.vel[1],
-        rate: data.rate,
-        samples: new Int16Array(data.pcm),
-        channels: data.channels === 2 ? 2 : 1,
-      });
-      if (!result.ok) problems.push(`${z.library} ${z.file}: ${result.errors.join("; ")}`);
-    } catch (error) {
-      problems.push(`${z.library} ${z.file}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+// a zone to load: a session's listed one, or a pack sound's single file
+export interface ZoneRef {
+  library: string;
+  file: string;
+  vel: [number, number];
+}
+
+const PACK = "pack-";
+
+// The zones of the libraries the score plays: those the session lists as fetched, and the one file
+// of a pack sound the session does not list yet (added since the newest saved score).
+export function wantedZones(libraries: readonly Library[], score: Score): ZoneRef[] {
+  const used = new Set<string>();
+  for (const s of Object.values(score.sounds)) if (typeof s.library === "string") used.add(s.library);
+  const listed = new Set(libraries.map((l) => l.name));
+  const out: ZoneRef[] = libraries.filter((l) => l.fetched && used.has(l.name)).flatMap((l) => l.zones.map((z) => ({ library: z.library, file: z.file, vel: z.vel })));
+  for (const name of used) if (name.startsWith(PACK) && !listed.has(name)) out.push({ library: name, file: "0", vel: [0, 127] });
+  return out;
+}
+
+export type ZoneClient = Pick<BeatClient, "loadZone" | "rebuildSamplers">;
+
+// One engine's zones: each is asked for once, whether it loaded or not, so an edit never fetches
+// again what the engine has; the samplers are rebuilt only after a new one.
+export class ZoneLoader {
+  readonly #fetch: (library: string, file: string) => Promise<ZoneData>;
+  readonly #tried = new Set<string>();
+
+  constructor(fetch: (library: string, file: string) => Promise<ZoneData>) {
+    this.#fetch = fetch;
   }
-  const rebuilt = await client.rebuildSamplers();
-  if (!rebuilt.ok) problems.push(...rebuilt.errors);
-  return problems;
+
+  async load(client: ZoneClient, wanted: readonly ZoneRef[]): Promise<string[]> {
+    const problems: string[] = [];
+    const todo = wanted.filter((z) => {
+      const key = `${z.library}\u0000${z.file}`;
+      if (this.#tried.has(key)) return false;
+      this.#tried.add(key);
+      return true;
+    });
+    let loaded = 0;
+    for (const z of todo) {
+      try {
+        const data = await this.#fetch(z.library, z.file);
+        const result = await client.loadZone({
+          library: z.library,
+          root: data.root,
+          velLo: z.vel[0],
+          velHi: z.vel[1],
+          rate: data.rate,
+          samples: new Int16Array(data.pcm),
+          channels: data.channels === 2 ? 2 : 1,
+        });
+        if (result.ok) loaded++;
+        else problems.push(`${z.library} ${z.file}: ${result.errors.join("; ")}`);
+      } catch (error) {
+        problems.push(`${z.library} ${z.file}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (loaded) {
+      const rebuilt = await client.rebuildSamplers();
+      if (!rebuilt.ok) problems.push(...rebuilt.errors);
+    }
+    return problems;
+  }
 }
 
 export interface AuditionOptions {
   open?: () => Promise<BeatHost>;
-  // run once on the new engine before the first score, e.g. loadZones
-  prepare?: (client: BeatClient) => Promise<string[]>;
+  // the zones a score needs and where they come from; loaded once a score is in the engine
+  zones?: (score: Score) => readonly ZoneRef[];
+  fetchZone?: (library: string, file: string) => Promise<ZoneData>;
   onError?: (message: string) => void;
+}
+
+interface Block {
+  fromBar: number;
+  bars: number;
 }
 
 export class Audition {
   readonly #open: () => Promise<BeatHost>;
-  readonly #prepare: ((client: BeatClient) => Promise<string[]>) | null;
+  readonly #zones: ((score: Score) => readonly ZoneRef[]) | null;
+  readonly #fetchZone: ((library: string, file: string) => Promise<ZoneData>) | null;
   readonly #onError: (message: string) => void;
-  readonly #live: Latest<Score>;
+  readonly #live: Latest<{ score: Score; block: Block }>;
   #host: Promise<BeatHost> | null = null;
   #ready: BeatHost | null = null;
+  #loader: ZoneLoader | null = null;
   #loaded = false;
   #closed = false;
   #playing = false;
+  // starts still under way: a hit waits for none of them and does not cut in
+  #starting = 0;
   // a start or a stop after another makes the older one's awaits come to nothing
   #seq = 0;
-  #block = { fromBar: 0, bars: 1 };
+  #block: Block = { fromBar: 0, bars: 1 };
   #range: Range = { start: 0, end: 0 };
   #anchor = { frame: 0, at: 0 };
 
   constructor(options: AuditionOptions = {}) {
     this.#open = options.open ?? (() => startBeat(AUDITION_RATE));
-    this.#prepare = options.prepare ?? null;
+    this.#zones = options.zones ?? null;
+    this.#fetchZone = options.fetchZone ?? null;
     this.#onError = options.onError ?? (() => {});
-    this.#live = new Latest((score) => this.#send(score));
+    this.#live = new Latest((next) => this.#send(next.score, next.block));
   }
 
   get playing(): boolean {
@@ -88,13 +140,20 @@ export class Audition {
   async start(score: Score, fromBar: number, bars: number): Promise<void> {
     if (this.#closed) return;
     const seq = ++this.#seq;
+    this.#starting++;
+    try {
+      await this.#begin(seq, score, fromBar, bars);
+    } finally {
+      this.#starting--;
+    }
+  }
+
+  async #begin(seq: number, score: Score, fromBar: number, bars: number): Promise<void> {
     const host = await this.#engine();
     if (seq !== this.#seq) return;
     await host.ctx.resume();
     const client = host.client;
-    const text = serialize(score);
-    if (!this.#check(await (this.#loaded ? client.update(text) : client.load(text)), "Партитура не играет")) return;
-    this.#loaded = true;
+    if (!(await this.#take(client, score, "Партитура не играет"))) return;
     if (seq !== this.#seq) return;
     let range: Range;
     try {
@@ -118,7 +177,29 @@ export class Audition {
   }
 
   update(score: Score): void {
-    if (this.#playing) this.#live.push(score);
+    if (this.#playing) this.#live.push({ score, block: this.#block });
+  }
+
+  // another score and block in place, from where it plays: the loop moves, nothing restarts
+  retarget(score: Score, fromBar: number, bars: number): void {
+    if (this.#playing) this.#live.push({ score, block: { fromBar, bars } });
+  }
+
+  // The score once from its start, with no loop: one hit of a sound. Not while a block plays or
+  // starts, so it never cuts into one; false when it was not played.
+  async hit(score: Score): Promise<boolean> {
+    if (this.#closed || this.#playing || this.#starting > 0) return false;
+    const seq = this.#seq;
+    const idle = (): boolean => seq === this.#seq && !this.#playing && this.#starting === 0;
+    const host = await this.#engine();
+    if (!idle()) return false;
+    await host.ctx.resume();
+    const client = host.client;
+    if (!idle() || !(await this.#take(client, score, "Звук не играет")) || !idle()) return false;
+    if (!this.#check(await client.loop(null), "Петля не снялась")) return false;
+    if (!idle() || !this.#check(await client.seek(0), "Перемотка не прошла")) return false;
+    if (!idle()) return false;
+    return this.#check(await client.play(), "Звук не пошёл");
   }
 
   async stop(): Promise<void> {
@@ -145,6 +226,7 @@ export class Audition {
     const host = this.#host;
     this.#host = null;
     this.#ready = null;
+    this.#loader = null;
     if (host) await host.then((h) => h.dispose(), () => {});
   }
 
@@ -162,10 +244,7 @@ export class Audition {
         host.client.subscribe((p) => {
           this.#anchor = { frame: p.frame, at: host.ctx.currentTime };
         });
-        if (this.#prepare) {
-          const problems = await this.#prepare(host.client);
-          if (problems.length) this.#onError(`Не все сэмплы загрузились: ${problems.slice(0, 3).join("; ")}`);
-        }
+        this.#loader = this.#fetchZone ? new ZoneLoader(this.#fetchZone) : null;
         this.#ready = host;
         return host;
       })();
@@ -177,18 +256,36 @@ export class Audition {
     return this.#host;
   }
 
-  async #send(score: Score): Promise<void> {
+  // the score into the engine, then the zones it still lacks: a zone needs a loaded score
+  async #take(client: BeatClient, score: Score, what: string): Promise<boolean> {
+    const text = serialize(score);
+    if (!this.#check(await (this.#loaded ? client.update(text) : client.load(text)), what)) return false;
+    this.#loaded = true;
+    await this.#loadZones(client, score);
+    return true;
+  }
+
+  async #loadZones(client: BeatClient, score: Score): Promise<void> {
+    const loader = this.#loader;
+    if (!loader || !this.#zones) return;
+    const problems = await loader.load(client, this.#zones(score));
+    if (problems.length) this.#onError(`Не все сэмплы загрузились: ${problems.slice(0, 3).join("; ")}`);
+  }
+
+  async #send(score: Score, block: Block): Promise<void> {
     const host = this.#ready;
     if (!host || !this.#playing) return;
     if (!this.#check(await host.client.update(serialize(score)), "Живой звук не обновился")) return;
-    // a new tempo or a shorter song moves the block's frames
+    await this.#loadZones(host.client, score);
+    // a new tempo, a shorter song or another block moves the loop's frames
     let range: Range;
     try {
-      range = auditionRange(score.bpm, this.#block.fromBar, this.#block.bars, host.ctx.sampleRate, host.client.length);
+      range = auditionRange(score.bpm, block.fromBar, block.bars, host.ctx.sampleRate, host.client.length);
     } catch (error) {
       this.#onError(error instanceof Error ? error.message : String(error));
       return;
     }
+    this.#block = block;
     if (range.start === this.#range.start && range.end === this.#range.end) return;
     this.#range = range;
     this.#check(await host.client.loop(range), "Петля не встала");
