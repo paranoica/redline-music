@@ -13,8 +13,10 @@ from redline.beat.checks import check_score  # noqa: E402
 from redline.beat.recipe import (  # noqa: E402
     BASS_STYLES,
     CHARACTER,
+    CLASHES,
     DEVICES,
     GENRES,
+    NEEDS,
     RecipeError,
     make_recipe,
     recipe_from_json,
@@ -173,12 +175,85 @@ def test_a_recipe_draws_one_or_two_moves_and_its_808_starts_from_its_style(genre
     assert counts == {1, 2}
 
 
-def test_a_recipe_saved_before_the_moves_reads_back_without_them():
-    raw = json.loads(recipe_json(make_recipe(3)))
-    del raw["bass_style"], raw["character"]
-    old = recipe_from_json(json.dumps(raw))
+# a recipe.json as saved before leads, 808 styles and character moves existed
+OLD_RECIPE = {
+    "seed": 9,
+    "genre": "trap",
+    "bpm": 140.0,
+    "key": "A minor",
+    "swing": 52.0,
+    "half_time": True,
+    "sounds": [
+        {"name": "kick", "instrument": "kick", "params": [], "library": None},
+        {"name": "bass", "instrument": "bass808", "params": [], "library": None},
+        {"name": "snare", "instrument": "snare", "params": [], "library": None},
+        {"name": "hat", "instrument": "hat_closed", "params": [], "library": None},
+        {"name": "bell", "instrument": "fm", "params": [["preset", "bell"]], "library": None},
+    ],
+    "structure": [{"name": "intro", "bars": 8}, {"name": "hook", "bars": 8}],
+    "bars": [8, 24],
+    "devices": ["drop_808", "hat_rolls"],
+    "hats_per_bar": [8, 40],
+    "kicks_per_bar": [1, 6],
+}
+
+
+def test_a_recipe_saved_before_the_moves_reads_back_and_asks_for_nothing_it_lacks():
+    old = recipe_from_json(json.dumps(OLD_RECIPE))
     assert old.bass_style == "" and old.character == ()
-    assert old.sounds == make_recipe(3).sounds
+    assert [s.name for s in old.sounds] == ["kick", "bass", "snare", "hat", "bell"]
+    lines = handoff._recipe(old)
+    assert not any("lead" in line and "melodic voice" in line for line in lines)
+    assert not any(line.startswith(("- 808 style", "- Character")) for line in lines)
+    assert "  - " + DEVICES["drop_808"].text + " (blog, unverified)" in lines
+
+
+def test_a_new_recipe_asks_for_its_lead():
+    lines = handoff._recipe(make_recipe(5, genre="trap"))
+    assert any(line.startswith("- `lead` is the beat's main melodic voice") for line in lines)
+
+
+def test_every_style_and_lead_param_is_one_the_instrument_takes_inside_its_range():
+    specs = {i["instrument"]: i for i in json.loads(redline_dsp.beat_instruments())}
+
+    def check(sound):
+        params = {p["name"]: p for p in specs[sound.instrument]["params"]}
+        for name, value in sound.params:
+            assert name in params, (sound, name)
+            spec = params[name]
+            if "choices" in spec:
+                assert value in spec["choices"], (sound, name)
+            else:
+                assert spec["low"] <= value <= spec["high"], (sound, name)
+
+    for _, params in BASS_STYLES.values():
+        check(replace(make_recipe(1).sounds[1], params=params))
+    for spec in GENRES.values():
+        for sound in spec.leads + spec.extras + spec.sounds:
+            check(sound)
+
+
+@pytest.mark.parametrize("genre", sorted(GENRES))
+def test_no_move_needs_a_section_the_structure_lacks_or_clashes_with_the_style(genre):
+    for seed in range(60):
+        recipe = make_recipe(seed, genre=genre)
+        sections = {part.name for part in recipe.structure}
+        drawn = (recipe.bass_style, *recipe.character)
+        for move in recipe.devices + recipe.character:
+            assert NEEDS.get(move, "intro") in sections, (seed, move)
+        for device in recipe.devices:
+            assert not set(CLASHES.get(device, ())) & set(drawn), (seed, device, drawn)
+        assert recipe.devices and recipe.character
+
+
+def test_a_genre_with_its_own_feel_says_it_instead_of_the_default():
+    jersey = handoff._recipe(make_recipe(2, genre="jersey_club"))
+    (line,) = [x for x in jersey if x.startswith("- Genre: jersey_club")]
+    assert GENRES["jersey_club"].feel in line and "2 and 4" not in line
+    (trap_line,) = [
+        x for x in handoff._recipe(make_recipe(2, genre="trap")) if x.startswith("- Genre")
+    ]
+    assert "half time: the snare on beat 3" in trap_line
 
 
 def test_options_override_only_what_they_name():
@@ -385,6 +460,14 @@ def test_a_kick_on_an_808_note_start_is_a_warning():
     warned = [w for w in warnings_of(body) if w.kind == "clash"]
     assert len(warned) == 1
     assert warned[0].source == "blog, unverified"
+
+
+def test_an_808_style_that_doubles_the_kick_is_no_clash_and_others_still_are():
+    body = score()
+    body["patterns"]["groove"]["rows"]["kick"] = "x.x...x........." * 8
+    doubling = replace(trap(), bass_style="kick_double")
+    assert "clash" not in kinds(warnings_of(body, doubling))
+    assert "clash" in kinds(warnings_of(body, replace(trap(), bass_style="clean_long")))
 
 
 @pytest.mark.parametrize(("bass_swing", "clash"), [(52, True), (55, False)])

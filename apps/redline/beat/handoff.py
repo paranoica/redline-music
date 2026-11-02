@@ -164,7 +164,9 @@ def _effects() -> list[str]:
 
 def _recipe(recipe: Recipe) -> list[str]:
     genre = GENRES[recipe.genre]
-    feel = "half time: the snare on beat 3" if recipe.half_time else "the snare on 2 and 4"
+    feel = genre.feel or (
+        "half time: the snare on beat 3" if recipe.half_time else "the snare on 2 and 4"
+    )
     out = [
         "```json",
         recipe_json(recipe),
@@ -192,13 +194,18 @@ def _recipe(recipe: Recipe) -> list[str]:
         "- Devices, all of them:",
     ]
     out += [f"  - {DEVICES[d].text} ({DEVICES[d].source})" for d in recipe.devices]
+    if any(s.name == "lead" for s in recipe.sounds):
+        out.append(
+            "- `lead` is the beat's main melodic voice: write the melody on it, do not swap it "
+            "for a bell."
+        )
     if recipe.bass_style:
         style = BASS_STYLES[recipe.bass_style][0]
         out.append(f"- 808 style ({recipe.bass_style}): {style.text} ({style.source}).")
     if recipe.character:
         out.append(
-            "- Character, all of them: this beat's own moves; where one clashes with "
-            '"Making it musical", the move wins.'
+            "- Character, all of them: this beat's own moves; where one clashes with a device "
+            'or with "Making it musical", the move wins.'
         )
         out += [f"  - {CHARACTER[c].text} ({CHARACTER[c].source})" for c in recipe.character]
     return out

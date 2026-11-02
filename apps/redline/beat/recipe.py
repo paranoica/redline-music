@@ -87,6 +87,7 @@ class Genre:
         character: The moves of `CHARACTER` this genre draws one or two from.
         source: Where the facts come from.
         invented: The fields set by own choice.
+        feel: Where the backbeat sits, when neither half time nor 2 and 4 says it.
     """
 
     bpm: tuple[int, int]
@@ -107,6 +108,7 @@ class Genre:
     character: tuple[str, ...]
     source: str
     invented: tuple[str, ...]
+    feel: str = ""
 
 
 @dataclass(frozen=True)
@@ -385,6 +387,23 @@ BOOM_BAP = _parts(
 )
 LOFI = _parts(("intro", 4), ("a", 8), ("break", 4), ("b", 8), ("outro", 4))
 LOOP = _parts(("intro", 4), ("a", 8), ("b", 8), ("a", 8), ("b", 8), ("outro", 4))
+# the sections a move speaks of; a structure without one does not draw it
+NEEDS = {
+    "drop_808": "hook",
+    "stop_before_hook": "hook",
+    "thin_verse": "verse",
+    "ghost_snares": "verse",
+    "kick_switch": "verse",
+    "sparse_808": "verse",
+    "no_hats_verse": "verse",
+    "silent_beat": "hook",
+    "counter_melody": "hook",
+}
+# a device the drawn 808 style or character move contradicts is not drawn with it
+CLASHES = {
+    "glide_sparingly": ("constant_glide", "lead_808"),
+    "hat_rolls": ("triplet_hats",),
+}
 ALL_DEVICES = tuple(DEVICES)
 NO_ROLLS = tuple(d for d in ALL_DEVICES if d not in ("hat_rolls", "glide_sparingly"))
 ALL_CHARACTER = tuple(CHARACTER)
@@ -402,8 +421,8 @@ GENRES: dict[str, Genre] = {
         extras=(OPEN_HAT, CLAP, PAD, RIM, SAMPLE),
         hats="eighths or sixteenths; the last two hats of a phrase become a 32nd or triplet "
         "roll with its middle hits softer; one open hat off the beat, choked",
-        bass="the 808 follows the melody's roots, mostly within an octave, an 808 under most "
-        "kicks plus a few notes in the gaps",
+        bass="the 808 follows the melody's roots, mostly within an octave: notes just after "
+        "the kicks plus a few in the gaps",
         kick="kick on step 0 and one or two syncopated hits (around steps 6, 10 or 14); snare "
         "or clap on beat 3",
         modes=("minor", "harmonic_minor", "phrygian"),
@@ -585,6 +604,7 @@ GENRES: dict[str, Genre] = {
         character=CALM_CHARACTER,
         source=BLOG,
         invented=("swing", "modes", "hats_per_bar", "structures"),
+        feel="full time: the snare follows the kick bounce on steps 8 and 11",
     ),
     "memphis": Genre(
         bpm=(80, 100),
@@ -594,7 +614,7 @@ GENRES: dict[str, Genre] = {
         leads=(FM_BELL, PIANO, STRINGS, TUBULAR),
         extras=(OPEN_HAT, RIM, CLAP, PAD, SAMPLE),
         hats="simple swung eighths, one open hat accent, a 32nd or triplet burst into the snare",
-        bass="an 808 on every kick, mostly root, octave glides, distorted",
+        bass="an 808 note right after most kicks, mostly the root, octave glides, distorted",
         kick="kick on step 0 with one or two syncopated hits; snare on 2 and 4, the clap a few ms "
         "late",
         modes=("minor", "phrygian"),
@@ -803,14 +823,13 @@ def make_recipe(
     swing = round(float(rng.uniform(*spec.swing)), 1)
     sounds = _palette(rng, spec)
     structure = spec.structures[int(rng.integers(len(spec.structures)))]
-    count = int(rng.integers(DEVICE_COUNT[0], DEVICE_COUNT[1] + 1))
-    devices = rng.choice(len(spec.devices), size=count, replace=False).tolist()
-    total = sum(part.bars for part in structure)
-    # drawn after everything older, so a seed keeps the rest of what it drew
+    sections = {part.name for part in structure}
     lead = spec.leads[int(rng.integers(len(spec.leads)))]
     style = spec.bass_styles[int(rng.integers(len(spec.bass_styles)))]
-    moves = int(rng.integers(CHARACTER_COUNT[0], CHARACTER_COUNT[1] + 1))
-    character = rng.choice(len(spec.character), size=moves, replace=False).tolist()
+    character = _draw(rng, _fitting(spec.character, sections, ()), CHARACTER_COUNT)
+    drawn = (style, *character)
+    devices = _draw(rng, _fitting(spec.devices, sections, drawn), DEVICE_COUNT)
+    total = sum(part.bars for part in structure)
     return Recipe(
         seed=seed,
         genre=name,
@@ -821,12 +840,31 @@ def make_recipe(
         sounds=_with_lead(_styled(sounds, style), lead, len(spec.sounds)),
         structure=structure,
         bars=(max(MIN_BARS, total - BARS_SLACK), total + BARS_SLACK),
-        devices=tuple(spec.devices[i] for i in sorted(devices)),
+        devices=devices,
         hats_per_bar=spec.hats_per_bar,
         kicks_per_bar=spec.kicks_per_bar,
         bass_style=style,
-        character=tuple(spec.character[i] for i in sorted(character)),
+        character=character,
     )
+
+
+def _fitting(moves: tuple[str, ...], sections: set[str], drawn: tuple[str, ...]) -> tuple[str, ...]:
+    """The moves the structure has sections for and nothing drawn contradicts."""
+    return tuple(
+        m
+        for m in moves
+        if NEEDS.get(m, next(iter(sections))) in sections
+        and not set(CLASHES.get(m, ())) & set(drawn)
+    )
+
+
+def _draw(
+    rng: np.random.Generator, pool: tuple[str, ...], count: tuple[int, int]
+) -> tuple[str, ...]:
+    """Between `count` moves of the pool, in the pool's order; fewer when the pool is short."""
+    want = int(rng.integers(count[0], count[1] + 1))
+    picked = rng.choice(len(pool), size=min(want, len(pool)), replace=False).tolist()
+    return tuple(pool[i] for i in sorted(picked))
 
 
 def _styled(sounds: tuple[Sound, ...], style: str) -> tuple[Sound, ...]:

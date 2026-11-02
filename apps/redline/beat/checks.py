@@ -21,6 +21,8 @@ RATE = 48000.0
 BPM_SLACK = 0.5
 BASS_RANGE = (24, 55)
 CLASH_S = 0.010
+# 808 styles that put the 808 on the kick on purpose
+DOUBLING = ("kick_double",)
 MAX_SAME = 8
 HATS = ("hat_closed", "hat_open")
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d{1,2})")
@@ -247,7 +249,9 @@ def _repeats(table: _Table) -> list[Caution]:
     return out
 
 
-def _clashes(table: _Table) -> list[Caution]:
+def _clashes(table: _Table, recipe: Recipe) -> list[Caution]:
+    if recipe.bass_style in DOUBLING:
+        return []
     starts = sorted(e["start"] for e in table.of(("bass808",)) if e["legato_from"] is None)
     near = CLASH_S * RATE
     bars = []
@@ -296,4 +300,6 @@ def check_score(score_json: str, recipe: Recipe, libraries: Iterable[str] | None
     if not rust_ok:
         return Checked(tuple(errors), ())
     table = _Table(score_json, body)
-    return Checked(tuple(errors), (*_density(table, recipe), *_repeats(table), *_clashes(table)))
+    return Checked(
+        tuple(errors), (*_density(table, recipe), *_repeats(table), *_clashes(table, recipe))
+    )
