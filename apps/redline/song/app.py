@@ -295,19 +295,31 @@ class AppHost:
         )
 
     def sources(self) -> Reply:
-        """What a new song can be made of: beat files, own seeds with a score, written texts."""
+        """What a new song can be made of: beat files, own seeds, texts, genres, the pack.
+
+        The genres are those a new beat may take; `pack_kit` says whether the owner's scanned
+        pack can make a new beat's kit.
+        """
+        from redline.beat import handoff, pack
+        from redline.beat.recipe import GENRES
+
+        pack_kit = handoff.pack_can_kit(pack.CATALOG)
         return reply_json(
             HTTPStatus.OK,
             {
                 "beats": audio_in(BEATS, self.root),
                 "seeds": score_seeds(self.root),
                 "texts": written_texts(self.root),
+                "genres": sorted(GENRES),
+                "pack_kit": pack_kit,
             },
         )
 
     def _new_beat(self, value: Any) -> dict[str, Any]:
-        if not isinstance(value, dict) or len(value) != 1 or set(value) - {"own", "file"}:
-            raise _unprocessable('beat is {"own": seed} or {"file": path}')
+        if not isinstance(value, dict) or len(value) != 1 or set(value) - {"own", "file", "new"}:
+            raise _unprocessable('beat is {"own": seed}, {"file": path} or {"new": {...}}')
+        if "new" in value:
+            return {"own": self._starter(value["new"])}
         if "own" in value:
             seed = _seed(value["own"], "beat.own")
             if seed not in score_seeds(self.root):
@@ -323,6 +335,23 @@ class AppHost:
         if not path.is_file() or path.suffix.lower() not in AUDIO:
             raise _unprocessable(f"beat.file: {stored} is not an audio file")
         return {"file": stored}
+
+    def _starter(self, value: Any) -> int:
+        """A new own beat from a starter score: `{"genre": name|null, "kit": "auto"|...}`."""
+        from redline.beat.handoff import BeatError, new_starter
+        from redline.beat.recipe import RecipeError
+
+        if not isinstance(value, dict) or set(value) - {"genre", "kit"}:
+            raise _unprocessable('beat.new is {"genre": name or null, "kit": "auto"}')
+        genre, kit = value.get("genre"), value.get("kit", "auto")
+        if genre is not None and not isinstance(genre, str):
+            raise _unprocessable("beat.new.genre is a genre name or null")
+        if not isinstance(kit, str):
+            raise _unprocessable("beat.new.kit is auto, synth or pack")
+        try:
+            return new_starter(self.root / "private" / "beats", genre, kit)
+        except (BeatError, RecipeError) as error:
+            raise _unprocessable(str(error)) from None
 
     def create(self, body: dict) -> Reply:
         """A new song as `redline song new` makes it, with every reference in input/refs."""

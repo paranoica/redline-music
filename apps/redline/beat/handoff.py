@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -396,7 +397,7 @@ class Session:
 
     def _judge(self, recipe: Recipe, state: dict[str, Any], text: str) -> Saved | Failed | None:
         """Check a draft: save it, fail the seed, or move to the next round (None)."""
-        checked = check_score(text, recipe)
+        checked = check_score(text, recipe, catalog=self.catalog)
         warnings = [str(w) for w in checked.warnings]
         _write(
             self.folder / f"checks-{state['round']}.json",
@@ -462,6 +463,49 @@ def write_beat(
 
 
 KITS = ("auto", "synth", "pack")
+
+
+def pack_can_kit(catalog: Path) -> bool:
+    """Whether the owner's scanned pack holds a kick, a snare or clap and a closed hat."""
+    try:
+        return _kit("auto", catalog) is not None
+    except BeatError:
+        return False
+
+
+def mark_saved(folder: Path, seed: int, score: Path) -> None:
+    """Record a seed's score as saved without a round with the agent (a starter)."""
+    state = {
+        "seed": seed,
+        "prompt": prompt_hash(),
+        "round": 1,
+        "status": "saved",
+        "reasons": [],
+        "warnings": [],
+        "score": score.name,
+    }
+    _write(folder / "state.json", json.dumps(state, ensure_ascii=False, indent=1))
+
+
+def new_starter(
+    root: Path, genre: str | None, kit: str = "auto", catalog: Path | None = None
+) -> int:
+    """A new own beat from a starter score on a free seed; returns the seed.
+
+    Raises:
+        BeatError: An unknown kit or a pack kit the pack cannot make.
+        RecipeError: An unknown genre.
+    """
+    from redline.beat.starter import write_starter
+
+    taken = {int(p.name) for p in root.glob("*") if p.name.isdigit()} if root.is_dir() else set()
+    rng = secrets.SystemRandom()
+    seed = rng.randrange(10_000, 1_000_000)
+    while seed in taken:
+        seed = rng.randrange(10_000, 1_000_000)
+    recipe = make_recipe(seed, genre, pack=_kit(kit, pack.CATALOG if catalog is None else catalog))
+    write_starter(root / str(seed), recipe)
+    return seed
 
 
 def _kit(kit: str, catalog: Path) -> dict[str, list[PackSound]] | None:

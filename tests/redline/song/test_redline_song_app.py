@@ -137,6 +137,27 @@ def test_the_list_shows_each_beat_kind_the_takes_the_text_and_the_time(served, r
 # create
 
 
+def test_a_song_on_a_new_beat_gets_a_starter_on_a_free_seed(served, root):
+    pytest.importorskip("redline_dsp")
+    body = {"name": "fresh", "beat": {"new": {"genre": "trap", "kit": "synth"}}, "text_seed": None}
+    assert api(served, "POST", "/api/songs", body) == (201, {"name": "fresh"})
+    seed = model.load("fresh").beat["own"]
+    folder = root / "private" / "beats" / str(seed)
+    assert (folder / "score-1.json").is_file() and (folder / "recipe.json").is_file()
+    status, data = api(
+        served, "POST", "/api/songs", {**body, "name": "bad", "beat": {"new": {"genre": "polka"}}}
+    )
+    assert status == 422 and "polka" in json.dumps(data)
+    status, _ = api(
+        served, "POST", "/api/songs", {**body, "name": "bad2", "beat": {"new": {"kit": "drums"}}}
+    )
+    assert status == 422
+    status, _ = api(
+        served, "POST", "/api/songs", {**body, "name": "bad3", "beat": {"new": {"x": 1}}}
+    )
+    assert status == 422
+
+
 def test_a_song_is_created_with_every_reference_and_the_latest_text(served, root):
     refs = root / "input" / "refs"
     refs.mkdir()
@@ -216,10 +237,14 @@ def test_an_unknown_field_in_a_new_song_is_refused(served, root):
 
 
 def test_sources_list_only_what_exists_and_no_lyric_text(served, root):
-    assert api(served, "GET", "/api/songs/sources") == (
-        200,
-        {"beats": [], "seeds": [], "texts": []},
-    )
+    status, empty = api(served, "GET", "/api/songs/sources")
+    assert status == 200 and empty["pack_kit"] is False
+    assert {k: empty[k] for k in ("beats", "seeds", "texts")} == {
+        "beats": [],
+        "seeds": [],
+        "texts": [],
+    }
+    assert "trap" in empty["genres"] and "uk_drill" in empty["genres"]
     beats = root / "input" / "beats"
     (beats / "sub").mkdir(parents=True)
     sf.write(beats / "b.wav", tone(), 8000)
