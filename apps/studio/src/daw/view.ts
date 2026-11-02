@@ -163,7 +163,7 @@ export interface HitMark {
 
 const DRUM_ROW: Record<string, number> = { kick: 0, snare: 1, clap: 1, rim: 1, hat_closed: 2, hat_open: 2, cowbell: 2 };
 
-// the mark row of a drum instrument, null for one the 808 and drum marks leave out
+// the mark row of a drum instrument in a clip preview, null for one it leaves out
 export const drumRow = (instrument: string): number | null => DRUM_ROW[instrument] ?? null;
 
 // ---------- keys and the editor's tabs ----------

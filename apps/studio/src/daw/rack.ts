@@ -49,14 +49,11 @@ const firstPattern = (score: Score): string | null => Object.keys(score.patterns
 
 // The pattern the rack shows: the one picked in it, else the selected block's first. A pick that
 // is gone (an undo, a delete) gives way to the score's first pattern; another seed drops it.
-// the kind of row the lane the rack was opened from shows: the drums lane wants drum rows
-export type RowWish = "drum" | "note" | null;
-
 export class RackPick {
   #seed: number | null | undefined = undefined;
   #pick: string | null = null;
 
-  current(score: Score, seed: number | null, section: number | null, wants: RowWish = null): string | null {
+  current(score: Score, seed: number | null, section: number | null): string | null {
     if (seed !== this.#seed) {
       if (this.#seed !== undefined) this.#pick = null;
       this.#seed = seed;
@@ -65,12 +62,6 @@ export class RackPick {
       if (own(score.patterns, this.#pick)) return this.#pick;
       this.#pick = firstPattern(score);
       return this.#pick;
-    }
-    if (wants !== null) {
-      const fits = (p: string) => Object.values(score.patterns[p]?.rows ?? {}).some((r) => isNoteRow(r) === (wants === "note"));
-      const played = section !== null && Number.isInteger(section) ? (score.sections[section]?.play ?? []) : [];
-      const found = played.find((p) => own(score.patterns, p) && fits(p)) ?? Object.keys(score.patterns).find(fits);
-      if (found !== undefined) return found;
     }
     return blockPattern(score, section) ?? firstPattern(score);
   }
@@ -158,8 +149,6 @@ export interface RackHost {
   seed(): number | null;
   // the selected block's section, for the pattern shown first
   section(): number | null;
-  // the kind of row the lane the rack was opened from shows, for the pattern shown first
-  wants?(): RowWish;
   // an edit of the whole pattern; `live`: a step of a drag, heard but not yet an undo step
   edit(next: Score, live?: boolean): boolean;
   // the note row the piano roll edits; `open` switches to the roll
@@ -234,7 +223,7 @@ export class RackView {
   // the pattern the rack shows for this score, drawn or not
   current(score: Score | null = this.#host.score()): string | null {
     if (!score) return null;
-    return this.#pick.current(score, this.#host.seed(), this.#host.section(), this.#host.wants?.() ?? null);
+    return this.#pick.current(score, this.#host.seed(), this.#host.section());
   }
 
   // Lights the playing step when it is in the bar shown; only the classes change. While it plays

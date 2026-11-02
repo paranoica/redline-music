@@ -69,30 +69,6 @@ test("the rack starts on the first pattern the selected block plays, else on the
   assert.equal(new RackPick().current({ ...s, patterns: {} }, 3, 1), null);
 });
 
-test("a drum lane opens on a pattern with drum rows, an 808 lane on one with notes", () => {
-  const s = {
-    bpm: 140,
-    sounds: { kick: { instrument: "kick" }, bass: { instrument: "bass808" } },
-    patterns: {
-      low: { bars: 2, rows: { bass: [{ step: 0, len: 4, note: "C1", vel: 1 }] } },
-      drums: { bars: 2, rows: { kick: "x" + ".".repeat(31) } },
-    },
-    sections: [
-      { name: "intro", bars: 8, play: ["low"] },
-      { name: "hook", bars: 8, play: ["low", "drums"] },
-    ],
-  };
-  // the intro plays no drums: the score's first pattern that has them
-  assert.equal(new RackPick().current(s, 3, 0, "drum"), "drums");
-  assert.equal(new RackPick().current(s, 3, 1, "drum"), "drums");
-  assert.equal(new RackPick().current(s, 3, 1, "note"), "low");
-  // no wish: the block's first, as before
-  assert.equal(new RackPick().current(s, 3, 0, null), "low");
-  // a wish nothing answers falls back to the block's first
-  const noDrums = { ...s, patterns: { low: s.patterns.low }, sections: [s.sections[0]] };
-  assert.equal(new RackPick().current(noDrums, 3, 0, "drum"), "low");
-});
-
 test("a pattern picked in the rack stays over the block's until it is gone", () => {
   const pick = new RackPick();
   pick.choose("b");
