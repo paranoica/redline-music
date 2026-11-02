@@ -1604,8 +1604,16 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
     render();
   }
 
+  // a gesture on a pattern lane makes it the selected lane, so Delete never falls back to a
+  // section picked earlier on the beat lane
+  function onPatternLane(): void {
+    picked = null;
+    if (selected !== "patterns") select("patterns");
+  }
+
   function removeClip(name: string, section: number): void {
     if (!playlistReady()) return;
+    onPatternLane();
     if (clipSel?.pattern === name && clipSel.section === section) clipSel = null;
     if (!bottom.clearClip(name, section)) render();
   }
@@ -1661,7 +1669,9 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       const up = (ev: PointerEvent): void => {
         end();
         range = dragSections(s, from, barOf(ev));
-        if (!playlistReady()) return;
+        // an undo during the drag moved the sections the range was read from
+        if (!playlistReady() || bottom.score !== s) return;
+        onPatternLane();
         bottom.paintPattern(name, range);
       };
       doc.addEventListener("pointermove", move);
@@ -1712,7 +1722,7 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
   }
 
   function paintEditor(): void {
-    const names: Record<LaneKind, string> = { text: "Текст", voice: "Голос", takes: "Голос", beat: "Бит", bass: "808", drums: "Барабаны", patterns: "Паттерны" };
+    const names: Record<LaneKind, string> = { text: "Текст", voice: "Голос", takes: "Голос", beat: "Бит", patterns: "Паттерны" };
     editor.classList.toggle("collapsed", !editorOpen || selected === null);
     collapse.hidden = selected === null;
     collapse.textContent = editorOpen ? "свернуть ▾" : "развернуть ▴";

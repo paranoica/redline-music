@@ -25,7 +25,7 @@
 .daw select { height: 28px; background: var(--raised); color: var(--text); border: 1px solid var(--line-strong); border-radius: 6px; font: 12px var(--font-ui); padding: 0 6px; }
 
 .daw .clip { cursor: default; }
-.daw .lane[data-kind="beat"] .clip, .daw .lane[data-kind="bass"] .clip, .daw .lane[data-kind="drums"] .clip { cursor: pointer; }
+.daw .lane[data-kind="beat"] .clip { cursor: pointer; }
 .daw .clip--on { box-shadow: 0 0 0 1px var(--text), inset 0 0 0 1px var(--text); }
 
 .daw .eplay {

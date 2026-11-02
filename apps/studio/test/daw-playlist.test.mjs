@@ -146,7 +146,7 @@ test("painting over sections makes one score; a refused section is left as it wa
   const s = score();
   const out = paintSections(s, "k", [0, 1, 2]);
   assert.deepEqual(out.painted, [1, 2]);
-  assert.deepEqual(out.refused, [{ section: 0, reason: "Паттерн k длиной 4 такта не ложится в секцию intro длиной 2 такта." }]);
+  assert.deepEqual(out.refused, [{ section: 0, reason: "«Паттерн 5» длиной 4 такта не ложится в секцию intro длиной 2 такта." }]);
   assert.deepEqual(out.score.sections.map((x) => x.play), [["d"], ["a", "d", "k"], ["a", "k"]]);
   // the fill stays
   assert.equal(out.score.sections[1].fill, "f");
@@ -467,7 +467,7 @@ test("a paint over several sections is one undo step; the refusals are said", as
   assert.deepEqual(out.painted, [1, 2]);
   assert.deepEqual(editor.score.sections.map((x) => x.play), [["d"], ["a", "d", "k"], ["a", "k"]]);
   assert.equal(changes.length, 1);
-  assert.deepEqual(said, ["Паттерн k длиной 4 такта не ложится в секцию intro длиной 2 такта."]);
+  assert.deepEqual(said, ["«Паттерн 5» длиной 4 такта не ложится в секцию intro длиной 2 такта."]);
   assert.equal(editor.undo(false), true);
   assert.deepEqual(editor.score.sections.map((x) => x.play), [["d"], ["a", "d"], ["a"]]);
   assert.equal(editor.undo(false), false);

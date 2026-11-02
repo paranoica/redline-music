@@ -13,7 +13,7 @@ import type { Job, SongApi, SongChange, SongReply, StartKind } from "../song/api
 import { h, icon } from "../ui/dom.ts";
 import type { Clip } from "./clips.ts";
 import { BeatDraft } from "./draft.ts";
-import { DrumsView, flipDrums, scoreDrums, type BeatEditing, type Block } from "./drums.ts";
+import { DrumsView, flipDrums, type BeatEditing, type Block } from "./drums.ts";
 import type { FlipDraft } from "./flipdraft.ts";
 import { FxPane, type StudioLike } from "./fx.ts";
 import type { LyricLayout } from "./lyrics.ts";
@@ -36,7 +36,7 @@ const hasText = (reply: SongReply): boolean => {
   return t.seed !== null && t.version !== undefined && t.version !== null;
 };
 
-export const BEAT_LANES: readonly LaneKind[] = ["beat", "bass", "drums", "patterns"];
+export const BEAT_LANES: readonly LaneKind[] = ["beat", "patterns"];
 
 export interface EditorHost {
   base: string | undefined;
@@ -92,7 +92,6 @@ export class Editor {
   readonly #host: EditorHost;
   readonly #roll: RollView;
   readonly #rack: RackView;
-  readonly #drums: DrumsView;
   readonly #flipRoll: RollView;
   readonly #flipDrums: DrumsView;
   readonly #source: SourceNotes;
@@ -135,13 +134,11 @@ export class Editor {
         },
       }),
     );
-    this.#drums = new DrumsView(scoreDrums(editing));
     this.#rack = new RackView({
       score: () => this.#draft.score,
       specs: () => this.#draft.instruments,
       seed: () => this.#seed(),
       section: () => this.block()?.section ?? null,
-      wants: () => (this.#lane === "drums" ? "drum" : this.#lane === "bass" ? "note" : null),
       edit: (next, live) => this.editPattern(next, { live: live === true }),
       notes: (pattern, sound, open) => {
         this.#notes = { pattern, sound };
@@ -668,7 +665,7 @@ export class Editor {
         return [this.#askBar(), view.root].filter((n): n is HTMLElement => n !== null);
       }
       case "drums": {
-        const view = this.#host.facts().beatKind === "flip" ? this.#flipDrums : this.#drums;
+        const view = this.#flipDrums;
         view.show();
         return [this.#askBar(), view.root].filter((n): n is HTMLElement => n !== null);
       }

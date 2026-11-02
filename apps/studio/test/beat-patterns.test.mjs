@@ -404,7 +404,7 @@ test("placePattern refuses a sound another played pattern has, naming both, and 
   const s = base();
   refused(pure(s, (x) => placePattern(x, "alt", 0, true)), shown(s, "drums"), "kick");
   // a four-bar pattern in the two-bar last section
-  refused(placePattern(s, "lead", 2, true), "lead");
+  refused(placePattern(s, "lead", 2, true), shown(s, "lead"));
   refused(placePattern(s, "nothing", 0, true));
   refused(placePattern(s, "alt", 3, true));
   refused(placePattern(s, "alt", -1, true));
@@ -455,11 +455,11 @@ test("splitSection makes two halves with the same play and mute; the fill goes t
 
 test("splitSection refuses a split point outside the section and halves a played pattern does not divide", () => {
   const s = base();
-  refused(pure(s, (x) => splitSection(x, 1, 2)), "lead");
-  refused(splitSection(s, 1, 6), "lead");
-  refused(splitSection(s, 0, 1), "drums");
+  refused(pure(s, (x) => splitSection(x, 1, 2)), shown(s, "lead"));
+  refused(splitSection(s, 1, 6), shown(s, "lead"));
+  refused(splitSection(s, 0, 1), shown(s, "drums"));
   // the last section: 2 bars of a 2-bar pattern
-  refused(splitSection(s, 2, 1), "low");
+  refused(splitSection(s, 2, 1), shown(s, "low"));
   for (const at of [0, 8, -1, 9, 1.5]) refused(splitSection(s, 1, at));
   refused(splitSection(s, 3, 1));
   refused(splitSection(empty(), 0, 1));

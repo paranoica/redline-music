@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, keyedBlock, pickAfterUndo, playbackKey, rulerGesture, scoreMarks, visibleLanes } from "../src/daw/view.ts";
+import { beatKindOf, capTakes, chipText, editorOpenAfter, factsOf, keyedBlock, pickAfterUndo, playbackKey, rulerGesture, visibleLanes } from "../src/daw/view.ts";
 
 const stations = (over = {}) => ({
   beat: { kind: "file", file: "input/beats/b.mp3", bpm: 120 },
@@ -171,63 +171,6 @@ test("the chip names the next step", () => {
   assert.equal(chipText("done"), "готово");
 });
 
-// ---------- score marks ----------
-
-const score = () => ({
-  version: 1,
-  bpm: 120,
-  seed: 1,
-  key: "C",
-  sounds: { kick: { instrument: "kick" }, snare: { instrument: "snare" }, hat: { instrument: "hat_closed" }, bass: { instrument: "bass808" }, keys: { instrument: "fm" } },
-  patterns: {
-    a: {
-      bars: 2,
-      rows: {
-        kick: "x.......x.......|x...............",
-        snare: "....x.......x...|....x.......x...",
-        hat: "x.x.x.x.x.x.x.x.|................",
-        bass: [
-          { step: 0, len: 4, note: "C2", vel: 0.8 },
-          { step: 20, len: 2, note: "G1", vel: 0.8 },
-        ],
-        keys: [{ step: 0, len: 16, note: "C4", vel: 0.5 }],
-      },
-    },
-    f: { bars: 1, rows: { snare: "xxxxxxxxxxxxxxxx" } },
-  },
-  sections: [
-    { name: "one", bars: 3, play: ["a"], fill: "f" },
-    { name: "two", bars: 1, play: ["a"], mute: ["kick", "bass"] },
-  ],
-});
-
-test("808 notes land on the bars the pattern plays, repeated and on play-order bars", () => {
-  const { bass } = scoreMarks(score());
-  // section one: bars 0,1 play a's bars 0,1, bar 2 plays a's bar 0 again; section two mutes the 808
-  assert.deepEqual(bass, [
-    { bar: 0, step: 0, len: 4, midi: 36 },
-    { bar: 1, step: 4, len: 2, midi: 31 },
-    { bar: 2, step: 0, len: 4, midi: 36 },
-  ]);
-});
-
-test("drum hits sit on rows kick 0, snare 1, hats 2; a fill replaces its rows on the last bar; mute drops a row", () => {
-  const { drums } = scoreMarks(score());
-  const at = (bar, row) => drums.filter((d) => d.bar === bar && d.row === row).map((d) => d.step);
-  assert.deepEqual(at(0, 0), [0, 8]);
-  assert.deepEqual(at(0, 1), [4, 12]);
-  assert.deepEqual(at(0, 2), [0, 2, 4, 6, 8, 10, 12, 14]);
-  assert.deepEqual(at(1, 2), []);
-  // bar 2 is the fill bar of section one: the snare row is the fill's
-  assert.deepEqual(at(2, 1), Array.from({ length: 16 }, (_, i) => i));
-  assert.deepEqual(at(2, 0), [0, 8]);
-  // section two mutes the kick
-  assert.deepEqual(at(3, 0), []);
-  assert.deepEqual(at(3, 1), [4, 12]);
-  // a keys part is neither 808 nor drums
-  assert.ok(drums.every((d) => d.row >= 0 && d.row <= 2));
-});
-
 // ---------- keys and editor tabs ----------
 
 import { dawKey, editorTabs } from "../src/daw/view.ts";
@@ -266,10 +209,9 @@ test("no key is taken while typing, with Alt, or with Ctrl on a plain key", () =
 });
 
 test("the editor shows only the tabs of the selected lane", () => {
-  // an own beat's lanes edit through the channel rack, which takes the drum grid's place
-  assert.deepEqual(editorTabs("bass", "own"), ["rack", "roll", "fx"]);
-  assert.deepEqual(editorTabs("drums", "own"), ["rack", "roll", "fx"]);
+  // an own beat's lanes edit through the channel rack
   assert.deepEqual(editorTabs("beat", "own"), ["rack", "roll", "fx"]);
+  assert.deepEqual(editorTabs("patterns", "own"), ["rack", "roll", "fx"]);
   // a flip or a plain file has no roll or grid in this version
   assert.deepEqual(editorTabs("beat", "flip"), ["roll", "drums", "fx"]);
   assert.deepEqual(editorTabs("beat", "file"), ["fx"]);
@@ -308,7 +250,9 @@ test("a beat file read into a flip is edited as a flip before its first render",
 });
 
 test("Delete and Ctrl+D act on the picked block only while a beat lane is selected", () => {
-  for (const lane of ["beat", "bass", "drums"]) assert.equal(keyedBlock(lane, 1, 3), 1);
+  assert.equal(keyedBlock("beat", 1, 3), 1);
+  // a pattern lane's Delete is a clip's
+  assert.equal(keyedBlock("patterns", 1, 3), null);
   for (const lane of ["text", "voice", "takes", null]) assert.equal(keyedBlock(lane, 1, 3), null);
   // first and last block; nothing picked; a pick past the blocks left
   assert.equal(keyedBlock("beat", 0, 3), 0);

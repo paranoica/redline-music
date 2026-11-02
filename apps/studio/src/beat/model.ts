@@ -610,7 +610,7 @@ export function splitSection(score: Score, i: number, atBar: number): SectionEdi
   for (const name of s.play ?? []) {
     const pb = patternOf(score, name)?.bars;
     if (pb && (atBar % pb !== 0 || rest % pb !== 0)) {
-      return refuse(`Паттерн ${name} длиной ${barsText(pb)}: части в ${barsText(atBar)} и ${barsText(rest)} на него не делятся.`);
+      return refuse(`«${shownName(score, name)}» длиной ${barsText(pb)}: части в ${barsText(atBar)} и ${barsText(rest)} на него не делятся.`);
     }
   }
   const first = structuredClone(s);
@@ -751,7 +751,7 @@ export function placePattern(score: Score, pattern: string, i: number, on: boole
   }
   if (play.includes(pattern)) return { ok: true, score: out };
   if (s.bars % p.bars !== 0) {
-    return refuse(`Паттерн ${pattern} длиной ${barsText(p.bars)} не ложится в секцию ${s.name} длиной ${barsText(s.bars)}.`);
+    return refuse(`«${shownName(score, pattern)}» длиной ${barsText(p.bars)} не ложится в секцию ${s.name} длиной ${barsText(s.bars)}.`);
   }
   for (const other of play) {
     const q = patternOf(score, other);

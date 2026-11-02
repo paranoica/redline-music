@@ -1,8 +1,7 @@
 // What the song screen shows, worked out from the server's song before any DOM: the facts it
 // acts on, the lanes for them, the take lanes it keeps on screen, what a press on the ruler
-// means, the chip's words and the marks of an own beat's notes and drum hits.
+// means and the chip's words.
 
-import { drumSteps, isNoteRow, notesOf, playingAt, STEPS_PER_BAR, type Score } from "../beat/model.ts";
 import type { BeatStation, Job, SongReply } from "../song/api.ts";
 import type { NextStep, SongFacts } from "./transport.ts";
 
@@ -67,7 +66,7 @@ export function factsOf(reply: SongReply, jobs: readonly Job[], extra: { flipAna
 // ---------- lanes ----------
 
 // "patterns": an own beat's playlist, one lane per pattern
-export type LaneKind = "text" | "voice" | "takes" | "beat" | "bass" | "drums" | "patterns";
+export type LaneKind = "text" | "voice" | "takes" | "beat" | "patterns";
 // "analyse": one waveform and the offer to analyse; "file": one waveform block; "blocks": sections
 export type BeatMode = "analyse" | "file" | "blocks";
 
@@ -167,40 +166,11 @@ const DRUM_ROW: Record<string, number> = { kick: 0, snare: 1, clap: 1, rim: 1, h
 // the mark row of a drum instrument, null for one the 808 and drum marks leave out
 export const drumRow = (instrument: string): number | null => DRUM_ROW[instrument] ?? null;
 
-export function scoreMarks(score: Score): { bass: BassMark[]; drums: HitMark[] } {
-  const total = score.sections.reduce((n, s) => n + (typeof s.bars === "number" ? s.bars : 0), 0);
-  const bass: BassMark[] = [];
-  const drums: HitMark[] = [];
-  for (let bar = 0; bar < total; bar++) {
-    for (const r of playingAt(score, bar)) {
-      if (r.muted || r.replaced) continue;
-      const instrument = score.sounds[r.sound]?.instrument;
-      const row = score.patterns[r.pattern]?.rows[r.sound];
-      if (instrument === undefined || row === undefined) continue;
-      const from = r.patternBar * STEPS_PER_BAR;
-      if (instrument === "bass808" && isNoteRow(row)) {
-        for (const n of notesOf(score, r.pattern, r.sound)) {
-          if (n.step >= from && n.step < from + STEPS_PER_BAR) bass.push({ bar, step: n.step - from, len: n.len, midi: n.midi });
-        }
-      } else if (instrument in DRUM_ROW && !isNoteRow(row)) {
-        const lane = DRUM_ROW[instrument] as number;
-        drumSteps(score, r.pattern, r.sound)
-          .slice(from, from + STEPS_PER_BAR)
-          .forEach((hit, step) => {
-            if (hit !== ".") drums.push({ bar, step, row: lane });
-          });
-      }
-    }
-  }
-  drums.sort((a, b) => a.bar - b.bar || a.row - b.row || a.step - b.step);
-  return { bass, drums };
-}
-
 // ---------- keys and the editor's tabs ----------
 
-const BEAT_LANE_KINDS: readonly LaneKind[] = ["beat", "bass", "drums", "patterns"];
+const BEAT_LANE_KINDS: readonly LaneKind[] = ["beat", "patterns"];
 // the pattern lanes' Delete is a clip's, never a section's
-const SECTION_LANE_KINDS: readonly LaneKind[] = ["beat", "bass", "drums"];
+const SECTION_LANE_KINDS: readonly LaneKind[] = ["beat"];
 
 // the block a Delete or Ctrl+D acts on: the picked one, while a beat lane is selected and it exists
 export function keyedBlock(selected: LaneKind | null, picked: number | null, blocks: number): number | null {
@@ -259,10 +229,6 @@ export function editorTabs(lane: LaneKind, beat: BeatKind): EditorTab[] {
   switch (lane) {
     case "text":
       return ["text"];
-    case "bass":
-      return ["roll"];
-    case "drums":
-      return ["drums"];
     case "beat":
       return beat === "flip" ? ["roll", "drums", "fx"] : ["fx"];
     default:
