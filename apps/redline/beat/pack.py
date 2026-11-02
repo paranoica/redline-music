@@ -58,11 +58,11 @@ WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
             r"|\bopenhat",
         ),
         ("hat_closed", r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bchh?\b|\bclosed\b|\bhihats?\b"),
-        ("crash", r"\bcrash|\bcymbals?\b|\brides?\b|\bsplash"),
+        ("crash", r"\bcrash(es)?\b|\bcymbals?\b|\brides?\b|\bsplash(es)?\b"),
         (
             "perc",
-            r"\bperc|\bshakers?\b|\btamb|\bconga|\bbongo|\btoms?\b|\bcowbell|\bwood|\bblock"
-            r"|\bsnaps?\b|\bclick",
+            r"\bpercs?\b|\bpercussion\b|\bshakers?\b|\btamb(ourine)?s?\b|\bcongas?\b"
+            r"|\bbongos?\b|\btoms?\b|\bcowbells?\b|\bwood ?blocks?\b|\bblocks?\b|\bsnaps?\b",
         ),
         ("808", r"808|\bsub ?bass\b|\bsubs?\b|\bbass\b"),
         ("fx", r"\bfx\b|\bsfx\b|\briser|\bsweep|\bimpact|\blifter|\bwhoosh|\bnoise|\btransition"),
@@ -75,6 +75,8 @@ WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     )
 )
 OPEN = re.compile(r"\bopen\b")
+CLOSED = re.compile(r"\bclosed\b|\bchh?\b")
+HAT = re.compile(r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bhihats?\b")
 NOTE = re.compile(r"(?<![A-Za-z0-9])([A-G])([#b]|sharp|flat)?(-?\d)?(?![A-Za-z])")
 KEY = re.compile(r"(?<![A-Za-z0-9])([A-G])([#b]|sharp|flat)? ?(minor|min|maj|major|m)?(?![A-Za-z])")
 BPM = re.compile(r"(?<!\d)(\d{2,3}) ?bpm|bpm ?(\d{2,3})(?!\d)")
@@ -141,11 +143,26 @@ def category_by_name(relative: str) -> str | None:
         words = _words(part)
         for category, pattern in WORDS:
             if pattern.search(words):
-                # "Open Hats/Hat 1.wav", "Hats/Open 1.wav": a bare open beside a hat
-                if category == "hat_closed" and any(OPEN.search(_words(p)) for p in parts):
-                    return "hat_open"
-                return category
+                return _hat_side(path) if category == "hat_closed" else category
     return None
+
+
+def _hat_side(path: Path) -> str:
+    """Open or closed for a hat.
+
+    The file's own word first, then a hat folder that says open and not closed ("Open Hats/");
+    a pack named "Open ..." with no hat in its name does not count.
+    """
+    name = _words(path.name)
+    if CLOSED.search(name):
+        return "hat_closed"
+    if OPEN.search(name):
+        return "hat_open"
+    for folder in reversed(path.parent.parts):
+        words = _words(folder)
+        if HAT.search(words) and OPEN.search(words) and not CLOSED.search(words):
+            return "hat_open"
+    return "hat_closed"
 
 
 def note_by_name(name: str) -> tuple[int, int | None] | None:
