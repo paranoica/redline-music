@@ -4,7 +4,7 @@
 
 import type { Api as BeatApi } from "../beat/api.ts";
 import { Refused } from "../beat/api.ts";
-import { serialize, type Score } from "../beat/model.ts";
+import { serialize, type InstrumentSpec, type Score } from "../beat/model.ts";
 import { SaveQueue, type SaveState, type Timer } from "./queue.ts";
 import type { ScreenFacts } from "./view.ts";
 
@@ -39,13 +39,14 @@ export interface DraftHost {
 }
 
 type RenderState = { state: string; score_file: string | null; error: string | null };
-type Read = { draft: { score: Score; base: string }; session: { score_file: string; score: Score } };
+type Read = { draft: { score: Score; base: string }; session: { score_file: string; score: Score; instruments?: InstrumentSpec[] } };
 
 // The working copy to start from, or null when the draft and the newest score were read across
 // a save. The newest score's text is what tells an edit from it.
-export function startFrom({ draft, session }: Read): { score: Score; base: string; saved: string } | null {
+export function startFrom({ draft, session }: Read): { score: Score; base: string; saved: string; instruments: InstrumentSpec[] } | null {
   if (session.score_file !== draft.base) return null;
-  return { score: draft.score, base: draft.base, saved: serialize(session.score) };
+  const instruments = Array.isArray(session.instruments) ? session.instruments : [];
+  return { score: draft.score, base: draft.base, saved: serialize(session.score), instruments };
 }
 
 export class BeatDraft {
@@ -54,6 +55,7 @@ export class BeatDraft {
   readonly #sleep: (ms: number) => Promise<void>;
   #seed: number | null = null;
   #score: Score | null = null;
+  #instruments: InstrumentSpec[] = [];
   #base: string | null = null;
   // the newest saved score as text, to tell an edit from it
   #saved = "";
@@ -97,6 +99,11 @@ export class BeatDraft {
     return this.#score;
   }
 
+  // what the engine can play, as the session gave it
+  get instruments(): readonly InstrumentSpec[] {
+    return this.#instruments;
+  }
+
   get rendering(): boolean {
     return this.#rendering;
   }
@@ -134,6 +141,7 @@ export class BeatDraft {
         if (!start) throw new Error("партитура менялась, пока я её читал");
         if (this.#closed || seed !== this.#seed) return;
         this.#score = start.score;
+        this.#instruments = start.instruments;
         this.#base = start.base;
         this.#saved = start.saved;
         this.#host.loaded(start.score, serialize(start.score) !== start.saved);

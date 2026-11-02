@@ -69,7 +69,7 @@ export interface BeatEditing {
   edit(section: number, pattern: string, change: (score: Score, pattern: string) => Score): void;
 }
 
-const ROLL_NAMES: [number, string][] = [
+export const ROLL_NAMES: readonly [number, string][] = [
   [0, "удар"],
   [2, "дробь 2"],
   [3, "дробь 3"],

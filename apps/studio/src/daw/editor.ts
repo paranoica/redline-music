@@ -1,10 +1,10 @@
-// The bottom editor's contents for the selected lane: an own beat's piano roll and drum grid, the
-// effects, the text. Own-beat edits go to one draft per seed after a quiet moment; the numbered
-// score and its render happen at the commit points only (commitBeat), and a small ▶ auditions the
-// selected block live through the beat engine.
+// The bottom editor's contents for the selected lane: an own beat's channel rack and piano roll,
+// a flip's notes and drum grid, the effects, the text. Own-beat edits go to one draft per seed
+// after a quiet moment; the numbered score and its render happen at the commit points only
+// (commitBeat), and a small ▶ auditions the selected block live through the beat engine.
 
 import type { Api as BeatApi } from "../beat/api.ts";
-import { ModelError, type Score } from "../beat/model.ts";
+import { ModelError, type InstrumentSpec, type Score } from "../beat/model.ts";
 import { History } from "../core/history.ts";
 import { apiPath, apiRoot } from "../core/mount.ts";
 import type { FlipApi, FlipState } from "../flip/api.ts";
@@ -17,7 +17,8 @@ import type { FlipDraft } from "./flipdraft.ts";
 import { FxPane, type StudioLike } from "./fx.ts";
 import type { LyricLayout } from "./lyrics.ts";
 import type { Playback } from "./player.ts";
-import { FlipRoll, layerProblem, RollView, scoreRoll, SourceNotes } from "./roll.ts";
+import { RackView } from "./rack.ts";
+import { FlipRoll, layerProblem, RollView, scoreRoll, SourceNotes, type NoteRowRef } from "./roll.ts";
 import { chooseShare, shareGate, type ShareChoice } from "./share.ts";
 import { TextTab } from "./text-tab.ts";
 import type { EditorTab, LaneKind, ScreenFacts } from "./view.ts";
@@ -66,6 +67,8 @@ export interface EditorHost {
   beatState(): void;
   // the editor wants to be drawn again
   repaint(): void;
+  // the editor wants another of the lane's tabs on screen
+  openTab(tab: EditorTab): void;
   say(text: string): void;
   overlay: HTMLElement;
 }
@@ -81,6 +84,7 @@ export class Editor {
   readonly audition: HTMLButtonElement;
   readonly #host: EditorHost;
   readonly #roll: RollView;
+  readonly #rack: RackView;
   readonly #drums: DrumsView;
   readonly #flipRoll: RollView;
   readonly #flipDrums: DrumsView;
@@ -92,6 +96,8 @@ export class Editor {
   readonly #answered = new Set<string>();
   #ask: Ask | null = null;
   #block: number | null = null;
+  // the note row the roll edits, picked in the rack
+  #notes: NoteRowRef | null = null;
   #auditioning = false;
   #auditionSeq = 0;
   #scoreKey: string | null = null;
@@ -108,8 +114,30 @@ export class Editor {
       block: () => this.block(),
       edit: (section, pattern, change) => this.#edit(section, pattern, change),
     };
-    this.#roll = new RollView(scoreRoll(editing));
+    this.#roll = new RollView(
+      scoreRoll({
+        ...editing,
+        notes: () => this.#notes,
+        editPattern: (change) => {
+          const score = this.#draft.score;
+          if (score) this.#run(() => change(score), true);
+        },
+      }),
+    );
     this.#drums = new DrumsView(scoreDrums(editing));
+    this.#rack = new RackView({
+      score: () => this.#draft.score,
+      specs: () => this.#draft.instruments,
+      seed: () => this.#seed(),
+      section: () => this.block()?.section ?? null,
+      wants: () => (this.#lane === "drums" ? "drum" : this.#lane === "bass" ? "note" : null),
+      edit: (next, live) => this.editPattern(next, { live: live === true }),
+      notes: (pattern, sound, open) => {
+        this.#notes = { pattern, sound };
+        if (open) host.openTab("roll");
+      },
+      say: (text) => host.say(text),
+    });
     this.#source = new SourceNotes(host.flipApi, () => host.flipDraft.flush(), () => host.repaint());
     const flipEditing = {
       doc: () => host.flipDraft.doc,
@@ -178,6 +206,11 @@ export class Editor {
     return this.#draft.score;
   }
 
+  // the instruments the engine plays, empty until the score is loaded
+  get instruments(): readonly InstrumentSpec[] {
+    return this.#draft.instruments;
+  }
+
   get rendering(): boolean {
     return this.#draft.rendering;
   }
@@ -217,8 +250,11 @@ export class Editor {
     return at !== null && this.#host.clips().some((c) => c.index === at && c.bars >= 1) ? at : null;
   }
 
+  // a block picked on the timeline points the rack and the roll at what it plays
   selectBlock(index: number): void {
     this.#block = index;
+    this.#notes = null;
+    this.#rack.follow();
     this.#source.retry();
     if (this.#auditioning) void this.#startAudition();
   }
@@ -234,6 +270,20 @@ export class Editor {
   editScore(next: Score): boolean {
     if (!this.#draft.score || this.#ask) return false;
     this.#answered.clear();
+    this.#apply(next, true);
+    return true;
+  }
+
+  // An edit of a pattern wherever it plays, from the rack or the roll of a picked sound: it asks
+  // nothing, and a question still open is dropped. `live`: a step of a drag, heard at once but
+  // neither saved nor an undo step; the drag ends with the same call without it.
+  editPattern(next: Score, opts: { live?: boolean } = {}): boolean {
+    if (!this.#draft.score) return false;
+    this.#ask = null;
+    if (opts.live) {
+      this.#host.playback()?.updateAudition(next);
+      return true;
+    }
     this.#apply(next, true);
     return true;
   }
@@ -298,14 +348,19 @@ export class Editor {
 
   // ---------- loading ----------
 
-  #syncSeed(): void {
+  #seed(): number | null {
     const b = this.#host.reply().stations.beat;
-    const seed = b.kind === "own" && typeof b.seed === "number" ? b.seed : null;
-    if (!this.#draft.reset(seed)) return;
+    return b.kind === "own" && typeof b.seed === "number" ? b.seed : null;
+  }
+
+  #syncSeed(): void {
+    if (!this.#draft.reset(this.#seed())) return;
     this.#history = null;
     this.#answered.clear();
     this.#ask = null;
     this.#block = null;
+    this.#notes = null;
+    this.#rack.reset();
   }
 
   // ---------- edits ----------
@@ -337,7 +392,7 @@ export class Editor {
     });
   }
 
-  #run(make: () => Score): void {
+  #run(make: () => Score, wide = false): void {
     let next: Score;
     try {
       next = make();
@@ -346,7 +401,8 @@ export class Editor {
       this.#host.repaint();
       return;
     }
-    this.#apply(next, true);
+    if (wide) this.editPattern(next);
+    else this.#apply(next, true);
   }
 
   #apply(next: Score, push: boolean): void {
@@ -374,6 +430,9 @@ export class Editor {
 
   #content(tab: EditorTab, lane: LaneKind): Node[] {
     switch (tab) {
+      case "rack":
+        this.#rack.show();
+        return [this.#rack.root];
       case "roll": {
         const view = this.#host.facts().beatKind === "flip" ? this.#flipRoll : this.#roll;
         view.show();

@@ -237,6 +237,11 @@ export async function mountScreen(root: HTMLElement, options: ScreenOptions): Pr
       render();
     },
     repaint: () => paintEditor(),
+    openTab: (t) => {
+      tab = t;
+      editorOpen = true;
+      paintEditor();
+    },
     say: (text) => say(text),
     overlay: root,
   });

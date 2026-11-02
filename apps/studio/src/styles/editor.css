@@ -1,4 +1,5 @@
-/* The bottom editor's contents: the piano roll, the drum grid, the knobs, the text, the drawer. */
+/* The bottom editor's contents: the channel rack, the piano roll, the drum grid, the knobs, the
+   text, the drawer. */
 
 .daw .arr { position: relative; }
 .daw .loading {
@@ -89,6 +90,60 @@
 .daw .step.on { background: var(--drum); border-color: var(--drum); }
 .daw .step.on.soft { opacity: 0.55; }
 .daw .step.roll { background: repeating-linear-gradient(90deg, var(--drum) 0 3px, transparent 3px 5px); border-color: var(--drum); }
+
+/* the channel rack */
+.daw .kpane { height: 100%; display: grid; grid-template-rows: 40px 1fr; }
+.daw .rhead { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.daw .rhead__title { margin: 0 4px 0 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.daw .rhead__pick { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 2px; background: var(--raised); border-radius: 6px; }
+.daw .rhead__pick select { border: 0; background: transparent; max-width: 220px; }
+.daw .rhead__btn { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-dim); cursor: pointer; font-size: 14px; }
+.daw .rhead__btn:hover:not(:disabled) { background: var(--raised-hover); color: var(--text); }
+.daw .rhead__btn:disabled { opacity: 0.35; cursor: default; }
+.daw .rhead__pager { display: flex; align-items: center; gap: 2px; font: 12px var(--font-num); color: var(--text-dim); }
+.daw .rhead__hint { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.daw .rack { padding: 8px 12px; overflow: auto; min-height: 0; display: grid; align-content: start; row-gap: 6px; }
+.daw .ch { display: grid; grid-template-columns: 14px 26px 26px 150px 1fr; align-items: center; gap: 6px; height: 28px; }
+.daw .led { width: 10px; height: 10px; padding: 0; border: 0; border-radius: 50%; background: #2a2e36; cursor: pointer; justify-self: center; }
+.daw .led[aria-pressed="true"] { background: #3fd06a; box-shadow: 0 0 6px #3fd06a88; }
+.daw .knob.knob--mini { width: 26px; gap: 0; position: relative; }
+.daw .knob--mini .knob__dial { width: 22px; height: 22px; }
+.daw .knob--mini .knob__dial::before { inset: 2px; }
+.daw .knob--mini .knob__dial::after { height: 8px; }
+.daw .knob--mini .knob__name { display: none; }
+.daw .knob--mini .knob__val {
+  display: none; position: absolute; top: 2px; left: calc(100% + 2px); z-index: 4; margin: 0; padding: 1px 5px;
+  background: var(--raised-hover); border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text); font-size: 11px; white-space: nowrap;
+}
+.daw .knob--mini:hover .knob__val, .daw .knob--mini:focus-within .knob__val { display: block; }
+.daw .ch__name {
+  height: 26px; min-width: 0; display: flex; align-items: baseline; gap: 6px; padding: 0 9px; text-align: left; font: 500 12px var(--font-ui); color: var(--text);
+  background: var(--raised); border: 0; border-left: 4px solid var(--c); border-radius: 5px; cursor: pointer; white-space: nowrap; overflow: hidden; line-height: 26px;
+}
+.daw .ch__name small { color: var(--muted); font: 10px var(--font-num); overflow: hidden; text-overflow: ellipsis; }
+.daw .ch__name:hover { background: var(--raised-hover); }
+.daw .ch__name.sel { outline: 1px solid var(--c); }
+.daw .rsteps { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+.daw .st { height: 26px; padding: 0; border: 0; border-radius: 4px; background: #23262e; cursor: pointer; }
+.daw .st:nth-child(8n+5), .daw .st:nth-child(8n+6), .daw .st:nth-child(8n+7), .daw .st:nth-child(8n+8) { background: #1a1c22; }
+.daw .st.on { background: var(--c); box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.25); }
+.daw .st.accent { box-shadow: inset 0 0 0 2px var(--text); }
+.daw .st.ghost { opacity: 0.45; }
+.daw .st.roll { background: repeating-linear-gradient(90deg, var(--c) 0 3px, transparent 3px 5px); }
+.daw .st:hover { filter: brightness(1.25); }
+.daw .ch--out .rsteps, .daw .ch--out .mini { opacity: 0.4; }
+.daw .ch__locked, .daw .ch__none {
+  height: 26px; padding: 0 10px; text-align: left; border: 1px dashed var(--line-strong); border-radius: 4px; background: none; color: var(--muted); font-size: 12px;
+}
+.daw .ch__locked { cursor: help; }
+.daw .ch__none { display: flex; align-items: center; }
+.daw .mini { position: relative; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--well); overflow: hidden; cursor: pointer; }
+.daw .mini i { position: absolute; height: 4px; background: var(--c); border-radius: 2px; }
+.daw .mini::after {
+  content: "открыть ноты"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; color: var(--text);
+  background: rgb(8 9 11 / 0.8); opacity: 0; transition: opacity 0.12s;
+}
+.daw .mini:hover::after, .daw .mini:focus-visible::after { opacity: 1; }
 
 /* the effects */
 .daw .fx { display: flex; gap: 24px; padding: 18px 24px; align-items: flex-start; height: 100%; overflow: auto; }

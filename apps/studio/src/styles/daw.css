@@ -21,6 +21,14 @@
   --drum: #9cc79a;
   --voice: #e9ebef;
   --text-lane: #b9a6d9;
+  --c-kick: #ff7a59;
+  --c-snare: #f2c14e;
+  --c-clap: #e8d27a;
+  --c-hat: #7fd1b9;
+  --c-ohat: #5fb3c9;
+  --c-perc: #a2a6ff;
+  --c-808: var(--bass);
+  --c-keys: #c79bf2;
   --font-ui: "Golos Text", "Segoe UI", system-ui, sans-serif;
   --font-num: "JetBrains Mono", ui-monospace, monospace;
   --bar: 60px;

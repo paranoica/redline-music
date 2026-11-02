@@ -1,10 +1,12 @@
-// The piano roll of the bottom editor: the 808 notes of the selected block. An own beat's block
-// plays its pattern round and round, so every pass is drawn and each is the same notes; a press
-// anywhere lands on the pattern. A flip block's notes are its own, bar after bar. Click empty =
-// add, drag = move, drag the right edge = resize, right click or Delete = remove. A note that
-// starts while the one before still sounds glides from it.
+// The piano roll of the bottom editor. An own beat's roll shows the note row picked in the
+// channel rack, a whole pattern wherever it plays; with none picked, the 808 of the selected
+// block, which plays its pattern round and round, so every pass is drawn and each is the same
+// notes. A flip block's notes are its own, bar after bar. Click empty = add, drag = move, drag the
+// right edge = resize, right click or Delete = remove. A note that starts while the one before
+// still sounds glides from it.
 
-import { addNote, deleteNote, isNoteRow, moveNote, noteName, notesOf, resizeNote, STEPS_PER_BAR, usesFlats, type NoteView, type Score } from "../beat/model.ts";
+import { instrumentLabel } from "../beat/labels.ts";
+import { addNote, deleteNote, isNoteRow, moveNote, noteName, notesOf, patternLabel, resizeNote, STEPS_PER_BAR, usesFlats, type NoteView, type Score } from "../beat/model.ts";
 import type { FlipApi } from "../flip/api.ts";
 import { draftProblem, STEPS_PER_BAR as FLIP_STEPS, type Block as FlipBlock, type FlipDoc, type FlipNote, type Refusal } from "../flip/model.ts";
 import { h } from "../ui/dom.ts";
@@ -82,6 +84,35 @@ export function bassRowOf(score: Score, section: number): { pattern: string; sou
   return null;
 }
 
+export interface NoteRowRef {
+  pattern: string;
+  sound: string;
+}
+
+// the row the roll edits: the one picked in the rack while it is a note row, else the block's 808
+export function rollRowOf(score: Score, section: number | null, chosen: NoteRowRef | null): (NoteRowRef & { chosen: boolean }) | null {
+  if (chosen && Object.hasOwn(score.patterns, chosen.pattern) && Object.hasOwn(score.sounds, chosen.sound)) {
+    const rows = score.patterns[chosen.pattern]?.rows ?? {};
+    const row = Object.hasOwn(rows, chosen.sound) ? rows[chosen.sound] : undefined;
+    if (row !== undefined && isNoteRow(row)) return { pattern: chosen.pattern, sound: chosen.sound, chosen: true };
+  }
+  if (section === null) return null;
+  const old = bassRowOf(score, section);
+  return old ? { ...old, chosen: false } : null;
+}
+
+export const BASS_INSTRUMENTS: readonly string[] = ["bass808", "reese", "sample808"];
+const MELODY_LO = 48;
+const MELODY_HI = 84;
+
+// a bass keeps the 808's range; anything else that plays notes gets C3..C6, more if its notes are wider
+export function rollRangeFor(instrument: string | undefined, midis: readonly number[]): { lo: number; hi: number } {
+  if (instrument === undefined || BASS_INSTRUMENTS.includes(instrument)) return rollRange(midis);
+  const lo = midis.length ? Math.min(MELODY_LO, Math.min(...midis) - 4) : MELODY_LO;
+  const hi = midis.length ? Math.max(MELODY_HI, Math.max(...midis) + 4) : MELODY_HI;
+  return { lo: Math.max(0, lo), hi: Math.min(127, hi) };
+}
+
 // pitches with room around the notes, at least two octaves
 export function rollRange(midis: readonly number[]): { lo: number; hi: number } {
   let lo = midis.length ? Math.min(...midis) - 4 : 26;
@@ -121,6 +152,8 @@ export interface RollData {
   patternSteps: number;
   viewBars: number;
   flats: boolean;
+  // the pitches shown; without it, two octaves around the notes
+  range?: { lo: number; hi: number };
   chip?: { text: string; action: string; run: () => void };
 }
 
@@ -140,32 +173,58 @@ const NEW_LEN = 2;
 
 const barWord = (n: number): string => (n === 1 ? "такт" : n < 5 ? "такта" : "тактов");
 
-// the 808 notes of an own beat's block, in the pattern its section plays
-export function scoreRoll(host: BeatEditing): RollSource {
-  let where: { section: number; pattern: string; sound: string } | null = null;
+export interface OwnRollEditing extends BeatEditing {
+  // the note row picked in the rack, null for the block's 808
+  notes(): NoteRowRef | null;
+  // an edit of the whole pattern, heard wherever it plays: nothing to ask
+  editPattern(change: (score: Score) => Score): void;
+}
+
+export function scoreRoll(host: OwnRollEditing): RollSource {
+  let where: (NoteRowRef & { chosen: boolean; section: number | null }) | null = null;
   const edit = (change: (s: Score, pattern: string, sound: string) => Score): void => {
     const w = where;
-    if (w) host.edit(w.section, w.pattern, (s, p) => change(s, p, w.sound));
+    if (!w) return;
+    if (w.chosen || w.section === null) host.editPattern((s) => change(s, w.pattern, w.sound));
+    else host.edit(w.section, w.pattern, (s, p) => change(s, p, w.sound));
   };
   return {
     data() {
       const score = host.score();
+      if (!score) return "Загружаю партитуру…";
       const block = host.block();
-      if (!score || !block) return score ? "Выбери кусок на дорожке бита." : "Загружаю партитуру…";
-      const row = bassRowOf(score, block.section);
-      if (!row) return "В этом куске 808 не играет.";
-      where = { section: block.section, ...row };
+      const row = rollRowOf(score, block?.section ?? null, host.notes());
+      where = null;
+      if (!row) return block ? "В этом куске 808 не играет. Звук с нотами открывается в «Каналах»." : "Выбери кусок на дорожке бита.";
+      where = { ...row, section: block?.section ?? null };
+      const instrument = score.sounds[row.sound]?.instrument;
+      const notes = notesOf(score, row.pattern, row.sound);
       const patternBars = score.patterns[row.pattern]?.bars ?? 1;
+      const range = rollRangeFor(instrument, notes.map((n) => n.midi));
+      if (row.chosen || !block) {
+        const label = patternLabel(score, row.pattern, Object.keys(score.patterns).indexOf(row.pattern));
+        return {
+          key: `notes:${row.pattern}:${row.sound}`,
+          caption: `${instrumentLabel(instrument ?? row.sound)} · ${row.sound} · ${label} · ${patternBars} ${barWord(patternBars)}, правка везде, где он играет`,
+          label: "Ноты: клик — нота, тяни — сдвинуть, правый край — длина, правый клик или Delete — убрать",
+          notes,
+          patternSteps: patternBars * STEPS_PER_BAR,
+          viewBars: patternBars,
+          flats: usesFlats(score),
+          range,
+        };
+      }
       const viewBars = Math.max(1, Math.min(MAX_VIEW_BARS, block.bars));
       const passes = Math.ceil(viewBars / patternBars);
       return {
         key: `${block.section}:${row.pattern}`,
         caption: `паттерн ${row.pattern} · ${patternBars} ${barWord(patternBars)}${passes > 1 ? `, в куске играет ${passes} раза` : ""}`,
         label: "Ноты 808: клик — нота, тяни — сдвинуть, правый край — длина, правый клик или Delete — убрать",
-        notes: notesOf(score, row.pattern, row.sound),
+        notes,
         patternSteps: patternBars * STEPS_PER_BAR,
         viewBars,
         flats: usesFlats(score),
+        range,
       };
     },
     add: (step, midi, chose) =>
@@ -465,7 +524,7 @@ export class RollView {
   #paint(data: RollData, fresh: boolean): void {
     const { notes, flats } = data;
     const viewSteps = data.viewBars * STEPS_PER_BAR;
-    const { lo, hi } = rollRange(notes.map((n) => n.midi));
+    const { lo, hi } = data.range ?? rollRange(notes.map((n) => n.midi));
     const l: RollLayout = { stepPx: STEP_PX, rowPx: ROW_PX, hi, lo, patternSteps: data.patternSteps, viewSteps };
     const passes = Math.ceil(viewSteps / l.patternSteps);
     this.#scroller.setAttribute("aria-label", data.label);

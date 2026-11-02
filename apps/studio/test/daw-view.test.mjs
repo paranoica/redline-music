@@ -266,9 +266,10 @@ test("no key is taken while typing, with Alt, or with Ctrl on a plain key", () =
 });
 
 test("the editor shows only the tabs of the selected lane", () => {
-  assert.deepEqual(editorTabs("bass", "own"), ["roll"]);
-  assert.deepEqual(editorTabs("drums", "own"), ["drums"]);
-  assert.deepEqual(editorTabs("beat", "own"), ["roll", "drums", "fx"]);
+  // an own beat's lanes edit through the channel rack, which takes the drum grid's place
+  assert.deepEqual(editorTabs("bass", "own"), ["rack", "roll", "fx"]);
+  assert.deepEqual(editorTabs("drums", "own"), ["rack", "roll", "fx"]);
+  assert.deepEqual(editorTabs("beat", "own"), ["rack", "roll", "fx"]);
   // a flip or a plain file has no roll or grid in this version
   assert.deepEqual(editorTabs("beat", "flip"), ["roll", "drums", "fx"]);
   assert.deepEqual(editorTabs("beat", "file"), ["fx"]);

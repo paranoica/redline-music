@@ -242,11 +242,12 @@ export function dawKey(e: KeyLike, typing: boolean): DawKey | null {
   }
 }
 
-export type EditorTab = "roll" | "drums" | "fx" | "text";
+export type EditorTab = "rack" | "roll" | "drums" | "fx" | "text";
 
-export const TAB_NAMES: Record<EditorTab, string> = { roll: "Ноты", drums: "Барабаны", fx: "Эффекты", text: "Текст" };
+export const TAB_NAMES: Record<EditorTab, string> = { rack: "Каналы", roll: "Ноты", drums: "Барабаны", fx: "Эффекты", text: "Текст" };
 
 export function editorTabs(lane: LaneKind, beat: BeatKind): EditorTab[] {
+  if (beat === "own" && BEAT_LANE_KINDS.includes(lane)) return ["rack", "roll", "fx"];
   switch (lane) {
     case "text":
       return ["text"];
@@ -255,7 +256,7 @@ export function editorTabs(lane: LaneKind, beat: BeatKind): EditorTab[] {
     case "drums":
       return ["drums"];
     case "beat":
-      return beat === "own" || beat === "flip" ? ["roll", "drums", "fx"] : ["fx"];
+      return beat === "flip" ? ["roll", "drums", "fx"] : ["fx"];
     default:
       return ["fx"];
   }
