@@ -18,7 +18,7 @@ import numpy.typing as npt
 import redline_dsp
 import soundfile as sf
 
-from redline.beat import library
+from redline.beat import library, pack
 from redline.core.private import write_private
 from redline.measure.beat import measure_beat, write_beat_report
 from redline.measure.separate import Separator
@@ -99,6 +99,18 @@ def notes_used(score_json: str, rate: float, body: dict[str, Any]) -> dict[str, 
     return used
 
 
+def _fits(path: Path) -> None:
+    """Refuse a recording too long or with too many channels before it is decoded."""
+    try:
+        info = sf.info(str(path))
+    except (sf.LibsndfileError, RuntimeError) as error:
+        raise RenderError(f"{path}: cannot read: {error}") from error
+    if info.channels > 2:
+        raise RenderError(f"{path}: {info.channels} channels, a zone takes 1 or 2")
+    if info.frames > pack.ZONE_MAX_S * info.samplerate:
+        raise RenderError(f"{path}: longer than {pack.ZONE_MAX_S:g} s, too long for a zone")
+
+
 def _load_samplers(
     player: Any,
     score_json: str,
@@ -121,6 +133,7 @@ def _load_samplers(
         except library.LibraryError as error:
             raise RenderError(f"sound {', '.join(names)}: {error}") from error
         for zone in zones:
+            _fits(zone.path)
             try:
                 data, zone_rate = sf.read(zone.path, dtype="int16", always_2d=False)
             except (OSError, sf.LibsndfileError) as error:

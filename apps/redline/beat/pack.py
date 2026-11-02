@@ -25,6 +25,8 @@ AUDIO = (".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3")
 PREFIX = "pack-"
 # a sound longer than this with no word for it is taken for a loop
 ONESHOT_MAX_S = 2.5
+# the longest recording a kit plays or the page and the render decode
+ZONE_MAX_S = 30.0
 # what is read of a file to judge its sound
 ANALYSE_S = 4.0
 CATEGORIES = (
@@ -41,15 +43,15 @@ CATEGORIES = (
     "melodic",
     "loop",
 )
-# first match wins, so the narrower words come before the wider ones
+# first match wins: a kick named after the 808 ("808 Kick", "Sub Kick") is still a kick
 WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (category, re.compile(pattern))
     for category, pattern in (
         ("loop", r"\bloops?\b|\b\d{2,3} ?bpm\b|\bbpm ?\d{2,3}\b"),
-        ("808", r"808|\bsub ?bass\b|\bsubs?\b|\bbass\b"),
-        ("hat_open", r"\bopen ?hi?-? ?hats?\b|\bopen\b|\boh\b|\bohh\b|\bopenhat"),
-        ("hat_closed", r"\bhi?-? ?hats?\b|\bhh\b|\bchh?\b|\bclosed\b|\bhihat"),
         ("kick", r"\bkicks?\b|\bkck\b|\bbd\b|\bbass ?drum"),
+        ("808", r"808|\bsub ?bass\b|\bsubs?\b|\bbass\b"),
+        ("hat_open", r"\bopen ?(hi ?-? ?)?hats?\b|\boh\b|\bohh\b|\bopenhat"),
+        ("hat_closed", r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bchh?\b|\bclosed\b|\bhihats?\b"),
         ("clap", r"\bclaps?\b|\bclp\b"),
         ("snare", r"\bsnares?\b|\bsnr\b|\bsd\b|\brims?\b|\brimshot"),
         ("crash", r"\bcrash|\bcymbals?\b|\brides?\b|\bsplash"),
@@ -281,7 +283,8 @@ def _files(root: Path) -> list[Path]:
         parts = path.relative_to(root).parts
         if any(p.startswith(".") or p == "__MACOSX" for p in parts):
             continue
-        if path.is_file() and path.suffix.lower() in AUDIO:
+        # a link could point anywhere on the machine
+        if path.is_file() and not path.is_symlink() and path.suffix.lower() in AUDIO:
             out.append(path)
     return out
 
@@ -353,6 +356,18 @@ def file_of(library: str, root: Path = PACK, catalog: Path = CATALOG) -> tuple[P
     if (stat.st_size, stat.st_mtime_ns) != (entry.size, entry.mtime_ns):
         raise PackError(f"{library}: {entry.path} changed since the scan; scan the pack again")
     return path, entry
+
+
+def display_name(sound: PackSound) -> str:
+    """A pack file's name fit to quote to a person or an agent.
+
+    Its stem, letters, digits and a few marks only, at most 48 characters: a downloaded pack's
+    names are not ours to trust.
+    """
+    stem = Path(sound.path).stem
+    spaced = re.sub(r"\s+", " ", stem)
+    kept = re.sub(r"[^\w ()#+.,'-]", "", spaced, flags=re.ASCII)
+    return " ".join(kept.split())[:48] or sound.id
 
 
 def counts(sounds: list[PackSound]) -> dict[str, int]:

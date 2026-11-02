@@ -412,11 +412,13 @@ def _nearest(files: tuple[SampleFile, ...], notes: Iterable[int]) -> list[Sample
     return [item for item in files if item.path in chosen]
 
 
-def _pack_zone(name: str, root: Path) -> Zone:
+def _pack_zone(name: str, root: Path, pack_root: Path | None) -> Zone:
     from redline.beat import pack
 
     try:
-        path, entry = pack.file_of(name, pack.PACK, root / "pack" / "catalog.json")
+        path, entry = pack.file_of(
+            name, pack.PACK if pack_root is None else pack_root, root / "pack" / "catalog.json"
+        )
     except pack.PackError as error:
         raise LibraryError(str(error)) from error
     # an unpitched sound plays at middle C, so a drum's note means nothing to it
@@ -438,6 +440,7 @@ def zones(
     root: Path = SOUNDS,
     notes_used: Iterable[int] | None = None,
     manifest: Path | None = None,
+    pack_root: Path | None = None,
 ) -> list[Zone]:
     """The verified zones of a fetched instrument, or the one zone of a pack sound.
 
@@ -447,6 +450,7 @@ def zones(
         notes_used: The MIDI notes a score plays; only the nearest roots of each velocity
             layer are returned and read. None returns every zone.
         manifest: The manifest file (default: the committed one).
+        pack_root: The owner's pack folder (default: `pack.PACK`), for a pack sound.
 
     Returns:
         The zones, in manifest order.
@@ -456,7 +460,7 @@ def zones(
             does not match its hash.
     """
     if is_pack(name):
-        return [_pack_zone(name, root)]
+        return [_pack_zone(name, root, pack_root)]
     entry = source(name, manifest)
     if entry.kind != "fetch":
         raise LibraryError(f"{name} is local only: its zones are placed by hand, not listed")

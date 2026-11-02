@@ -14,7 +14,7 @@ from typing import Any
 
 import redline_dsp
 
-from redline.beat import library
+from redline.beat import library, pack
 from redline.beat.recipe import BLOG, LETTERS, OWN, Recipe, parse_key, scale
 
 RATE = 48000.0
@@ -26,7 +26,7 @@ BASSES = ("bass808", "sample808")
 # 808 styles that put the 808 on the kick on purpose
 DOUBLING = ("kick_double",)
 MAX_SAME = 8
-HATS = ("hat_closed", "hat_open")
+HATS = ("hat_closed", "hat_open", "oneshot_hat", "oneshot_open_hat")
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d{1,2})")
 NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 SHOWN_BARS = 8
@@ -178,12 +178,39 @@ def _run_spans(values: list[Any]) -> Iterator[tuple[int, int]]:
             first = i
 
 
+# what a recorded pack sound plays the part of, by its category
+PACK_ROLES = {
+    "kick": "kick",
+    "snare": "snare",
+    "clap": "clap",
+    "hat_closed": "hat_closed",
+    "hat_open": "hat_open",
+    "808": "sample808",
+}
+
+
+def _roles(sounds: list[dict[str, Any]], body: dict[str, Any]) -> list[str]:
+    """Each sound's instrument, a pack one-shot's taken as the drum its category names."""
+    try:
+        catalog = pack.load(pack.CATALOG)
+    except pack.PackError:
+        catalog = {}
+    out = []
+    for s in sounds:
+        library_name = _dict(_dict(body.get("sounds")).get(s["name"])).get("library")
+        entry = None
+        if isinstance(library_name, str) and library.is_pack(library_name):
+            entry = catalog.get(library_name[len(library.PACK_PREFIX) :])
+        out.append(PACK_ROLES.get(entry.category, s["instrument"]) if entry else s["instrument"])
+    return out
+
+
 class _Table:
     """The event table with what the warnings ask of it."""
 
     def __init__(self, score_json: str, body: dict[str, Any]) -> None:
         table = json.loads(redline_dsp.beat_events(score_json, RATE))
-        self.instruments = [s["instrument"] for s in table["sounds"]]
+        self.instruments = _roles(table["sounds"], body)
         self.names = [s["name"] for s in table["sounds"]]
         self.events = table["events"]
         self.sections = [(str(s["name"]), int(s["bars"])) for s in body["sections"]]

@@ -311,6 +311,9 @@ pub static INSTRUMENTS: &[Instrument] = &[
     note("vox", 8, 8.0, VOX),
     note("flute", 4, 3.0, FLUTE),
     drum("oneshot", 4, 10.0, ONESHOT),
+    // recorded hats, in the synthesised hats' choke group
+    hat("oneshot_hat", false, 10.0, ONESHOT),
+    hat("oneshot_open_hat", true, 10.0, ONESHOT),
     Instrument {
         mono: true,
         ..note("sample808", 1, 1.0, SAMPLE808)
@@ -318,7 +321,13 @@ pub static INSTRUMENTS: &[Instrument] = &[
 ];
 
 /// The instruments that play a sound library's zones, named by the sound's `library`.
-pub const SAMPLED: &[&str] = &["sampler", "oneshot", "sample808"];
+pub const SAMPLED: &[&str] = &[
+    "sampler",
+    "oneshot",
+    "oneshot_hat",
+    "oneshot_open_hat",
+    "sample808",
+];
 
 /// The instrument of that name.
 pub fn instrument(name: &str) -> Option<&'static Instrument> {

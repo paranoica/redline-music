@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from redline.beat import library
-from redline.beat.pack import PackSound
+from redline.beat.pack import ZONE_MAX_S, PackSound
 
 BLOG = "blog, unverified"
 OWN = "own choice"
@@ -921,11 +921,21 @@ PACK_FOR = {
 }
 
 
+# the instrument that plays a pack sound of each category; the rest play as plain one-shots
+PACK_INSTRUMENT = {
+    "808": "sample808",
+    "hat_closed": "oneshot_hat",
+    "hat_open": "oneshot_open_hat",
+}
+
+
 def pack_kit(sounds: Iterable[PackSound]) -> dict[str, list[PackSound]]:
     """The pack's one-shots by category, each list in id order; an 808 needs a known root."""
     kit: dict[str, list[PackSound]] = {}
     for s in sorted(sounds, key=lambda s: s.id):
         if s.category == "808" and s.note is None:
+            continue
+        if s.duration_s > ZONE_MAX_S:
             continue
         kit.setdefault(s.category, []).append(s)
     return kit
@@ -952,7 +962,7 @@ def _from_pack(
             continue
         named = [s for s in pool if words & set(re.split(r"[^a-z0-9]+", s.path.lower()))]
         chosen = (named or pool)[draw % len(named or pool)]
-        instrument = "sample808" if sound.instrument == "bass808" else "oneshot"
+        instrument = PACK_INSTRUMENT.get(chosen.category, "oneshot")
         out.append(Sound(sound.name, instrument, (), f"{library.PACK_PREFIX}{chosen.id}"))
     return tuple(out)
 

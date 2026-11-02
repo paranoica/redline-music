@@ -242,7 +242,7 @@ class BeatStudio:
                 continue
             notes = sorted(set().union(*(used[s] for s in sounds)))
             try:
-                zones = library.zones(name, self.work / "sounds", notes, self.manifest)
+                zones = library.zones(name, self.work / "sounds", notes, self.manifest, self.pack)
                 item["zones"] = [self._zone_info(name, entry, zone) for zone in zones]
                 item["fetched"] = True
             except (library.LibraryError, OSError, sf.LibsndfileError) as error:
@@ -322,6 +322,7 @@ class BeatStudio:
         # the catalogue's paths come from a walk of the folder; a symlink on disk is not
         if not path.resolve().is_relative_to(self.pack.resolve()):
             raise BadRequest(HTTPStatus.FORBIDDEN, f"{name} resolves outside {self.pack}")
+        _fits(path, name)
         data = path.read_bytes()
         if len(data) != entry.size:
             raise BadRequest(HTTPStatus.CONFLICT, f"{name} changed since the scan: scan again")
@@ -561,6 +562,18 @@ class Handler(LocalHandler):
         except Exception as error:  # noqa: BLE001
             # the page shows a JSON error; a dropped connection tells it nothing
             self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
+
+
+def _fits(path: Path, label: str) -> None:
+    """Refuse a recording too long or with too many channels before it is decoded."""
+    try:
+        info = sf.info(str(path))
+    except (sf.LibsndfileError, RuntimeError) as error:
+        raise BadRequest(HTTPStatus.CONFLICT, f"{label}: {error}") from error
+    if info.channels > 2:
+        raise BadRequest(HTTPStatus.CONFLICT, f"{label}: more than 2 channels")
+    if info.frames > pack.ZONE_MAX_S * info.samplerate:
+        raise BadRequest(HTTPStatus.CONFLICT, f"{label}: longer than {pack.ZONE_MAX_S:g} s")
 
 
 def _pcm(data: bytes, label: str) -> tuple[bytes, int, int, int]:

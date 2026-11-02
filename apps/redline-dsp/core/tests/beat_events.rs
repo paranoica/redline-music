@@ -335,6 +335,31 @@ fn a_closed_hat_chokes_an_open_one_and_a_snare_does_not() {
 }
 
 #[test]
+fn recorded_hats_choke_like_the_synthesised_ones_and_across_them() {
+    let s = score(
+        json!({
+            "open": {"instrument": "oneshot_open_hat", "library": "pack-0000000001"},
+            "closed": {"instrument": "oneshot_hat", "library": "pack-0000000002"},
+            "synth_closed": {"instrument": "hat_closed"},
+            "hit": {"instrument": "oneshot", "library": "pack-0000000003"}
+        }),
+        json!({"p": {"bars": 1, "rows": {
+            "open": "x.......x...x...",
+            "closed": "....x...........",
+            "hit": "......x.........",
+            "synth_closed": "..........x....."
+        }}}),
+        json!([{"name": "a", "bars": 1, "play": ["p"]}]),
+    );
+    let t = table(&s);
+    let open = of(&t, &s, "open");
+    assert_eq!(open[0].end, Some(4 * STEP));
+    // a plain one-shot cuts nothing; the synthesised closed hat cuts the recorded open one
+    assert_eq!(open[1].end, Some(10 * STEP));
+    assert_eq!(open[2].end, None);
+}
+
+#[test]
 fn an_open_hat_chokes_the_open_hat_before_it() {
     let s = one_row("hat_open", json!("x...x..........."), 1);
     let t = table(&s);

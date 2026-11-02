@@ -72,7 +72,8 @@ def _sounds_scan(args: argparse.Namespace) -> int:
     print(f"scanning {args.pack} ...", flush=True)
     sounds, problems = pack.scan(args.pack, catalog)
     for line in problems:
-        print(f"  cannot read: {line}", flush=True)
+        # a downloaded pack's file names may carry terminal escapes
+        print(f"  cannot read: {line!r}", flush=True)
     found = pack.counts(sounds)
     print(
         f"{len(sounds)} sounds: "

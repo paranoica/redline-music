@@ -4,6 +4,7 @@ use super::drums::{Fall, Gate as HitGate};
 use super::fm::{param, Gate};
 use super::{Ctx, Voice};
 use crate::beat::events::Event;
+use crate::beat::instruments::SAMPLED;
 use std::ops::RangeInclusive;
 
 const TUNE: usize = 0;
@@ -457,7 +458,7 @@ pub fn sampler_for(_rate: f32, library: usize) -> Box<dyn Voice> {
 /// library of that index.
 pub fn sampled_for(instrument: &str, rate: f32, library: usize) -> Box<dyn Voice> {
     match instrument {
-        "oneshot" => Box::new(OneShot {
+        "oneshot" | "oneshot_hat" | "oneshot_open_hat" => Box::new(OneShot {
             rate: rate as f64,
             library,
             ..OneShot::default()
@@ -472,6 +473,7 @@ pub fn sampled_for(instrument: &str, rate: f32, library: usize) -> Box<dyn Voice
 }
 
 pub fn make(instrument: &str, rate: f32) -> Option<Box<dyn Voice>> {
-    matches!(instrument, "sampler" | "oneshot" | "sample808")
+    SAMPLED
+        .contains(&instrument)
         .then(|| sampled_for(instrument, rate, 0))
 }

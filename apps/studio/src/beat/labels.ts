@@ -24,6 +24,8 @@ const INSTRUMENTS: Record<string, string> = {
   vox: "хор",
   flute: "флейта",
   oneshot: "сэмпл",
+  oneshot_hat: "хэт из сэмпла",
+  oneshot_open_hat: "откр. хэт из сэмпла",
   sample808: "808 из сэмпла",
 };
 
@@ -58,6 +60,7 @@ const PARAMS: Record<string, string> = {
   breath: "Дыхание",
   vibrato: "Вибрато",
   vibrato_hz: "Частота вибрато",
+  length: "Длина",
 };
 
 export const LANE_NAMES: Record<Lane, string> = {
