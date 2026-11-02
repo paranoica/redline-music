@@ -21,6 +21,8 @@ from redline.core.private import write_private
 PACK = Path("input/sounds")
 CATALOG = Path("work/sounds/pack/catalog.json")
 FORMAT = 1
+# raised whenever the sorting changes, so a rescan sorts every file again
+SORTING = 2
 AUDIO = (".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3")
 PREFIX = "pack-"
 # a sound longer than this with no word for it is taken for a loop
@@ -49,20 +51,24 @@ WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (category, re.compile(pattern))
     for category, pattern in (
         ("loop", r"\bloops?\b|\b\d{2,3} ?bpm\b|\bbpm ?\d{2,3}\b"),
-        ("kick", r"\bkicks?\b|\bkck\b|\bbd\b|\bbass ?drum"),
+        ("kick", r"\bkicks?\b|\bkck\b|\bbass ?drum"),
         ("clap", r"\bclaps?\b|\bclp\b"),
-        ("snare", r"\bsnares?\b|\bsnr\b|\bsd\b|\brims?\b|\brimshot"),
+        ("snare", r"\bsnares?\b|\bsnr\b|\brims?\b|\brimshot|\bside ?stick"),
         (
             "hat_open",
-            r"\bopen ?(hi ?-? ?)?hats?\b|\b(hi ?-? ?)?hats? ?open\b|\bhh ?open\b|\boh\b|\bohh\b"
-            r"|\bopenhat",
+            r"\bopen ?(hi ?-? ?)?hats?\b|\b(hi ?-? ?)?hats? ?open\b|\bhh ?open\b|\bohh\b"
+            r"|\bopenhat|\bhho\b",
         ),
-        ("hat_closed", r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bchh?\b|\bclosed\b|\bhihats?\b"),
+        (
+            "hat_closed",
+            r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bchh\b|\bclosed\b|\bhihats?\b|\bhh ?closed\b|\bhhc\b",
+        ),
         ("crash", r"\bcrash(es)?\b|\bcymbals?\b|\brides?\b|\bsplash(es)?\b"),
         (
             "perc",
-            r"\bpercs?\b|\bpercussion\b|\bshakers?\b|\btamb(ourine)?s?\b|\bcongas?\b"
-            r"|\bbongos?\b|\btoms?\b|\bcowbells?\b|\bwood ?blocks?\b|\bblocks?\b|\bsnaps?\b",
+            r"\bpercs?\b|\bpercussion\b|\bshakers?\b|\btamb(ourine)?s?\b|\bconga|\bbongo"
+            r"|\btom(s|hi|lo|mid|high|low)?\b|\bmaracas?\b|\btimbales?\b|\bcowbells?\b"
+            r"|\bwood ?blocks?\b|\bblocks?\b|\bsnaps?\b|\bclaves?\b",
         ),
         ("808", r"808|\bsub ?bass\b|\bsubs?\b|\bbass\b"),
         ("fx", r"\bfx\b|\bsfx\b|\briser|\bsweep|\bimpact|\blifter|\bwhoosh|\bnoise|\btransition"),
@@ -70,12 +76,29 @@ WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         (
             "melodic",
             r"\bbells?\b|\bpiano|\bkeys\b|\bplucks?\b|\bsynths?\b|\bleads?\b|\bguitar|\bflute"
-            r"|\bstrings?\b|\bpads?\b|\bchoir|\bbrass|\bmelod|\bchords?\b|\bmallet|\bbox\b",
+            r"|\bstrings?\b|\bpads?\b|\bchoir|\bbrass|\bmelod|\bchords?\b|\bmallet|\bbox\b"
+            r"|\bmulti(s|samples?)?\b|\bstabs?\b|\bchimes?\b",
         ),
     )
 )
-OPEN = re.compile(r"\bopen\b")
-CLOSED = re.compile(r"\bclosed\b|\bchh?\b")
+OPEN = re.compile(r"\bopen\b|\bhh ?open\b|\bhho\b")
+CLOSED = re.compile(r"\bclosed\b|\bchh?\b|\bhh ?closed\b|\bhhc\b")
+# drum machine codes, read only when no word of the path says anything: "Lead Ch1" is a lead
+# on channel 1, not a hat
+CODES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (category, re.compile(pattern))
+    for category, pattern in (
+        ("kick", r"\bbd\b"),
+        ("snare", r"\bsd\b"),
+        ("hat_open", r"\boh\b"),
+        ("hat_closed", r"\bch\b"),
+    )
+)
+# a folder is a folder of 808s only by these; "808" alone in a folder name is the drum machine
+FOLDER_808 = re.compile(
+    r"^808s?$|\b808s\b|\b808 ?bass|\bsub ?bass\b|^subs?$|^bass(es)?( \d+)?$|\bbass ?multi"
+    r"|\bbasslines?\b|\bbass ?(one ?)?shots?\b"
+)
 HAT = re.compile(r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bhihats?\b")
 NOTE = re.compile(r"(?<![A-Za-z0-9])([A-G])([#b]|sharp|flat)?(-?\d)?(?![A-Za-z])")
 KEY = re.compile(r"(?<![A-Za-z0-9])([A-G])([#b]|sharp|flat)? ?(minor|min|maj|major|m)?(?![A-Za-z])")
@@ -128,6 +151,7 @@ def _words(relative: str) -> str:
     """The path's words, lower case: separators, digits glued to letters and camel case split."""
     text = Path(relative).with_suffix("").as_posix()
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    text = re.sub(r"([A-Za-z])(\d)", r"\1 \2", text)
     text = re.sub(r"[_/\\\-\.\(\)\[\]{},+&]+", " ", text)
     return " ".join(text.lower().split())
 
@@ -138,11 +162,14 @@ def category_by_name(relative: str) -> str | None:
     The file name wins over its folders, so a kick in a folder named "808 kit" stays a kick.
     """
     path = Path(relative)
-    parts = (path.name, *reversed(path.parent.parts))
-    for part in parts:
-        words = _words(part)
-        for category, pattern in WORDS:
-            if pattern.search(words):
+    parts = [_words(part) for part in (path.name, *reversed(path.parent.parts))]
+    for table in (WORDS, CODES):
+        for i, words in enumerate(parts):
+            for category, pattern in table:
+                if not pattern.search(words):
+                    continue
+                if category == "808" and i > 0 and not FOLDER_808.search(words):
+                    continue
                 return _hat_side(path) if category == "hat_closed" else category
     return None
 
@@ -285,9 +312,9 @@ def describe(root: Path, path: Path) -> PackSound:
         category = "loop"
     note = None
     if category in ("808", "melodic") and duration <= 2 * ONESHOT_MAX_S:
-        named = note_by_name(path.name)
-        heard = None if named is not None and named[1] is not None else _pitch(x, rate)
-        note = root_of(named, heard, 1 if category == "808" else 4)
+        pitch = note_by_name(path.name)
+        heard = None if pitch is not None and pitch[1] is not None else _pitch(x, rate)
+        note = root_of(pitch, heard, 1 if category == "808" else 4)
     peak = float(np.max(np.abs(x))) if len(x) else 0.0
     return PackSound(
         id=sound_id(relative),
@@ -344,6 +371,8 @@ def scan(root: Path = PACK, catalog: Path = CATALOG) -> tuple[list[PackSound], l
         raise PackError(f"no pack folder {root}: put the pack's files there")
     try:
         before = {s.path: s for s in load(catalog).values()}
+        if before and _sorting(catalog) != SORTING:
+            before = {}
     except PackError:
         before = {}
     sounds: list[PackSound] = []
@@ -359,10 +388,22 @@ def scan(root: Path = PACK, catalog: Path = CATALOG) -> tuple[list[PackSound], l
             sounds.append(describe(root, path))
         except PackError as error:
             problems.append(str(error))
-    body = {"format": FORMAT, "root": str(root), "sounds": [asdict(s) for s in sounds]}
+    body = {
+        "format": FORMAT,
+        "sorting": SORTING,
+        "root": str(root),
+        "sounds": [asdict(s) for s in sounds],
+    }
     catalog.parent.mkdir(parents=True, exist_ok=True)
     write_private(catalog, json.dumps(body, ensure_ascii=False, indent=1))
     return sounds, problems
+
+
+def _sorting(catalog: Path) -> int | None:
+    """The sorting a readable catalogue was made with; None from before the mark."""
+    raw = json.loads(catalog.read_text(encoding="utf-8"))
+    value = raw.get("sorting") if isinstance(raw, dict) else None
+    return value if isinstance(value, int) else None
 
 
 def file_of(library: str, root: Path = PACK, catalog: Path = CATALOG) -> tuple[Path, PackSound]:

@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import os
 from pathlib import Path
 
@@ -175,6 +176,24 @@ def test_a_rescan_reads_only_new_or_changed_files(made, monkeypatch):
     assert sorted(seen) == ["Drums/Snares/Snare 1.wav", "Hats/HH_closed_03.wav", "misc/broken.wav"]
     assert len(again) == len(first) + 1
     assert pack.load(catalog) == {s.id: s for s in again}
+
+
+def test_a_catalogue_of_the_old_sorting_is_sorted_again(made):
+    root, catalog = made
+    pack.scan(root, catalog)
+    body = json.loads(catalog.read_text())
+    # the first sorting, which wrote no mark, could file a kick as an 808
+    del body["sorting"]
+    for sound in body["sounds"]:
+        if sound["path"] == "808 Kit/Kick 7.wav":
+            sound["category"] = "808"
+    catalog.write_text(json.dumps(body))
+    # until a rescan the old catalogue still serves the pack as it is
+    old = {s.path: s for s in pack.load(catalog).values()}
+    assert old["808 Kit/Kick 7.wav"].category == "808"
+    again = by_path(pack.scan(root, catalog)[0])
+    assert again["808 Kit/Kick 7.wav"].category == "kick"
+    assert json.loads(catalog.read_text())["sorting"] == pack.SORTING
 
 
 def test_a_pack_sound_is_found_by_id_and_refused_once_it_changed(made):
@@ -386,7 +405,9 @@ def write_catalog(path, sounds):
     from dataclasses import asdict
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"format": 1, "root": "x", "sounds": [asdict(s) for s in sounds]}))
+    path.write_text(
+        json.dumps({"format": pack.FORMAT, "root": "x", "sounds": [asdict(s) for s in sounds]})
+    )
 
 
 def test_the_kit_option_takes_the_pack_only_when_it_makes_a_kit(tmp_path):
@@ -505,6 +526,59 @@ def test_a_score_on_pack_sounds_renders(placed, tmp_path):
 )
 def test_names_that_used_to_be_misfiled(path, category):
     assert pack.category_by_name(path) == category
+
+
+@pytest.mark.parametrize(
+    ("path", "category"),
+    [
+        ("Tape 808/Clean Kit/kick01rr1.wav", "kick"),
+        ("Tape 808/Clean Kit/snare02.wav", "snare"),
+        ("Tape 808/Clean Kit/clave.wav", "perc"),
+        ("Tape 808/Clean Kit/congahi.wav", "perc"),
+        ("Tape 808/Clean Kit/tomlo.wav", "perc"),
+        ("Tape 808/Clean Kit/tommid.wav", "perc"),
+        ("Tape 808/Clean Kit/maracas.wav", "perc"),
+        ("Hits/Timbale 01.wav", "perc"),
+        ("Hits/Sidestick.wav", "snare"),
+        ("Tape 808/Hot Kit/hhclosed.wav", "hat_closed"),
+        ("Tape 808/Hot Kit/hhopen.wav", "hat_open"),
+        ("Tape 808/Hot Kit/zap.wav", None),
+        ("TR-808 Kit/thing.wav", None),
+        ("808/Boom.wav", "808"),
+        ("808s/Boom.wav", "808"),
+        ("808 Bass/Boom.wav", "808"),
+        ("BonusMultiSamples/Lead01/Octave0/A.wav", "melodic"),
+        ("BonusMultiSamples/Bass01/Octave0/C.wav", "808"),
+        ("Kit 04/AcidMulti/C#.wav", "melodic"),
+        ("Kit 03/IceChime/C.wav", "melodic"),
+        ("Stabs/Stab_01.wav", "melodic"),
+        ("Loops/Lead 140bpm.wav", "loop"),
+        ("Tape 808/CH01.wav", "hat_closed"),
+        ("Tape 808/OH01.wav", "hat_open"),
+        ("Tape 808/BD01.wav", "kick"),
+        ("Tape 808/SD01.wav", "snare"),
+        ("Strings/Lead Ch1.wav", "melodic"),
+        ("Vocals/Chorus Ch1.wav", "vox"),
+        ("Kit/Melody Sd1.wav", "melodic"),
+        ("Piano/Keys Bd2.wav", "melodic"),
+        ("Drum & Bass/zap.wav", None),
+        ("Future Bass Kit/zap.wav", None),
+        ("Bass/Boom.wav", "808"),
+        ("Sub Bass/Boom.wav", "808"),
+        ("Lofi Kit/BassMulti/C.wav", "808"),
+    ],
+)
+def test_digits_glued_to_a_word_and_a_drum_machine_named_808(path, category):
+    assert pack.category_by_name(path) == category
+
+
+def test_a_sound_sorted_by_its_folder_is_sorted_by_name(tmp_path):
+    root = tmp_path / "sounds"
+    path = put(root, "808s/Boom.wav", tone(49.0, 1.5))
+    sound = pack.describe(root, path)
+    assert (sound.category, sound.by) == ("808", "name")
+    path = put(root, "misc/low.wav", tone(49.0, 1.0))
+    assert pack.describe(root, path).by == "sound"
 
 
 def test_a_pack_kit_score_is_checked_like_a_synthesised_one(tmp_path, monkeypatch):
