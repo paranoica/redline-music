@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ApiError } from "../src/song/api.ts";
-import { beatFileName, chooseView, NAME_RULE, nameProblem, newSongRequest, openRefusal, relativeText, songMeta, textLabel } from "../src/daw/start.ts";
+import { beatFileName, chooseView, genreName, NAME_RULE, nameProblem, newSongRequest, openRefusal, relativeText, songMeta, textLabel } from "../src/daw/start.ts";
 
 // ---------- the name ----------
 
@@ -109,6 +109,18 @@ test("a type beat without text makes the server's body", () => {
 test("an own beat with a written text makes the server's body; seed 0 counts", () => {
   const got = newSongRequest(form({ beat: "own", file: "input/beats/a.mp3", seed: 0, text: "seed", textSeed: 7 }), []);
   assert.deepEqual(got, { ok: true, body: { name: "новая", beat: { own: 0 }, text_seed: 7 } });
+});
+
+test("a new beat sends its genre and kit; no genre is a drawn one", () => {
+  const got = newSongRequest(form({ beat: "new", file: null, genre: "uk_drill", kit: "synth" }), []);
+  assert.deepEqual(got, { ok: true, body: { name: "новая", beat: { new: { genre: "uk_drill", kit: "synth" } }, text_seed: null } });
+  const drawn = newSongRequest(form({ beat: "new", genre: null }), []);
+  assert.deepEqual(drawn.ok && drawn.body.beat, { new: { genre: null, kit: "auto" } });
+});
+
+test("a genre shows by its Russian name, an unknown one by its words", () => {
+  assert.equal(genreName("uk_drill"), "UK дрилл");
+  assert.equal(genreName("new_wave"), "new wave");
 });
 
 test("a missing choice is named, the name first", () => {

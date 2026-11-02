@@ -1,7 +1,7 @@
 // The start screen: the songs as cards, newest first, and the «Новая песня» dialog. A card opens
 // its song on the server; the pure parts above the DOM are what the tests check.
 
-import { ApiError, createSongApi, type NewSong, type SongApi, type SongListItem } from "../song/api.ts";
+import { ApiError, createSongApi, type Kit, type NewSong, type SongApi, type SongListItem } from "../song/api.ts";
 import { h } from "../ui/dom.ts";
 import { plural } from "./words.ts";
 
@@ -70,9 +70,12 @@ export function chooseView(o: { active: string | null; listed: boolean; asked: b
 
 export interface NewSongForm {
   name: string;
-  beat: "file" | "own";
+  beat: "file" | "own" | "new";
   file: string | null;
   seed: number | null;
+  // a new beat's genre, null for one drawn by its seed
+  genre?: string | null;
+  kit?: Kit;
   text: "seed" | "none";
   textSeed: number | null;
 }
@@ -85,7 +88,12 @@ export function newSongRequest(f: NewSongForm, taken: readonly string[]): NewSon
   if (f.beat === "file" && f.file === null) return { ok: false, problem: "Выбери тайп-бит." };
   if (f.beat === "own" && f.seed === null) return { ok: false, problem: "Выбери свой бит." };
   if (f.text === "seed" && f.textSeed === null) return { ok: false, problem: "Выбери текст." };
-  const beat = f.beat === "own" ? { own: f.seed as number } : { file: f.file as string };
+  const beat =
+    f.beat === "new"
+      ? { new: { genre: f.genre ?? null, kit: f.kit ?? "auto" } }
+      : f.beat === "own"
+        ? { own: f.seed as number }
+        : { file: f.file as string };
   return { ok: true, body: { name: f.name, beat, text_seed: f.text === "seed" ? f.textSeed : null } };
 }
 
@@ -93,6 +101,28 @@ export function newSongRequest(f: NewSongForm, taken: readonly string[]): NewSon
 
 export function beatFileName(path: string): string {
   return path.split("/").pop() ?? path;
+}
+
+// the genres as the dialog shows them
+const GENRE_NAMES: Record<string, string> = {
+  trap: "трэп",
+  dark_trap: "дарк трэп",
+  rage: "рейдж",
+  plugg: "плагг",
+  pluggnb: "плаггнб",
+  uk_drill: "UK дрилл",
+  ny_drill: "NY дрилл",
+  chicago_drill: "чикаго дрилл",
+  jersey_club: "джерси",
+  memphis: "мемфис",
+  phonk: "фонк",
+  cloud: "клауд",
+  lofi: "лоу-фай",
+  boom_bap: "бум-бэп",
+};
+
+export function genreName(genre: string): string {
+  return GENRE_NAMES[genre] ?? genre.replace(/_/g, " ");
 }
 
 export function textLabel(t: { seed: number; title: string }): string {
@@ -257,13 +287,34 @@ function newSongDialog(sources: Sources, taken: readonly string[], create: (body
   const nameSay = h("p", { class: "field__say" });
   const beatFiles = chooser("Тайп-бит", sources.beats.map((b) => ({ value: b, name: beatFileName(b) })));
   const seeds = chooser("Свой бит", sources.seeds.map((s) => ({ value: String(s), name: `seed ${s}` })));
-  const ownSay = h("p", { class: "field__say" }, "Новый свой бит пишет агент в чате, здесь он не создаётся: тут только биты с готовой партитурой.");
+  const ownSay = h("p", { class: "field__say" }, "Биты с готовой партитурой: написанные агентом или собранные раньше.");
+  const genres = chooser("Жанр", [{ value: "", name: "случайный" }, ...(sources.genres ?? []).map((g) => ({ value: g, name: genreName(g) }))]);
+  const packReady = sources.pack_kit === true;
+  let kit: Kit = packReady ? "auto" : "synth";
+  const kitPick = pick<Kit>(
+    "Звуки",
+    [
+      { value: "auto", name: "Из пака", sub: packReady ? "бочка, хэты, 808 из input/sounds" : "пак не разобран", disabled: !packReady },
+      { value: "synth", name: "Синтез", sub: "свои синтезированные звуки", disabled: false },
+    ],
+    kit,
+    (v) => {
+      kit = v;
+    },
+  );
+  const newSay = h(
+    "p",
+    { class: "field__say" },
+    packReady
+      ? "Заготовка: барабаны и 808 под жанр. Дальше собираешь бит сам: каналы, паттерны, плейлист."
+      : "Заготовка: барабаны и 808 под жанр. Чтобы звуки брались из пака, положи его в input/sounds и запусти redline beat sounds scan.",
+  );
   const texts = chooser("Текст", sources.texts.map((t) => ({ value: String(t.seed), name: textLabel(t) })));
   const error = h("p", { class: "dialog__error", role: "alert" });
   const cancel = h("button", { class: "btn btn--ghost", type: "button" }, "Отмена");
   const go = h("button", { class: "btn btn--main", type: "button" }, "Создать");
 
-  let beat: NewSongForm["beat"] = sources.beats.length || !sources.seeds.length ? "file" : "own";
+  let beat: NewSongForm["beat"] = sources.beats.length ? "file" : sources.seeds.length ? "own" : "new";
   let text: NewSongForm["text"] = sources.texts.length ? "seed" : "none";
   let touched = false;
 
@@ -272,6 +323,8 @@ function newSongDialog(sources: Sources, taken: readonly string[], create: (body
     beat,
     file: beatFiles.value || null,
     seed: seeds.value === "" ? null : Number(seeds.value),
+    genre: genres.value === "" ? null : genres.value,
+    kit,
     text,
     textSeed: texts.value === "" ? null : Number(texts.value),
   });
@@ -280,6 +333,9 @@ function newSongDialog(sources: Sources, taken: readonly string[], create: (body
     beatFiles.hidden = beat !== "file";
     seeds.hidden = beat !== "own";
     ownSay.hidden = beat !== "own";
+    genres.hidden = beat !== "new";
+    kitPick.hidden = beat !== "new";
+    newSay.hidden = beat !== "new";
     texts.hidden = text !== "seed";
     const problem = nameProblem(name.value, taken);
     nameSay.textContent = touched && problem ? problem : "";
@@ -290,6 +346,7 @@ function newSongDialog(sources: Sources, taken: readonly string[], create: (body
     [
       { value: "file", name: "Тайп-бит", sub: sources.beats.length ? "файл из input/beats" : "в input/beats пусто", disabled: !sources.beats.length },
       { value: "own", name: "Свой бит", sub: sources.seeds.length ? "seed с партитурой" : "партитур пока нет", disabled: !sources.seeds.length },
+      { value: "new", name: "Новый бит", sub: "заготовка под жанр", disabled: false },
     ],
     beat,
     (v) => {
@@ -341,7 +398,7 @@ function newSongDialog(sources: Sources, taken: readonly string[], create: (body
     { class: "dialog__box", role: "dialog", "aria-modal": "true", "aria-label": "Новая песня" },
     h("h2", {}, "Новая песня"),
     h("div", { class: "field" }, h("label", {}, "Название"), name, nameSay),
-    h("div", { class: "field" }, h("label", {}, "Бит"), beatPick, beatFiles, seeds, ownSay),
+    h("div", { class: "field" }, h("label", {}, "Бит"), beatPick, beatFiles, seeds, ownSay, genres, kitPick, newSay),
     h("div", { class: "field" }, h("label", {}, "Текст"), textPick, texts),
     error,
     h("div", { class: "dialog__row" }, cancel, go),

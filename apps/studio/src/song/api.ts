@@ -175,9 +175,12 @@ export interface SongListItem {
   modified: string;
 }
 
+// where a new beat's drums and 808 come from
+export type Kit = "auto" | "synth" | "pack";
+
 export interface NewSong {
   name: string;
-  beat: { file: string } | { own: number };
+  beat: { file: string } | { own: number } | { new: { genre: string | null; kit: Kit } };
   text_seed: number | null;
 }
 
@@ -245,7 +248,10 @@ export function createSongApi({ base, token }: SongApiOptions) {
     flipBase: apiPath(root, "/flip"),
     close: (): void => lifetime.abort(),
     songs: () => json<{ songs: SongListItem[]; active: string | null }>(call("GET", "/songs")),
-    sources: () => json<{ beats: string[]; seeds: number[]; texts: { seed: number; title: string }[] }>(call("GET", "/songs/sources")),
+    sources: () =>
+      json<{ beats: string[]; seeds: number[]; texts: { seed: number; title: string }[]; genres?: string[]; pack_kit?: boolean }>(
+        call("GET", "/songs/sources"),
+      ),
     createSong: (body: NewSong) => json<{ name: string }>(call("POST", "/songs", body)),
     openSong: (name: string) => json<{ active: string }>(call("POST", "/songs/open", { name })),
     peaks: (of: "beat" | "take", name?: string, n?: number) => {
