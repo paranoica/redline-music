@@ -331,7 +331,9 @@ class BeatStudio:
     def check(self, score: dict[str, Any]) -> tuple[tuple[str, ...], list[dict[str, str]]]:
         """The errors and warnings of a score against the seed's recipe."""
         recipe, _ = self.recipe()
-        checked = check_score(json.dumps(score), recipe, self._sources().keys())
+        catalog = self.work / "sounds" / "pack" / "catalog.json"
+        known = self._sources().keys() | library.pack_names(catalog)
+        checked = check_score(json.dumps(score), recipe, known, catalog)
         return checked.errors, [_caution(w) for w in checked.warnings]
 
     def save(self, score: dict[str, Any], base: str) -> tuple[str, list[dict[str, str]]]:

@@ -43,23 +43,28 @@ CATEGORIES = (
     "melodic",
     "loop",
 )
-# first match wins: a kick named after the 808 ("808 Kick", "Sub Kick") is still a kick
+# first match wins: a drum named after the machine ("808 Kick", "808 Snare") is that drum,
+# and only a sound no drum word names is an 808
 WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (category, re.compile(pattern))
     for category, pattern in (
         ("loop", r"\bloops?\b|\b\d{2,3} ?bpm\b|\bbpm ?\d{2,3}\b"),
         ("kick", r"\bkicks?\b|\bkck\b|\bbd\b|\bbass ?drum"),
-        ("808", r"808|\bsub ?bass\b|\bsubs?\b|\bbass\b"),
-        ("hat_open", r"\bopen ?(hi ?-? ?)?hats?\b|\boh\b|\bohh\b|\bopenhat"),
-        ("hat_closed", r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bchh?\b|\bclosed\b|\bhihats?\b"),
         ("clap", r"\bclaps?\b|\bclp\b"),
         ("snare", r"\bsnares?\b|\bsnr\b|\bsd\b|\brims?\b|\brimshot"),
+        (
+            "hat_open",
+            r"\bopen ?(hi ?-? ?)?hats?\b|\b(hi ?-? ?)?hats? ?open\b|\bhh ?open\b|\boh\b|\bohh\b"
+            r"|\bopenhat",
+        ),
+        ("hat_closed", r"\b(hi ?-? ?)?hats?\b|\bhh\b|\bchh?\b|\bclosed\b|\bhihats?\b"),
         ("crash", r"\bcrash|\bcymbals?\b|\brides?\b|\bsplash"),
         (
             "perc",
             r"\bperc|\bshakers?\b|\btamb|\bconga|\bbongo|\btoms?\b|\bcowbell|\bwood|\bblock"
             r"|\bsnaps?\b|\bclick",
         ),
+        ("808", r"808|\bsub ?bass\b|\bsubs?\b|\bbass\b"),
         ("fx", r"\bfx\b|\bsfx\b|\briser|\bsweep|\bimpact|\blifter|\bwhoosh|\bnoise|\btransition"),
         ("vox", r"\bvox\b|\bvocals?\b|\bchants?\b|\badlibs?\b|\bvoices?\b|\bshouts?\b"),
         (
@@ -69,6 +74,7 @@ WORDS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ),
     )
 )
+OPEN = re.compile(r"\bopen\b")
 NOTE = re.compile(r"(?<![A-Za-z0-9])([A-G])([#b]|sharp|flat)?(-?\d)?(?![A-Za-z])")
 KEY = re.compile(r"(?<![A-Za-z0-9])([A-G])([#b]|sharp|flat)? ?(minor|min|maj|major|m)?(?![A-Za-z])")
 BPM = re.compile(r"(?<!\d)(\d{2,3}) ?bpm|bpm ?(\d{2,3})(?!\d)")
@@ -130,10 +136,14 @@ def category_by_name(relative: str) -> str | None:
     The file name wins over its folders, so a kick in a folder named "808 kit" stays a kick.
     """
     path = Path(relative)
-    for part in (path.name, *reversed(path.parent.parts)):
+    parts = (path.name, *reversed(path.parent.parts))
+    for part in parts:
         words = _words(part)
         for category, pattern in WORDS:
             if pattern.search(words):
+                # "Open Hats/Hat 1.wav", "Hats/Open 1.wav": a bare open beside a hat
+                if category == "hat_closed" and any(OPEN.search(_words(p)) for p in parts):
+                    return "hat_open"
                 return category
     return None
 

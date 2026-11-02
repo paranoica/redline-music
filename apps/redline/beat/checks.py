@@ -10,6 +10,7 @@ import re
 from bisect import bisect_left
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import redline_dsp
@@ -189,10 +190,10 @@ PACK_ROLES = {
 }
 
 
-def _roles(sounds: list[dict[str, Any]], body: dict[str, Any]) -> list[str]:
+def _roles(sounds: list[dict[str, Any]], body: dict[str, Any], path: Path | None) -> list[str]:
     """Each sound's instrument, a pack one-shot's taken as the drum its category names."""
     try:
-        catalog = pack.load(pack.CATALOG)
+        catalog = pack.load(pack.CATALOG if path is None else path)
     except pack.PackError:
         catalog = {}
     out = []
@@ -208,9 +209,9 @@ def _roles(sounds: list[dict[str, Any]], body: dict[str, Any]) -> list[str]:
 class _Table:
     """The event table with what the warnings ask of it."""
 
-    def __init__(self, score_json: str, body: dict[str, Any]) -> None:
+    def __init__(self, score_json: str, body: dict[str, Any], catalog: Path | None) -> None:
         table = json.loads(redline_dsp.beat_events(score_json, RATE))
-        self.instruments = _roles(table["sounds"], body)
+        self.instruments = _roles(table["sounds"], body, catalog)
         self.names = [s["name"] for s in table["sounds"]]
         self.events = table["events"]
         self.sections = [(str(s["name"]), int(s["bars"])) for s in body["sections"]]
@@ -303,13 +304,19 @@ def _clashes(table: _Table, recipe: Recipe) -> list[Caution]:
     ]
 
 
-def check_score(score_json: str, recipe: Recipe, libraries: Iterable[str] | None = None) -> Checked:
+def check_score(
+    score_json: str,
+    recipe: Recipe,
+    libraries: Iterable[str] | None = None,
+    catalog: Path | None = None,
+) -> Checked:
     """Check a score's text against its recipe.
 
     Args:
         score_json: The score as the beatmaker wrote it.
         recipe: The seed's recipe.
         libraries: The sound library names a sampler may play; None reads the manifest.
+        catalog: The owner's pack catalogue (default: `pack.CATALOG`), for a pack sound's part.
 
     Returns:
         The errors as `path: message` lines, and the warnings (only for a score Rust takes).
@@ -321,14 +328,16 @@ def check_score(score_json: str, recipe: Recipe, libraries: Iterable[str] | None
         return Checked(tuple(errors), ())
     if not isinstance(body, dict):
         return Checked(tuple(errors), ())
-    known = (library.load().keys() | library.pack_names()) if libraries is None else libraries
+    known = (
+        (library.load().keys() | library.pack_names(catalog)) if libraries is None else libraries
+    )
     rust_ok = not errors
     errors += _recipe_errors(body, recipe)
     errors += _notes(body, recipe)
     errors += _libraries(body, known)
     if not rust_ok:
         return Checked(tuple(errors), ())
-    table = _Table(score_json, body)
+    table = _Table(score_json, body, catalog)
     return Checked(
         tuple(errors), (*_density(table, recipe), *_repeats(table), *_clashes(table, recipe))
     )

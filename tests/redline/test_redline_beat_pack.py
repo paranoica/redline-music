@@ -474,6 +474,18 @@ def test_a_score_on_pack_sounds_renders(placed, tmp_path):
         ("Hihats/Trap Hihat 4.wav", "hat_closed"),
         ("Open Hi Hat.wav", "hat_open"),
         ("Hi Hat.wav", "hat_closed"),
+        ("Hi-Hat Open.wav", "hat_open"),
+        ("Hi Hat Open 01.wav", "hat_open"),
+        ("HH Open.wav", "hat_open"),
+        ("Hats/Hat (Open).wav", "hat_open"),
+        ("Hats/Open 1.wav", "hat_open"),
+        ("Open Hats/Hat 1.wav", "hat_open"),
+        ("808 Snare.wav", "snare"),
+        ("808 Clap 2.wav", "clap"),
+        ("808 HiHat.wav", "hat_closed"),
+        ("808 Open Hat.wav", "hat_open"),
+        ("808 Cowbell.wav", "perc"),
+        ("808 Glide (C).wav", "808"),
     ],
 )
 def test_names_that_used_to_be_misfiled(path, category):
@@ -590,3 +602,77 @@ def test_the_scan_skips_linked_files(tmp_path):
     (root / "Kicks" / "Linked Kick.wav").symlink_to(outside)
     sounds, _ = pack.scan(root, tmp_path / "catalog.json")
     assert [s.path for s in sounds] == ["Kicks/Kick.wav"]
+
+
+def test_the_sampled_instruments_are_the_ones_rust_lets_play_a_library():
+    pytest.importorskip("redline_dsp")
+    import json
+
+    import redline_dsp
+    from redline.beat.render import SAMPLED
+
+    takes = set()
+    for spec in json.loads(redline_dsp.beat_instruments()):
+        name = spec["instrument"]
+        row = "x..............." if spec["kind"] == "drum" else []
+        score = {
+            "version": 1,
+            "bpm": 120,
+            "seed": 1,
+            "key": "A minor",
+            "sounds": {"s": {"instrument": name, "library": "pack-0000000001"}},
+            "patterns": {"p": {"bars": 1, "rows": {"s": row}}},
+            "sections": [{"name": "a", "bars": 1, "play": ["p"]}],
+        }
+        if not any("library" in e for e in redline_dsp.beat_check(json.dumps(score))):
+            takes.add(name)
+    assert takes == set(SAMPLED)
+
+
+def test_a_pack_hat_is_loaded_for_the_render_and_the_page(placed):
+    pytest.importorskip("redline_dsp")
+    import json
+
+    from redline.beat.render import notes_used
+
+    kick = placed["Kicks/Kick 1.wav"]
+    score = {
+        "version": 1,
+        "bpm": 120,
+        "seed": 1,
+        "key": "A minor",
+        "sounds": {
+            "h": {"instrument": "oneshot_hat", "library": f"pack-{kick.id}"},
+            "o": {"instrument": "oneshot_open_hat", "library": f"pack-{kick.id}"},
+        },
+        "patterns": {"p": {"bars": 1, "rows": {"h": "x.x.x.x.x.x.x.x.", "o": "......x........."}}},
+        "sections": [{"name": "a", "bars": 1, "play": ["p"]}],
+    }
+    text = json.dumps(score)
+    assert set(notes_used(text, 48000.0, score)) == {"h", "o"}
+
+
+def test_the_beat_page_takes_a_score_on_pack_sounds(placed, tmp_path):
+    pytest.importorskip("redline_dsp")
+    from redline.beat import server as beat_server
+    from redline.beat.recipe import make_recipe, pack_kit, recipe_json
+
+    found = pack.load(pack.CATALOG).values()
+    recipe = make_recipe(9, genre="trap", pack=pack_kit(found))
+    folder = tmp_path / "beats" / "9"
+    folder.mkdir(parents=True)
+    (folder / "recipe.json").write_text(recipe_json(recipe))
+    beat = beat_server.BeatStudio(9, tmp_path / "beats", tmp_path / "work")
+    kick = next(s for s in recipe.sounds if s.name == "kick")
+    assert kick.library and kick.library.startswith("pack-")
+    score = {
+        "version": 1,
+        "bpm": recipe.bpm,
+        "seed": 9,
+        "key": recipe.key,
+        "sounds": {"kick": {"instrument": kick.instrument, "library": kick.library}},
+        "patterns": {"p": {"bars": 1, "rows": {"kick": "x.......x......."}}},
+        "sections": [{"name": "a", "bars": 8, "play": ["p"]}],
+    }
+    errors, _ = beat.check(score)
+    assert not any("library" in e for e in errors), errors

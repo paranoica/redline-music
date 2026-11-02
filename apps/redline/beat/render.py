@@ -27,7 +27,7 @@ ROOT = Path("private/beats")
 WORK = Path("work")
 RATE = 48000
 # the instruments that play a library's zones
-SAMPLED = ("sampler", "oneshot", "sample808")
+SAMPLED = ("sampler", "oneshot", "oneshot_hat", "oneshot_open_hat", "sample808")
 BLOCK = 8192
 QUIET = 1e-6
 QUIET_S = 0.5
