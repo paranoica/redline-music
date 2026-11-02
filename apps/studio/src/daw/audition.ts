@@ -49,9 +49,13 @@ export type ZoneClient = Pick<BeatClient, "loadZone" | "rebuildSamplers">;
 
 // One engine's zones: each is asked for once, whether it loaded or not, so an edit never fetches
 // again what the engine has; the samplers are rebuilt only after a new one.
+// Loads each zone into an engine once. A zone on its way is waited for by a second load rather
+// than skipped; one that failed is asked for again next time, so a passing error does not
+// silence a sound for the whole session.
 export class ZoneLoader {
   readonly #fetch: (library: string, file: string) => Promise<ZoneData>;
-  readonly #tried = new Set<string>();
+  readonly #done = new Set<string>();
+  readonly #pending = new Map<string, Promise<string | null>>();
 
   constructor(fetch: (library: string, file: string) => Promise<ZoneData>) {
     this.#fetch = fetch;
@@ -59,36 +63,57 @@ export class ZoneLoader {
 
   async load(client: ZoneClient, wanted: readonly ZoneRef[]): Promise<string[]> {
     const problems: string[] = [];
-    const todo = wanted.filter((z) => {
+    const mine: Promise<string | null>[] = [];
+    const theirs: Promise<string | null>[] = [];
+    // one after another, as the engine takes them
+    let chain: Promise<unknown> = Promise.resolve();
+    for (const z of wanted) {
       const key = `${z.library}\u0000${z.file}`;
-      if (this.#tried.has(key)) return false;
-      this.#tried.add(key);
-      return true;
-    });
-    let loaded = 0;
-    for (const z of todo) {
-      try {
-        const data = await this.#fetch(z.library, z.file);
-        const result = await client.loadZone({
-          library: z.library,
-          root: data.root,
-          velLo: z.vel[0],
-          velHi: z.vel[1],
-          rate: data.rate,
-          samples: new Int16Array(data.pcm),
-          channels: data.channels === 2 ? 2 : 1,
-        });
-        if (result.ok) loaded++;
-        else problems.push(`${z.library} ${z.file}: ${result.errors.join("; ")}`);
-      } catch (error) {
-        problems.push(`${z.library} ${z.file}: ${error instanceof Error ? error.message : String(error)}`);
+      if (this.#done.has(key)) continue;
+      const pending = this.#pending.get(key);
+      if (pending) {
+        theirs.push(pending);
+        continue;
       }
+      const job = chain.then(() => this.#one(client, z, key));
+      chain = job;
+      this.#pending.set(key, job);
+      mine.push(job);
     }
+    let loaded = 0;
+    for (const job of mine) {
+      const problem = await job;
+      if (problem === null) loaded++;
+      else problems.push(problem);
+    }
+    await Promise.all(theirs);
     if (loaded) {
       const rebuilt = await client.rebuildSamplers();
       if (!rebuilt.ok) problems.push(...rebuilt.errors);
     }
     return problems;
+  }
+
+  async #one(client: ZoneClient, z: ZoneRef, key: string): Promise<string | null> {
+    try {
+      const data = await this.#fetch(z.library, z.file);
+      const result = await client.loadZone({
+        library: z.library,
+        root: data.root,
+        velLo: z.vel[0],
+        velHi: z.vel[1],
+        rate: data.rate,
+        samples: new Int16Array(data.pcm),
+        channels: data.channels === 2 ? 2 : 1,
+      });
+      if (!result.ok) return `${z.library} ${z.file}: ${result.errors.join("; ")}`;
+      this.#done.add(key);
+      return null;
+    } catch (error) {
+      return `${z.library} ${z.file}: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.#pending.delete(key);
+    }
   }
 }
 

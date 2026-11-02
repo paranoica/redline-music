@@ -156,6 +156,11 @@ def test_a_song_on_a_new_beat_gets_a_starter_on_a_free_seed(served, root):
         served, "POST", "/api/songs", {**body, "name": "bad3", "beat": {"new": {"x": 1}}}
     )
     assert status == 422
+    # a create that fails leaves no starter behind
+    before = sorted(p.name for p in (root / "private" / "beats").iterdir())
+    assert api(served, "POST", "/api/songs", {**body, "name": "fresh"})[0] == 409
+    assert api(served, "POST", "/api/songs", {**body, "name": "other", "text_seed": 999})[0] == 422
+    assert sorted(p.name for p in (root / "private" / "beats").iterdir()) == before
 
 
 def test_a_song_is_created_with_every_reference_and_the_latest_text(served, root):
@@ -239,6 +244,13 @@ def test_an_unknown_field_in_a_new_song_is_refused(served, root):
 def test_sources_list_only_what_exists_and_no_lyric_text(served, root):
     status, empty = api(served, "GET", "/api/songs/sources")
     assert status == 200 and empty["pack_kit"] is False
+    from redline.beat import pack
+
+    pack.CATALOG.parent.mkdir(parents=True, exist_ok=True)
+    pack.CATALOG.write_text("[]")
+    status, broken = api(served, "GET", "/api/songs/sources")
+    assert status == 200 and broken["pack_kit"] is False
+    pack.CATALOG.unlink()
     assert {k: empty[k] for k in ("beats", "seeds", "texts")} == {
         "beats": [],
         "seeds": [],

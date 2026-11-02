@@ -71,3 +71,27 @@ def test_a_pack_starter_needs_a_pack_that_makes_a_kit(tmp_path):
     seed = handoff.new_starter(tmp_path / "beats", "trap", "pack", catalog)
     recipe = json.loads((tmp_path / "beats" / str(seed) / "recipe.json").read_text())
     assert recipe["kit"] == "pack"
+
+
+def test_a_seed_whose_folder_exists_is_never_taken(tmp_path, monkeypatch):
+    import random
+
+    root = tmp_path / "beats"
+    (root / "11111").mkdir(parents=True)
+    (root / "11111" / "keep.txt").write_text("x")
+    picks = iter([11111, 22222])
+    monkeypatch.setattr(random.SystemRandom, "randrange", lambda self, a, b: next(picks))
+    seed = handoff.new_starter(root, "trap", "synth", tmp_path / "none.json")
+    assert seed == 22222
+    assert sorted(p.name for p in (root / "11111").iterdir()) == ["keep.txt"]
+
+
+def test_a_catalogue_that_is_not_an_object_is_a_pack_error(tmp_path):
+    from redline.beat import pack
+
+    for text in ("[]", '"x"', "1"):
+        bad = tmp_path / "catalog.json"
+        bad.write_text(text)
+        with pytest.raises(pack.PackError):
+            pack.load(bad)
+        assert handoff.pack_can_kit(bad) is False

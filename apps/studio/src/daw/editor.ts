@@ -350,7 +350,11 @@ export class Editor {
     this.#host.liveChanged?.();
     const seq = ++this.#auditionSeq;
     try {
+      const pattern = this.#rack.current(score);
       await pb.audition(preview.score, 0, preview.bars);
+      // a switch or an edit made while the engine started went nowhere: the latest pattern now
+      const moved = this.#draft.score !== score || this.#rack.current(this.#draft.score ?? score) !== pattern;
+      if (seq === this.#auditionSeq && this.patternPlaying && moved) this.#retarget();
     } catch (error) {
       if (seq !== this.#auditionSeq) return;
       this.#auditioning = false;
@@ -703,7 +707,12 @@ export class Editor {
         const made = await this.#flipScore();
         if (!made || seq !== this.#auditionSeq || !this.#auditioning) return;
         await pb.audition(made.score, 0, made.bars);
-      } else if (score) await pb.audition(score, block.fromBar, block.bars);
+      } else if (score) {
+        await pb.audition(score, block.fromBar, block.bars);
+        // an edit made while the engine started went nowhere: the latest score now
+        const latest = this.#draft.score;
+        if (seq === this.#auditionSeq && this.#auditioning && latest && latest !== score) pb.updateAudition(latest);
+      }
     } catch (error) {
       this.#auditioning = false;
       this.#paintAudition();

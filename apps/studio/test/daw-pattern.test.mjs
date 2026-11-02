@@ -306,19 +306,45 @@ test("the zone loader asks only for zones not loaded yet, and rebuilds the sampl
   assert.deepEqual(client.log.loaded, ["a", "pack-1", "pack-2", "pack-3"]);
 });
 
-test("a zone that fails comes back as text, is not asked for again, and alone rebuilds nothing", async () => {
+test("a zone that fails comes back as text, rebuilds nothing, and is asked for again on the next load", async () => {
   let asked = 0;
+  let down = true;
   const loader = new ZoneLoader(async () => {
     asked++;
-    throw new Error("404");
+    if (down) throw new Error("404");
+    return { pcm: new ArrayBuffer(4), rate: 48000, channels: 1, frames: 2, root: 60 };
   });
   const client = fakeClient();
-  const problems = await loader.load(client, [{ library: "pack-9", file: "0", vel: [0, 127] }]);
+  const z = { library: "pack-9", file: "0", vel: [0, 127] };
+  const problems = await loader.load(client, [z]);
   assert.equal(problems.length, 1);
   assert.match(problems[0], /pack-9/);
   assert.equal(client.log.rebuilt, 0);
-  await loader.load(client, [{ library: "pack-9", file: "0", vel: [0, 127] }]);
-  assert.equal(asked, 1);
+  down = false;
+  assert.deepEqual(await loader.load(client, [z]), []);
+  assert.equal(asked, 2);
+  assert.equal(client.log.rebuilt, 1);
+  await loader.load(client, [z]);
+  assert.equal(asked, 2);
+});
+
+test("a load that finds a zone still on its way waits for it before it returns", async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const loader = new ZoneLoader(async () => {
+    await gate;
+    return { pcm: new ArrayBuffer(4), rate: 48000, channels: 1, frames: 2, root: 60 };
+  });
+  const client = fakeClient();
+  const z = { library: "pack-5", file: "0", vel: [0, 127] };
+  const first = loader.load(client, [z]);
+  let second = false;
+  const later = loader.load(client, [z]).then(() => (second = true));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(second, false);
+  release();
+  await Promise.all([first, later]);
+  assert.deepEqual(client.log.loaded, ["pack-5"]);
 });
 
 // ---------- the owner: a hit and a retarget ----------
@@ -465,18 +491,27 @@ const all = (node, out = []) => {
 const find = (root, pred) => all(root).find((n) => typeof n === "object" && pred(n));
 const textOf = (n) => (typeof n === "string" ? n : (n.children ?? []).map(textOf).join(""));
 
-async function editorSetup({ confirm = () => true } = {}) {
+async function editorSetup({ confirm = () => true, starting = null } = {}) {
   fakeDom();
   const { Editor } = await import("../src/daw/editor.ts");
   const calls = [];
+  const delivered = [];
   let auditioning = false;
   const playback = {
     audition: async (s, from, bars) => {
-      auditioning = true;
       calls.push(["start", s, from, bars]);
+      if (starting) await starting;
+      auditioning = true;
     },
-    updateAudition: (s) => calls.push(["update", s]),
-    retargetAudition: (s, from, bars) => calls.push(["retarget", s, from, bars]),
+    updateAudition: (s) => {
+      calls.push(["update", s]);
+      if (auditioning) delivered.push(["update", s]);
+    },
+    retargetAudition: (s, from, bars) => {
+      calls.push(["retarget", s, from, bars]);
+      // as the real playback: nothing reaches an engine that does not play yet
+      if (auditioning) delivered.push(["retarget", s, from, bars]);
+    },
     stopAudition: async () => {
       auditioning = false;
       calls.push(["stop"]);
@@ -533,7 +568,7 @@ async function editorSetup({ confirm = () => true } = {}) {
   await settle();
   const panes = { children: [], replaceChildren(...n) { this.children = n; } };
   editor.mount(panes, "beat", "rack", ["rack", "roll", "fx"], true);
-  return { editor, calls, panes, asked };
+  return { editor, calls, delivered, panes, asked };
 }
 
 test("pattern mode plays the rack's pattern alone; edits, a pattern switch and a block pick retarget it; song mode sends the song again", async () => {
@@ -579,6 +614,22 @@ test("pattern mode plays the rack's pattern alone; edits, a pattern switch and a
   const again = rackStep(editor.score, SPECS, "b", "kick", 8, "click", 0).score;
   editor.editPattern(again);
   assert.deepEqual(calls, [["update", again]]);
+});
+
+test("an edit made while the engine starts reaches it once it plays", async () => {
+  let started;
+  const starting = new Promise((r) => (started = r));
+  const { editor, delivered } = await editorSetup({ starting });
+  editor.setPatternMode(true);
+  const going = editor.togglePattern();
+  // the engine is still opening: an edit has nowhere to go yet
+  const next = rackStep(editor.score, SPECS, "b", "kick", 4, "click", 0).score;
+  editor.editPattern(next);
+  started();
+  await going;
+  const last = delivered.at(-1);
+  assert.equal(last[0], "retarget");
+  assert.deepEqual(last[1], patternPreview(next, "b").score);
 });
 
 test("a press in pattern mode while it plays stops it; song mode leaves edits as before", async () => {

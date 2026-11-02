@@ -322,10 +322,12 @@ def load(catalog: Path = CATALOG) -> dict[str, PackSound]:
         return {}
     try:
         raw = json.loads(catalog.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise PackError(f"{catalog}: not a catalogue")
         if raw.get("format") != FORMAT:
             raise PackError(f"{catalog}: format {raw.get('format')!r}, expected {FORMAT}")
         return {item["id"]: PackSound(**item) for item in raw["sounds"]}
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         raise PackError(f"{catalog}: cannot read: {error}") from error
 
 

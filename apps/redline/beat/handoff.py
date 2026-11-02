@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -498,13 +499,22 @@ def new_starter(
     """
     from redline.beat.starter import write_starter
 
-    taken = {int(p.name) for p in root.glob("*") if p.name.isdigit()} if root.is_dir() else set()
+    kit_sounds = _kit(kit, pack.CATALOG if catalog is None else catalog)
+    root.mkdir(parents=True, exist_ok=True)
     rng = secrets.SystemRandom()
-    seed = rng.randrange(10_000, 1_000_000)
-    while seed in taken:
+    # the folder is the claim on the seed: made exclusively, so two creates never share one
+    while True:
         seed = rng.randrange(10_000, 1_000_000)
-    recipe = make_recipe(seed, genre, pack=_kit(kit, pack.CATALOG if catalog is None else catalog))
-    write_starter(root / str(seed), recipe)
+        try:
+            (root / str(seed)).mkdir(mode=0o700)
+            break
+        except FileExistsError:
+            continue
+    try:
+        write_starter(root / str(seed), make_recipe(seed, genre, pack=kit_sounds))
+    except Exception:
+        shutil.rmtree(root / str(seed), ignore_errors=True)
+        raise
     return seed
 
 

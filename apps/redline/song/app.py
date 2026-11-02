@@ -7,6 +7,7 @@ old app, so none of them runs on a closed one.
 
 import contextlib
 import json
+import shutil
 import threading
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -350,7 +351,7 @@ class AppHost:
             raise _unprocessable("beat.new.kit is auto, synth or pack")
         try:
             return new_starter(self.root / "private" / "beats", genre, kit)
-        except (BeatError, RecipeError) as error:
+        except (BeatError, RecipeError, ValueError) as error:
             raise _unprocessable(str(error)) from None
 
     def create(self, body: dict) -> Reply:
@@ -362,15 +363,22 @@ class AppHost:
             name = model.check_name(name)
         except model.SongError as error:
             raise _unprocessable(str(error)) from None
-        beat = self._new_beat(body.get("beat"))
         if text_seed is not None:
             text_seed = _seed(text_seed, "text_seed")
+        if (model.song_dir(name, self.root) / "song.json").is_file():
+            raise ApiError(HTTPStatus.CONFLICT, f"{name}: the song exists", "exists")
+        beat = self._new_beat(body.get("beat"))
         refs = tuple(audio_in(REFS, self.root))
         try:
             saved = model.create(name, beat, None, refs, text_seed, self.root)
-        except model.SongExists as error:
-            raise ApiError(HTTPStatus.CONFLICT, str(error), "exists") from None
-        except model.SongError as error:
+        except (model.SongExists, model.SongError) as error:
+            # a starter made for this song alone goes with it
+            if "own" in beat and isinstance(body.get("beat"), dict) and "new" in body["beat"]:
+                shutil.rmtree(
+                    self.root / "private" / "beats" / str(beat["own"]), ignore_errors=True
+                )
+            if isinstance(error, model.SongExists):
+                raise ApiError(HTTPStatus.CONFLICT, str(error), "exists") from None
             raise _unprocessable(str(error)) from None
         return reply_json(HTTPStatus.CREATED, {"name": saved.name})
 

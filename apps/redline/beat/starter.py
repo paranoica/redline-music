@@ -73,7 +73,9 @@ def starter_score(recipe: Recipe) -> dict[str, Any]:
         name = next((n for n in candidates if n in names), None)
         if name is not None and name not in rows:
             rows[name] = "|".join(family[role])
-    bass = next(s.name for s in recipe.sounds if s.instrument in ("bass808", "sample808"))
+    bass = next((s.name for s in recipe.sounds if s.instrument in ("bass808", "sample808")), None)
+    if bass is None:
+        raise ValueError(f"recipe of seed {recipe.seed} has no 808 to start from")
     # the root in the 808's lowest octave: C1..B1, MIDI 24..35
     root = _note(24 + tonic)
     patterns: dict[str, Any] = {
