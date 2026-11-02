@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from redline.beat import library
+from redline.beat import library, pack
 
 if TYPE_CHECKING:
     from redline.measure.separate import Separator
@@ -23,12 +23,12 @@ def _beat(args: argparse.Namespace, separator: "Separator | None" = None) -> int
         return _beat_marks(args)
     if args.beat_command == "studio":
         return _beat_studio(args)
-    handlers = {"list": _sounds_list, "fetch": _sounds_fetch}
+    handlers = {"list": _sounds_list, "fetch": _sounds_fetch, "scan": _sounds_scan}
     if args.beat_command != "sounds" or args.sounds_command not in handlers:
         return None
     try:
         return handlers[args.sounds_command](args)
-    except library.LibraryError as error:
+    except (library.LibraryError, pack.PackError) as error:
         print(f"redline: {error}", file=sys.stderr)
         return 2
 
@@ -64,6 +64,24 @@ def _sounds_fetch(args: argparse.Namespace) -> int:
         f"{args.name}: {len(result.downloaded)} downloaded, {len(result.present)} already there,"
         f" in {root / args.name}"
     )
+    return 0
+
+
+def _sounds_scan(args: argparse.Namespace) -> int:
+    catalog = args.work / "sounds" / "pack" / "catalog.json"
+    print(f"scanning {args.pack} ...", flush=True)
+    sounds, problems = pack.scan(args.pack, catalog)
+    for line in problems:
+        print(f"  cannot read: {line}", flush=True)
+    found = pack.counts(sounds)
+    print(
+        f"{len(sounds)} sounds: "
+        + ", ".join(f"{name} {n}" for name, n in found.items() if n)
+        + f"; catalogue {catalog}"
+    )
+    unsure = sum(1 for s in sounds if s.by == "sound")
+    if unsure:
+        print(f"{unsure} sorted by their sound alone (no telling word in the name)")
     return 0
 
 

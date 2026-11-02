@@ -292,7 +292,7 @@ def check_score(score_json: str, recipe: Recipe, libraries: Iterable[str] | None
         return Checked(tuple(errors), ())
     if not isinstance(body, dict):
         return Checked(tuple(errors), ())
-    known = library.load().keys() if libraries is None else libraries
+    known = (library.load().keys() | library.pack_names()) if libraries is None else libraries
     rust_ok = not errors
     errors += _recipe_errors(body, recipe)
     errors += _notes(body, recipe)

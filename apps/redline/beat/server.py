@@ -23,7 +23,7 @@ import numpy as np
 import redline_dsp
 import soundfile as sf
 
-from redline.beat import library
+from redline.beat import library, pack
 from redline.beat.checks import Caution, check_score
 from redline.beat.handoff import write_new_score
 from redline.beat.marks import MarkError, StaleMark, add_mark, seed_marks
@@ -135,6 +135,7 @@ class BeatStudio:
         manifest: Path | None = None,
         render: Render = render_seed,
         rate: int = RATE,
+        pack_root: Path = pack.PACK,
     ) -> None:
         """Work on `<root>/<seed>/`, render into `<work>/beats/<seed>/`.
 
@@ -145,12 +146,14 @@ class BeatStudio:
             manifest: The sound manifest (default: the committed one).
             render: The exact render, `render_seed` unless a test swaps it.
             rate: The rate of the event table and the render.
+            pack_root: The owner's pack folder, whose catalogue is under `<work>/sounds/pack/`.
         """
         self.seed = seed
         self.root = root
         self.work = work
         self.manifest = manifest
         self.rate = rate
+        self.pack = pack_root
         self.folder = root / str(seed)
         self.out = work / "beats" / str(seed)
         self._render = render
@@ -223,7 +226,7 @@ class BeatStudio:
         sources = self._sources()
         out = []
         for name, sounds in sorted(by_library.items()):
-            entry = sources.get(name)
+            entry = library.source(name) if library.is_pack(name) else sources.get(name)
             item: dict[str, Any] = {
                 "name": name,
                 "sounds": sounds,
@@ -248,7 +251,12 @@ class BeatStudio:
 
     def _zone_info(self, name: str, entry: library.Source, zone: library.Zone) -> dict[str, Any]:
         folder = self.work / "sounds" / name
-        index = next(i for i, f in enumerate(entry.files) if folder / f.path == zone.path)
+        # a pack sound is one file
+        index = (
+            0
+            if library.is_pack(name)
+            else next(i for i, f in enumerate(entry.files) if folder / f.path == zone.path)
+        )
         info = sf.info(zone.path)
         return {
             "library": name,
@@ -273,6 +281,8 @@ class BeatStudio:
         """
         if not FILE_ID.fullmatch(file_id):
             raise BadRequest(HTTPStatus.BAD_REQUEST, "a file is its index in the manifest")
+        if library.is_pack(name):
+            return self._pack_zone(name, file_id)
         entry = self._sources().get(name)
         if entry is None:
             raise BadRequest(HTTPStatus.NOT_FOUND, f"no sound library named {name!r}")
@@ -298,14 +308,24 @@ class BeatStudio:
             raise BadRequest(
                 HTTPStatus.CONFLICT, f"{name} file {index} does not match its hash: fetch it again"
             )
+        return (*_pcm(data, f"{name} file {index}"), item.note)
+
+    def _pack_zone(self, name: str, file_id: str) -> tuple[bytes, int, int, int, int]:
+        if file_id != "0":
+            raise BadRequest(HTTPStatus.NOT_FOUND, f"{name} has no file {file_id}")
         try:
-            samples, rate = sf.read(io.BytesIO(data), dtype="int16", always_2d=True)
-        except sf.LibsndfileError as error:
-            raise BadRequest(HTTPStatus.CONFLICT, f"{name} file {index}: {error}") from error
-        if samples.shape[1] > 2:
-            raise BadRequest(HTTPStatus.CONFLICT, f"{name} file {index}: more than 2 channels")
-        pcm = np.ascontiguousarray(samples, dtype="<i2").tobytes()
-        return pcm, int(rate), samples.shape[1], samples.shape[0], item.note
+            path, entry = pack.file_of(
+                name, self.pack, self.work / "sounds" / "pack" / "catalog.json"
+            )
+        except pack.PackError as error:
+            raise BadRequest(HTTPStatus.NOT_FOUND, str(error)) from error
+        # the catalogue's paths come from a walk of the folder; a symlink on disk is not
+        if not path.resolve().is_relative_to(self.pack.resolve()):
+            raise BadRequest(HTTPStatus.FORBIDDEN, f"{name} resolves outside {self.pack}")
+        data = path.read_bytes()
+        if len(data) != entry.size:
+            raise BadRequest(HTTPStatus.CONFLICT, f"{name} changed since the scan: scan again")
+        return (*_pcm(data, name), entry.note if entry.note is not None else 60)
 
     def check(self, score: dict[str, Any]) -> tuple[tuple[str, ...], list[dict[str, str]]]:
         """The errors and warnings of a score against the seed's recipe."""
@@ -541,6 +561,18 @@ class Handler(LocalHandler):
         except Exception as error:  # noqa: BLE001
             # the page shows a JSON error; a dropped connection tells it nothing
             self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
+
+
+def _pcm(data: bytes, label: str) -> tuple[bytes, int, int, int]:
+    """A file's samples as little-endian int16, its rate, channels and frames."""
+    try:
+        samples, rate = sf.read(io.BytesIO(data), dtype="int16", always_2d=True)
+    except sf.LibsndfileError as error:
+        raise BadRequest(HTTPStatus.CONFLICT, f"{label}: {error}") from error
+    if samples.shape[1] > 2:
+        raise BadRequest(HTTPStatus.CONFLICT, f"{label}: more than 2 channels")
+    pcm = np.ascontiguousarray(samples, dtype="<i2").tobytes()
+    return pcm, int(rate), samples.shape[1], samples.shape[0]
 
 
 def beat_get(beat: BeatStudio, path: str, query: dict[str, list[str]]) -> Reply:

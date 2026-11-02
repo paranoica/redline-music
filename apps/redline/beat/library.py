@@ -235,12 +235,36 @@ def load(manifest: Path | None = None) -> dict[str, Source]:
     return sources
 
 
+PACK_PREFIX = "pack:"
+
+
+def is_pack(name: str) -> bool:
+    """Whether a library name is one sound of the owner's pack, ``pack:<id>``."""
+    return name.startswith(PACK_PREFIX)
+
+
+def _pack_source(name: str) -> Source:
+    # the pack's licence is whatever the owner downloaded it under: never marked for sale
+    return Source(
+        name=name,
+        source="the owner's pack in input/sounds",
+        commit="",
+        licence="as downloaded",
+        licence_quote="",
+        kind="pack",
+        commercial=False,
+        files=(),
+    )
+
+
 def source(name: str, manifest: Path | None = None) -> Source:
-    """The manifest entry of one instrument.
+    """The manifest entry of one instrument, or the entry of a ``pack:<id>`` sound.
 
     Raises:
         LibraryError: No source has that name.
     """
+    if is_pack(name):
+        return _pack_source(name)
     sources = load(manifest)
     if name not in sources:
         raise LibraryError(f"no sound named {name!r}; known: {', '.join(sorted(sources))}")
@@ -388,13 +412,34 @@ def _nearest(files: tuple[SampleFile, ...], notes: Iterable[int]) -> list[Sample
     return [item for item in files if item.path in chosen]
 
 
+def _pack_zone(name: str, root: Path) -> Zone:
+    from redline.beat import pack
+
+    try:
+        path, entry = pack.file_of(name, pack.PACK, root / "pack" / "catalog.json")
+    except pack.PackError as error:
+        raise LibraryError(str(error)) from error
+    # an unpitched sound plays at middle C, so a drum's note means nothing to it
+    return Zone(path, entry.note if entry.note is not None else 60, (0, 127))
+
+
+def pack_names(root: Path = SOUNDS) -> set[str]:
+    """The ``pack:<id>`` names of every catalogued pack sound."""
+    from redline.beat import pack
+
+    try:
+        return {f"{PACK_PREFIX}{i}" for i in pack.load(root / "pack" / "catalog.json")}
+    except pack.PackError:
+        return set()
+
+
 def zones(
     name: str,
     root: Path = SOUNDS,
     notes_used: Iterable[int] | None = None,
     manifest: Path | None = None,
 ) -> list[Zone]:
-    """The verified zones of a fetched instrument.
+    """The verified zones of a fetched instrument, or the one zone of a pack sound.
 
     Args:
         name: The instrument's name in the manifest.
@@ -410,6 +455,8 @@ def zones(
         LibraryError: The name is unknown or local only, or a returned file is missing or
             does not match its hash.
     """
+    if is_pack(name):
+        return [_pack_zone(name, root)]
     entry = source(name, manifest)
     if entry.kind != "fetch":
         raise LibraryError(f"{name} is local only: its zones are placed by hand, not listed")

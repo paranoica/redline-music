@@ -26,6 +26,8 @@ from redline.measure.separate import Separator
 ROOT = Path("private/beats")
 WORK = Path("work")
 RATE = 48000
+# the instruments that play a library's zones
+SAMPLED = ("sampler", "oneshot", "sample808")
 BLOCK = 8192
 QUIET = 1e-6
 QUIET_S = 0.5
@@ -90,7 +92,7 @@ def notes_used(score_json: str, rate: float, body: dict[str, Any]) -> dict[str, 
     for event in table["events"]:
         name = names[event["sound"]]
         sound = sounds.get(name, {})
-        if sound.get("instrument") != "sampler" or "library" not in sound:
+        if sound.get("instrument") not in SAMPLED or "library" not in sound:
             continue
         tune = float(sound.get("params", {}).get("tune", 0.0))
         used.setdefault(name, set()).add(min(127, max(0, round(event["note"] + tune))))

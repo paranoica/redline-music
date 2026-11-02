@@ -312,7 +312,9 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
         )
     for command in (rendered, measured, studio):
         command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
-    sounds = beat_commands.add_parser("sounds", help="the sample instruments: list, fetch")
+    sounds = beat_commands.add_parser(
+        "sounds", help="the sample instruments and the owner's pack: list, fetch, scan"
+    )
     sounds_commands = sounds.add_subparsers(dest="sounds_command", metavar="command")
     listed = sounds_commands.add_parser(
         "list", help="every instrument with its licence, size and whether it is fetched"
@@ -321,7 +323,15 @@ def _beat(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> No
         "fetch", help="download an instrument into <work>/sounds/<name>/, checking every file"
     )
     fetch.add_argument("name", help="the instrument's name, as listed")
-    for command in (listed, fetch):
+    scanned = sounds_commands.add_parser(
+        "scan",
+        help="catalogue the pack in input/sounds/: each file's kind (kick, 808, hat, loop...), "
+        "an 808's or melody's root, a loop's tempo and key",
+    )
+    scanned.add_argument(
+        "--pack", type=Path, default=Path("input/sounds"), help="the pack's folder"
+    )
+    for command in (listed, fetch, scanned):
         command.add_argument("--work", type=Path, default=Path("work"), help="cache and run folder")
 
 
