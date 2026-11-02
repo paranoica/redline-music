@@ -57,6 +57,13 @@ const BASS808: &[ParamSpec] = &[
     ParamSpec::range("click", 0.0, 1.0, 0.1, ""),
     // a low-pass after the drive
     ParamSpec::range("tone", 100.0, 8000.0, 2000.0, "Hz"),
+    // how far above the note a hit starts, falling to it over `punch_ms`
+    ParamSpec::range("punch", 0.0, 24.0, 0.0, "st"),
+    ParamSpec::range("punch_ms", 5.0, 200.0, 30.0, "ms"),
+    // a hard clip after the drive: 0 none, 1 a near square
+    ParamSpec::range("clip", 0.0, 1.0, 0.0, ""),
+    // a wavefold after the drive
+    ParamSpec::range("fold", 0.0, 1.0, 0.0, ""),
 ];
 
 const SNARE: &[ParamSpec] = &[
@@ -104,7 +111,7 @@ const COWBELL: &[ParamSpec] = &[
 
 const FM: &[ParamSpec] = &[
     // the envelope and operator shape the other params adjust
-    ParamSpec::choice("preset", &["bell", "keys", "pluck"]),
+    ParamSpec::choice("preset", &["bell", "keys", "pluck", "brass", "glass"]),
     // the modulator's frequency over the carrier's
     ParamSpec::range("ratio", 0.5, 16.0, 2.0, ""),
     // the depth of the modulation
@@ -132,6 +139,76 @@ const SAW: &[ParamSpec] = &[
     ParamSpec::range("resonance", 0.0, 1.0, 0.1, ""),
     ParamSpec::range("attack", 0.001, 4.0, 0.01, "s"),
     ParamSpec::range("release", 0.005, 8.0, 0.3, "s"),
+];
+
+const TOM: &[ParamSpec] = &[
+    ParamSpec::range("tune", 50.0, 400.0, 110.0, "Hz"),
+    ParamSpec::range("pitch_drop", 0.0, 24.0, 7.0, "st"),
+    ParamSpec::range("decay", 0.05, 2.0, 0.4, "s"),
+    ParamSpec::range("drive", 0.0, 1.0, 0.1, ""),
+];
+
+const SHAKER: &[ParamSpec] = &[
+    ParamSpec::range("decay", 0.01, 0.4, 0.06, "s"),
+    // the band-pass centre
+    ParamSpec::range("tone", 2000.0, 14000.0, 7000.0, "Hz"),
+    // the rise of the grains, a shaker's swing
+    ParamSpec::range("attack_ms", 1.0, 30.0, 6.0, "ms"),
+];
+
+const CRASH: &[ParamSpec] = &[
+    ParamSpec::range("decay", 0.3, 6.0, 2.0, "s"),
+    ParamSpec::range("tone", 3000.0, 14000.0, 6000.0, "Hz"),
+    ParamSpec::range("metal", 0.0, 1.0, 0.6, ""),
+];
+
+const SNAP: &[ParamSpec] = &[
+    ParamSpec::range("decay", 0.02, 0.4, 0.08, "s"),
+    ParamSpec::range("tone", 1000.0, 6000.0, 2600.0, "Hz"),
+];
+
+const PERC: &[ParamSpec] = &[
+    // a struck block: its resonance
+    ParamSpec::range("tune", 200.0, 3000.0, 900.0, "Hz"),
+    ParamSpec::range("decay", 0.01, 1.0, 0.12, "s"),
+    // wood against metal: inharmonic partials over the ping
+    ParamSpec::range("metal", 0.0, 1.0, 0.2, ""),
+];
+
+const REESE: &[ParamSpec] = &[
+    ParamSpec::range("tune", -12.0, 12.0, 0.0, "st"),
+    // the spread of the two saws
+    ParamSpec::range("detune", 0.0, 50.0, 18.0, "cents"),
+    ParamSpec::range("cutoff", 60.0, 8000.0, 900.0, "Hz"),
+    ParamSpec::range("resonance", 0.0, 1.0, 0.2, ""),
+    // a sine an octave below the saws
+    ParamSpec::range("sub", 0.0, 1.0, 0.5, ""),
+    ParamSpec::range("drive", 0.0, 1.0, 0.3, ""),
+    ParamSpec::range("glide_ms", 10.0, 500.0, 90.0, "ms"),
+    ParamSpec::range("attack", 0.001, 1.0, 0.005, "s"),
+    ParamSpec::range("release", 0.005, 2.0, 0.08, "s"),
+];
+
+const VOX: &[ParamSpec] = &[
+    // a, e, i, o, u, morphing between neighbours
+    ParamSpec::range("vowel", 0.0, 4.0, 0.0, ""),
+    // singers a note, read as a whole number
+    ParamSpec::range("voices", 1.0, 7.0, 4.0, "").fixed(),
+    ParamSpec::range("detune", 0.0, 40.0, 12.0, "cents"),
+    ParamSpec::range("breath", 0.0, 1.0, 0.15, ""),
+    ParamSpec::range("vibrato", 0.0, 1.0, 0.3, ""),
+    ParamSpec::range("attack", 0.01, 4.0, 0.4, "s"),
+    ParamSpec::range("release", 0.01, 8.0, 1.2, "s"),
+];
+
+const FLUTE: &[ParamSpec] = &[
+    ParamSpec::range("breath", 0.0, 1.0, 0.25, ""),
+    ParamSpec::range("vibrato", 0.0, 1.0, 0.4, ""),
+    ParamSpec::range("vibrato_hz", 1.0, 9.0, 5.0, "Hz"),
+    // the overtones over the fundamental
+    ParamSpec::range("tone", 0.0, 1.0, 0.5, ""),
+    ParamSpec::range("attack", 0.005, 1.0, 0.06, "s"),
+    ParamSpec::range("release", 0.01, 3.0, 0.25, "s"),
 ];
 
 const SAMPLER: &[ParamSpec] = &[
@@ -206,6 +283,17 @@ pub static INSTRUMENTS: &[Instrument] = &[
     note("pluck", 8, 2.0, PLUCK),
     note("saw", 8, 8.0, SAW),
     note("sampler", 8, 4.0, SAMPLER),
+    drum("tom", 4, 2.5, TOM),
+    drum("shaker", 4, 0.6, SHAKER),
+    drum("crash", 2, 7.0, CRASH),
+    drum("snap", 4, 0.6, SNAP),
+    drum("perc", 4, 1.2, PERC),
+    Instrument {
+        mono: true,
+        ..note("reese", 1, 2.0, REESE)
+    },
+    note("vox", 8, 8.0, VOX),
+    note("flute", 4, 3.0, FLUTE),
 ];
 
 /// The instrument of that name.

@@ -6,10 +6,15 @@ use super::events::{hash, Event};
 
 mod bass;
 mod drums;
+mod flute;
 mod fm;
+mod osc;
+mod perc;
 mod pluck;
-mod saw;
+mod reese;
 mod sampler;
+mod saw;
+mod vox;
 
 pub use sampler::{sampler_for, SampleBank};
 
@@ -35,6 +40,10 @@ pub fn make(instrument: &str, rate: f32) -> Option<Box<dyn Voice>> {
         .or_else(|| pluck::make(instrument, rate))
         .or_else(|| saw::make(instrument, rate))
         .or_else(|| sampler::make(instrument, rate))
+        .or_else(|| perc::make(instrument, rate))
+        .or_else(|| reese::make(instrument, rate))
+        .or_else(|| vox::make(instrument, rate))
+        .or_else(|| flute::make(instrument, rate))
 }
 
 /// The pitch of a MIDI note in Hz.

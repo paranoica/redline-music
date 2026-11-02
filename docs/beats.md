@@ -122,22 +122,37 @@ What keeps two beats of a genre apart:
 | Instrument | Row | Voices | | Params |
 |---|---|---|---|---|
 | `kick` | drum | 4 |  | tune 30..120 Hz, pitch_drop 0..48 st, drop_ms 5..200 ms, decay 0.05..2 s, click 0..1, drive 0..1 |
-| `bass808` | note | 1 | mono | tune -12..12 st, decay 0.1..8 s, release 0.005..1 s, drive 0..1, glide_ms 10..500 ms, click 0..1, tone 100..8000 Hz |
+| `bass808` | note | 1 | mono | tune -12..12 st, decay 0.1..8 s, release 0.005..1 s, drive 0..1, glide_ms 10..500 ms, click 0..1, tone 100..8000 Hz, punch 0..24 st, punch_ms 5..200 ms, clip 0..1, fold 0..1 |
 | `snare` | drum | 4 |  | tune 120..400 Hz, decay 0.05..1 s, tone 0..1, snap 0..1 |
 | `clap` | drum | 4 |  | decay 0.05..1 s, spread_ms 5..40 ms, tone 600..4000 Hz |
 | `hat_closed` | drum | 4 | choke group hat | decay 0.01..0.3 s, tone 4000..14000 Hz, metal 0..1 |
 | `hat_open` | drum | 4 | choke group hat | decay 0.1..2 s, tone 4000..14000 Hz, metal 0..1 |
 | `rim` | drum | 4 |  | tune 300..2000 Hz, decay 0.01..0.3 s |
 | `cowbell` | drum | 4 |  | tune 400..1200 Hz, decay 0.05..1 s |
-| `fm` | note | 8 |  | preset (bell/keys/pluck), ratio 0.5..16, index 0..20, decay 0.05..8 s, attack 0.001..2 s, release 0.005..4 s |
+| `fm` | note | 8 |  | preset (bell/keys/pluck/brass/glass), ratio 0.5..16, index 0..20, decay 0.05..8 s, attack 0.001..2 s, release 0.005..4 s |
 | `pluck` | note | 8 |  | decay 0.1..10 s, tone 0..1, release 0.005..2 s |
 | `saw` | note | 8 |  | voices 1..9, detune 0..50 cents, cutoff 100..16000 Hz, resonance 0..1, attack 0.001..4 s, release 0.005..8 s |
 | `sampler` | note | 8 |  | tune -24..24 st, attack 0.001..2 s, release 0.005..4 s |
+| `tom` | drum | 4 |  | tune 50..400 Hz, pitch_drop 0..24 st, decay 0.05..2 s, drive 0..1 |
+| `shaker` | drum | 4 |  | decay 0.01..0.4 s, tone 2000..14000 Hz, attack_ms 1..30 ms |
+| `crash` | drum | 2 |  | decay 0.3..6 s, tone 3000..14000 Hz, metal 0..1 |
+| `snap` | drum | 4 |  | decay 0.02..0.4 s, tone 1000..6000 Hz |
+| `perc` | drum | 4 |  | tune 200..3000 Hz, decay 0.01..1 s, metal 0..1 |
+| `reese` | note | 1 | mono | tune -12..12 st, detune 0..50 cents, cutoff 60..8000 Hz, resonance 0..1, sub 0..1, drive 0..1, glide_ms 10..500 ms, attack 0.001..1 s, release 0.005..2 s |
+| `vox` | note | 8 |  | vowel 0..4 (a e i o u), voices 1..7, detune 0..40 cents, breath 0..1, vibrato 0..1, attack 0.01..4 s, release 0.01..8 s |
+| `flute` | note | 4 |  | breath 0..1, vibrato 0..1, vibrato_hz 1..9 Hz, tone 0..1, attack 0.005..1 s, release 0.01..3 s |
 
 Drums and the 808 are classic analog-style recipes: a sine with a falling pitch for the kick, two
 tones and filtered noise for the snare, noise bursts for the clap, six square waves for the hats.
 `fm` is two-operator FM with three envelope presets, `pluck` is Karplus-Strong, `saw` a stack of
 detuned band-limited saws through a resonant lowpass. A closed hat cuts a ringing open hat.
+
+The 808 can be made nasty: `punch` starts a hit above its note and drops into it, `clip` hard
+clips after the drive (towards a square), `fold` wavefolds it; all three at 0 leave it as it was.
+`reese` is a gliding bass of two detuned saws and a sub through a resonant lowpass; `vox` a choir
+of detuned saws through three vowel formants; `flute` a breathy sine with a delayed vibrato. The
+`brass` FM preset swells into its brightness, `glass` rings a bright partial over a held tone. The
+tom, shaker, crash, finger snap and struck block (`perc`) follow the drum recipes.
 
 `sampler` plays a recorded library named by the sound's `library` field.
 

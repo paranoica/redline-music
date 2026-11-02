@@ -38,6 +38,9 @@ import {
 } from "../model.ts";
 import { h } from "../../ui/dom.ts";
 
+// instruments whose notes sit in the bass octaves
+const BASS = new Set(["bass808", "reese", "sample808"]);
+
 export interface Selection {
   pattern: string;
   sound: string;
@@ -281,7 +284,7 @@ export class Grid {
 
   #centre(st: GridState, row: PlayingRow): number {
     const inst = st.score.sounds[row.sound]?.instrument ?? "";
-    return inst === "bass808" ? 36 : 60;
+    return BASS.has(inst) ? 36 : 60;
   }
 
   #row(st: GridState, row: PlayingRow): HTMLElement {

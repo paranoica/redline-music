@@ -4,6 +4,7 @@
 
 use super::super::events::Event;
 use super::super::instruments::instrument;
+use super::osc::blep;
 use super::{noise, Ctx, Voice};
 use std::f64::consts::TAU;
 
@@ -182,18 +183,6 @@ struct Square {
     inc: f64,
 }
 
-fn blep(t: f64, dt: f64) -> f64 {
-    if t < dt {
-        let t = t / dt;
-        2.0 * t - t * t - 1.0
-    } else if t > 1.0 - dt {
-        let t = (t - 1.0) / dt;
-        t * t + 2.0 * t + 1.0
-    } else {
-        0.0
-    }
-}
-
 impl Square {
     fn new(f: f64, rate: f64) -> Square {
         Square {
@@ -227,26 +216,26 @@ impl Sine {
 }
 
 /// The frequency ratio a step's pitch puts on a drum: its note is 60 plus the semitones.
-fn pitch_ratio(e: &Event) -> f64 {
+pub(super) fn pitch_ratio(e: &Event) -> f64 {
     ((e.note as f64 - 60.0) / 12.0).exp2()
 }
 
 /// The decay a step's scale leaves of `seconds`.
-fn scaled(seconds: f32, e: &Event) -> f64 {
+pub(super) fn scaled(seconds: f32, e: &Event) -> f64 {
     seconds as f64 * (e.decay as f64).max(0.0)
 }
 
 /// What every drum voice keeps: its rate, its instrument's longest life and the gate.
 #[derive(Clone, Copy, Default)]
-struct Base {
-    rate: f64,
+pub(super) struct Base {
+    pub(super) rate: f64,
     max_life_s: f64,
-    gate: Gate,
+    pub(super) gate: Gate,
     id: u32,
 }
 
 impl Base {
-    fn new(name: &str, rate: f32) -> Base {
+    pub(super) fn new(name: &str, rate: f32) -> Base {
         Base {
             rate: rate as f64,
             max_life_s: instrument(name).map_or(0.0, |i| i.max_life_s as f64),
@@ -254,13 +243,13 @@ impl Base {
         }
     }
 
-    fn start(&mut self, e: &Event) {
+    pub(super) fn start(&mut self, e: &Event) {
         let life = (self.max_life_s * (e.decay as f64).max(0.0) * self.rate).round() as u64;
         self.gate = Gate::new(e, self.rate, Some(life));
         self.id = e.id;
     }
 
-    fn noise(&self, k: u64) -> f64 {
+    pub(super) fn noise(&self, k: u64) -> f64 {
         noise(self.id, k) as f64
     }
 }

@@ -536,9 +536,19 @@ fn the_instrument_catalogue_lists_kinds_voices_and_params() {
         "pluck",
         "saw",
         "sampler",
+        "tom",
+        "shaker",
+        "crash",
+        "snap",
+        "perc",
+        "reese",
+        "vox",
+        "flute",
     ] {
         assert!(names.contains(&n), "{n}");
     }
+    let reese = INSTRUMENTS.iter().find(|i| i.name == "reese").unwrap();
+    assert!(reese.mono && reese.kind == Kind::Note);
     let bass = INSTRUMENTS.iter().find(|i| i.name == "bass808").unwrap();
     assert!(bass.mono && bass.kind == Kind::Note);
     let glide = bass.params.iter().find(|p| p.name == "glide_ms").unwrap();
@@ -552,7 +562,10 @@ fn the_instrument_catalogue_lists_kinds_voices_and_params() {
         .all(|i| (1..=8).contains(&i.max_voices) && i.max_life_s > 0.0));
     let fm = list.iter().find(|e| e["instrument"] == "fm").unwrap();
     assert_eq!(fm["kind"], "note");
-    assert_eq!(fm["params"][0]["choices"], json!(["bell", "keys", "pluck"]));
+    assert_eq!(
+        fm["params"][0]["choices"],
+        json!(["bell", "keys", "pluck", "brass", "glass"])
+    );
 }
 
 #[test]

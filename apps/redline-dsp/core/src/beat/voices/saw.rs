@@ -2,6 +2,7 @@
 //! low-pass.
 
 use super::fm::{param, Gate};
+use super::osc::blep;
 use super::{hz, Ctx, Voice};
 use crate::beat::events::{hash, unit, Event};
 use std::f64::consts::{FRAC_PI_4, PI};
@@ -14,19 +15,6 @@ const ATTACK: usize = 4;
 const RELEASE: usize = 5;
 
 const MAX_SAWS: usize = 9;
-
-/// PolyBLEP: the residual that rounds off a saw's jump at phase 0.
-fn blep(t: f64, dt: f64) -> f64 {
-    if t < dt {
-        let x = t / dt;
-        2.0 * x - x * x - 1.0
-    } else if t > 1.0 - dt {
-        let x = (t - 1.0) / dt;
-        x * x + 2.0 * x + 1.0
-    } else {
-        0.0
-    }
-}
 
 /// A state-variable low-pass (topology-preserving transform).
 #[derive(Clone, Copy, Default)]

@@ -1,5 +1,6 @@
 //! Two-operator FM. The preset picks the envelope shapes; `ratio` and `index` are used as
-//! given, so a bell wants an inharmonic ratio such as 1.4.
+//! given, so a bell wants an inharmonic ratio such as 1.4. Glass adds a third operator, a
+//! second modulator at a fixed high ratio.
 
 use super::{hz, Ctx, Voice};
 use crate::beat::events::Event;
@@ -15,6 +16,18 @@ const RELEASE: usize = 5;
 
 const BELL: usize = 0;
 const KEYS: usize = 1;
+const PLUCK: usize = 2;
+const BRASS: usize = 3;
+
+/// Brass's modulator lags its carrier: it swells over the attack and this much longer.
+const BRASS_SWELL_S: f64 = 0.05;
+/// The share of the swell's peak brass's modulator settles to.
+const BRASS_SUSTAIN: f64 = 0.6;
+/// Glass's second modulator over the carrier, whole so its partials stay harmonic.
+const GLASS_RATIO: f64 = 7.0;
+/// Its index against `index`.
+const GLASS_INDEX: f64 = 0.5;
+const HELD_LEVEL: f64 = 0.5;
 
 /// The fade a cut voice (choke, steal, mono) takes to silence.
 pub(super) const FADE_S: f64 = 0.005;
@@ -107,6 +120,18 @@ struct Fm {
     env_m: f64,
     fall_c: f64,
     fall_m: f64,
+    /// frames the modulator swells over before it falls; 0 for no swell
+    swell: f64,
+    /// where the modulator's fall settles, as a share of its peak
+    floor_m: f64,
+    /// the second modulator; none at an index of 0
+    modulator2: f64,
+    dm2: f64,
+    index2: f64,
+    env_m2: f64,
+    fall_m2: f64,
+    /// the held presets (brass, glass) sit lower, since their carrier does not decay
+    level: f64,
 }
 
 impl Voice for Fm {
@@ -115,26 +140,49 @@ impl Voice for Fm {
         let p = |i| param("fm", params, i);
         let decay = p(DECAY);
         let f = hz(event.note as f64);
-        let (fall_c, fall_m) = match p(PRESET).round() as usize {
+        let vel = event.vel.clamp(0.0, 1.0) as f64;
+        let preset = p(PRESET).round() as usize;
+        let (fall_c, fall_m) = match preset {
             BELL => (fall(decay, rate), fall(decay, rate)),
             // an electric piano: the tine's brightness goes fast, the tone holds
             KEYS => (1.0, fall(decay / 4.0, rate)),
-            _ => (fall(decay / 4.0, rate), fall(decay / 8.0, rate)),
+            PLUCK => (fall(decay / 4.0, rate), fall(decay / 8.0, rate)),
+            BRASS => (1.0, fall(decay, rate)),
+            // glass: the partials ring off fast over a carrier that holds
+            _ => (1.0, fall(decay / 8.0, rate)),
         };
+        let mut index = p(INDEX);
+        let (mut swell, mut floor_m, mut index2) = (0.0, 0.0, 0.0);
+        if preset == BRASS {
+            swell = ((p(ATTACK) + BRASS_SWELL_S) * rate).max(1.0);
+            floor_m = BRASS_SUSTAIN;
+            // a harder blow is a brassier one
+            index *= 0.3 + 0.7 * vel;
+        } else if preset > BRASS {
+            index2 = GLASS_INDEX * index;
+        }
         *self = Fm {
             active: true,
             n: 0,
             gate: Gate::new(event, p(ATTACK), p(RELEASE), rate),
-            vel: event.vel.clamp(0.0, 1.0) as f64,
+            vel,
             carrier: 0.0,
             modulator: 0.0,
             dc: f / rate,
             dm: f * p(RATIO) / rate,
-            index: p(INDEX),
+            index,
             env_c: 1.0,
             env_m: 1.0,
             fall_c,
             fall_m,
+            swell,
+            floor_m,
+            modulator2: 0.0,
+            dm2: f * GLASS_RATIO / rate,
+            index2,
+            env_m2: 1.0,
+            fall_m2: fall(decay / 3.0, rate),
+            level: if preset >= BRASS { HELD_LEVEL } else { 1.0 },
         };
     }
 
@@ -146,14 +194,33 @@ impl Voice for Fm {
             if self.gate.done(self.n) {
                 break;
             }
-            let m = self.index * self.env_m * (TAU * self.modulator).sin();
-            let y = (TAU * self.carrier + m).sin() * self.env_c * self.vel * self.gate.at(self.n);
+            let n = self.n as f64;
+            let env_m = if self.swell == 0.0 {
+                self.env_m
+            } else if n < self.swell {
+                n / self.swell
+            } else {
+                self.floor_m + (1.0 - self.floor_m) * self.env_m
+            };
+            let mut m = self.index * env_m * (TAU * self.modulator).sin();
+            if self.index2 != 0.0 {
+                m += self.index2 * self.env_m2 * (TAU * self.modulator2).sin();
+                self.modulator2 = (self.modulator2 + self.dm2).fract();
+                self.env_m2 *= self.fall_m2;
+            }
+            let y = (TAU * self.carrier + m).sin()
+                * self.env_c
+                * self.vel
+                * self.gate.at(self.n)
+                * self.level;
             frame[0] += y as f32;
             frame[1] += y as f32;
             self.carrier = (self.carrier + self.dc).fract();
             self.modulator = (self.modulator + self.dm).fract();
             self.env_c *= self.fall_c;
-            self.env_m *= self.fall_m;
+            if n >= self.swell {
+                self.env_m *= self.fall_m;
+            }
             self.n += 1;
         }
         self.active = !self.gate.done(self.n);

@@ -15,6 +15,16 @@ const INSTRUMENTS: Record<string, string> = {
   pluck: "щипок",
   saw: "пила",
   sampler: "сэмплер",
+  tom: "том",
+  shaker: "шейкер",
+  crash: "крэш",
+  snap: "щелчок пальцами",
+  perc: "перкуссия",
+  reese: "риз-бас",
+  vox: "хор",
+  flute: "флейта",
+  oneshot: "сэмпл",
+  sample808: "808 из сэмпла",
 };
 
 const PARAMS: Record<string, string> = {
@@ -38,6 +48,16 @@ const PARAMS: Record<string, string> = {
   cutoff: "Срез",
   resonance: "Резонанс",
   voices: "Голоса",
+  punch: "Удар высоты",
+  punch_ms: "Время удара",
+  clip: "Клип",
+  fold: "Фолд",
+  attack_ms: "Атака",
+  sub: "Саб",
+  vowel: "Гласная",
+  breath: "Дыхание",
+  vibrato: "Вибрато",
+  vibrato_hz: "Частота вибрато",
 };
 
 export const LANE_NAMES: Record<Lane, string> = {

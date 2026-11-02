@@ -11,6 +11,11 @@ const DRUMS: &[&str] = &[
     "hat_open",
     "rim",
     "cowbell",
+    "tom",
+    "shaker",
+    "crash",
+    "snap",
+    "perc",
 ];
 const ALL: &[&str] = &[
     "kick",
@@ -21,6 +26,11 @@ const ALL: &[&str] = &[
     "hat_open",
     "rim",
     "cowbell",
+    "tom",
+    "shaker",
+    "crash",
+    "snap",
+    "perc",
 ];
 /// The fade a cut voice takes, in frames.
 const FADE: usize = (0.005 * RATE as f64) as usize;
@@ -340,7 +350,18 @@ fn a_softer_hit_is_quieter() {
 fn level_follows_velocity_to_the_power_1_5_in_the_linear_voices() {
     // the voices without a drive are linear in their input, so the level ratio is the gain's
     let want = 0.5f64.powf(1.5);
-    for name in ["snare", "clap", "hat_closed", "hat_open", "rim", "cowbell"] {
+    for name in [
+        "snare",
+        "clap",
+        "hat_closed",
+        "hat_open",
+        "rim",
+        "cowbell",
+        "shaker",
+        "crash",
+        "snap",
+        "perc",
+    ] {
         let p = defaults(name);
         let level = |vel: f32| {
             let mut e = hit(name, 2);
@@ -532,4 +553,134 @@ fn a_shorter_step_decay_shortens_the_hit() {
         let (a, b) = (rings(name, &p, &full), rings(name, &p, &short));
         assert!(b < a, "{name}: {b} vs {a}");
     }
+}
+
+/// The magnitude spectrum of `x` under a Hann window, bin `k` at `k * RATE / x.len()` Hz.
+fn spectrum(x: &[f64]) -> Vec<f64> {
+    let n = x.len();
+    let tau = std::f64::consts::TAU;
+    let w: Vec<f64> = (0..n)
+        .map(|i| x[i] * (0.5 - 0.5 * (tau * i as f64 / n as f64).cos()))
+        .collect();
+    let cos: Vec<f64> = (0..n).map(|i| (tau * i as f64 / n as f64).cos()).collect();
+    let sin: Vec<f64> = (0..n).map(|i| (tau * i as f64 / n as f64).sin()).collect();
+    (0..n / 2)
+        .map(|k| {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (i, v) in w.iter().enumerate() {
+                let j = (k * i) % n;
+                re += v * cos[j];
+                im -= v * sin[j];
+            }
+            (re * re + im * im).sqrt()
+        })
+        .collect()
+}
+
+fn bin_hz(k: usize, n: usize) -> f64 {
+    k as f64 * RATE as f64 / n as f64
+}
+
+/// The magnitude-weighted mean frequency of `x`.
+fn centroid(x: &[f64]) -> f64 {
+    let s = spectrum(x);
+    let total: f64 = s.iter().sum();
+    s.iter()
+        .enumerate()
+        .map(|(k, m)| bin_hz(k, x.len()) * m)
+        .sum::<f64>()
+        / total
+}
+
+/// The share of the power of `x` outside a third of an octave around `f`.
+fn power_away_from(x: &[f64], f: f64) -> f64 {
+    let s = spectrum(x);
+    let near = |k: usize| {
+        let h = bin_hz(k, x.len());
+        h > f / 1.26 && h < f * 1.26
+    };
+    let total: f64 = s.iter().map(|m| m * m).sum();
+    let away: f64 = s
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| !near(*k))
+        .map(|(_, m)| m * m)
+        .sum();
+    away / total
+}
+
+#[test]
+fn tom_settles_on_its_tune_after_the_drop() {
+    let tune = 110.0;
+    let p = with(
+        "tom",
+        &[("tune", tune), ("pitch_drop", 24.0), ("decay", 2.0)],
+    );
+    let x = left(&render("tom", &p, &hit("tom", 1), frames(1.0)));
+    let f = zc_hz(&x[frames(0.3)..]);
+    assert!((f / tune as f64 - 1.0).abs() < 0.02, "{f} Hz");
+}
+
+#[test]
+fn tom_starts_above_its_tune() {
+    // 24 st above at the hit, still well above the tune 5 to 30 ms on; no drop stays on it
+    let tune = 110.0;
+    let measure = |drop: f32| {
+        let p = with("tom", &[("tune", tune), ("pitch_drop", drop)]);
+        let x = left(&render("tom", &p, &hit("tom", 1), frames(0.1)));
+        zc_hz(&x[frames(0.005)..frames(0.03)])
+    };
+    let dropped = measure(24.0);
+    assert!(dropped > 1.4 * tune as f64, "{dropped} Hz");
+    let flat = measure(0.0);
+    assert!((flat / tune as f64 - 1.0).abs() < 0.05, "{flat} Hz");
+}
+
+#[test]
+fn a_brighter_shaker_tone_raises_its_spectral_centre() {
+    let e = hit("shaker", 1);
+    let at = |tone: f32| {
+        let p = with("shaker", &[("tone", tone), ("decay", 0.2)]);
+        centroid(&left(&render("shaker", &p, &e, 4096)))
+    };
+    let (dark, bright) = (at(3000.0), at(12000.0));
+    assert!(bright > dark + 2000.0, "dark {dark} Hz, bright {bright} Hz");
+}
+
+#[test]
+fn shaker_rises_over_its_attack() {
+    let p = with("shaker", &[("attack_ms", 20.0), ("decay", 0.2)]);
+    let x = left(&render("shaker", &p, &hit("shaker", 1), frames(0.1)));
+    let early = rms(&x[..frames(0.002)]);
+    let top = rms(&x[frames(0.018)..frames(0.022)]);
+    assert!(early < 0.3 * top, "early {early} top {top}");
+}
+
+#[test]
+fn crash_rings_longer_than_hat_open() {
+    let crash = rings("crash", &defaults("crash"), &hit("crash", 1));
+    let open = rings("hat_open", &defaults("hat_open"), &hit("hat_open", 1));
+    assert!(crash > 2 * open, "crash {crash} open {open}");
+}
+
+#[test]
+fn perc_rings_near_its_tune() {
+    let tune = 900.0;
+    let p = with("perc", &[("tune", tune), ("metal", 0.0), ("decay", 0.5)]);
+    let x = left(&render("perc", &p, &hit("perc", 1), frames(0.3)));
+    let f = zc_hz(&x[frames(0.005)..frames(0.2)]);
+    assert!((f / tune as f64 - 1.0).abs() < 0.01, "{f} Hz");
+}
+
+#[test]
+fn more_metal_on_perc_adds_energy_away_from_its_tune() {
+    let tune = 900.0;
+    let e = hit("perc", 1);
+    let away = |metal: f32| {
+        let p = with("perc", &[("tune", tune), ("metal", metal), ("decay", 0.5)]);
+        power_away_from(&left(&render("perc", &p, &e, 4096)), tune as f64)
+    };
+    let (wood, metal) = (away(0.0), away(1.0));
+    assert!(wood < 0.1, "wood {wood}");
+    assert!(metal > 2.0 * wood + 0.05, "wood {wood} metal {metal}");
 }

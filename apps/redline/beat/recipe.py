@@ -311,6 +311,13 @@ COWBELL = Sound("cowbell", "cowbell")
 PAD = Sound("pad", "saw", (("attack", 0.3), ("release", 1.0)))
 SAMPLE = Sound("sample", "sampler")
 KEYS = Sound("keys", "fm", (("preset", "keys"),))
+TOM = Sound("tom", "tom")
+SHAKER = Sound("shaker", "shaker")
+CRASH = Sound("crash", "crash")
+SNAP = Sound("snap", "snap")
+BLOCK = Sound("perc", "perc")
+REESE = Sound("reese", "reese")
+CHOIR = Sound("choir", "vox", (("vowel", 3.0), ("attack", 0.8), ("release", 2.0)))
 
 
 def _lead(instrument: str, *params: tuple[str, str | float], library: str | None = None) -> Sound:
@@ -337,6 +344,10 @@ GLOCK = _lead("sampler", library="vcsl-glock")
 VIBES = _lead("sampler", library="vcsl-vibes-hard")
 MARIMBA = _lead("sampler", library="vcsl-marimba")
 TUBULAR = _lead("sampler", library="vcsl-tubular-bells")
+FLUTE = _lead("flute")
+VOX_LEAD = _lead("vox", ("vowel", 0.0), ("voices", 3.0))
+FM_BRASS = _lead("fm", ("preset", "brass"), ("ratio", 1.0), ("index", 4.0))
+FM_GLASS = _lead("fm", ("preset", "glass"), ("ratio", 3.5), ("index", 2.5), ("decay", 1.5))
 
 
 def _parts(*pairs: tuple[str, int]) -> tuple[Part, ...]:
@@ -422,8 +433,20 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 55.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        leads=(PIANO, FM_KEYS, PLUCK, SAW_LEAD, STRINGS, HARP, PIZZ, FM_BELL, GLOCK),
-        extras=(OPEN_HAT, CLAP, PAD, RIM, SAMPLE),
+        leads=(
+            PIANO,
+            FM_KEYS,
+            PLUCK,
+            SAW_LEAD,
+            STRINGS,
+            HARP,
+            PIZZ,
+            FM_BELL,
+            GLOCK,
+            FLUTE,
+            FM_GLASS,
+        ),
+        extras=(OPEN_HAT, CLAP, PAD, RIM, SAMPLE, CRASH, BLOCK),
         hats="eighths or sixteenths; the last two hats of a phrase become a 32nd or triplet "
         "roll with its middle hits softer; one open hat off the beat, choked",
         bass="the 808 follows the melody's roots, mostly within an octave: notes just after "
@@ -445,8 +468,19 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 53.0),
         sounds=(KICK, BASS, CLAP, HAT),
-        leads=(FM_BELL, TUBULAR, GLOCK, KALIMBA, PIANO, STRINGS, SAW_LEAD),
-        extras=(PAD, OPEN_HAT, SNARE, RIM, SAMPLE),
+        leads=(
+            FM_BELL,
+            TUBULAR,
+            GLOCK,
+            KALIMBA,
+            PIANO,
+            STRINGS,
+            SAW_LEAD,
+            VOX_LEAD,
+            FM_GLASS,
+            FLUTE,
+        ),
+        extras=(PAD, OPEN_HAT, SNARE, RIM, SAMPLE, CHOIR, CRASH),
         hats="eighths with the middle hats turned down, the last two of a phrase as a "
         "32nd-triplet roll; hats drop out for the bar before a hook",
         bass="a long 808 on the chord roots, grit above a clean sub; it slides down into the "
@@ -468,7 +502,7 @@ GENRES: dict[str, Genre] = {
         swing=(50.0, 54.0),
         sounds=(KICK, BASS, CLAP, HAT),
         leads=(SUPERSAW, SUPERSAW, SAW_LEAD, GLOCK),
-        extras=(OPEN_HAT, SNARE, PAD, SAMPLE),
+        extras=(OPEN_HAT, SNARE, PAD, SAMPLE, REESE, CRASH),
         hats="sparse in some sections and rapid in others; triplet or 32nd rolls only at the end "
         "of a 2- or 4-bar phrase, velocity ramping up",
         bass="a distorted, clipped 808 that follows the chords and glides; a clean sub under a "
@@ -490,8 +524,8 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 54.0),
         sounds=(KICK, BASS, CLAP, HAT),
-        leads=(FM_BELL, FM_KEYS, VIBES, GLOCK, MARIMBA, SAW_LEAD),
-        extras=(PAD, KEYS, SAMPLE, SNARE),
+        leads=(FM_BELL, FM_KEYS, VIBES, GLOCK, MARIMBA, SAW_LEAD, FM_GLASS, FLUTE),
+        extras=(PAD, KEYS, SAMPLE, SNARE, CRASH, SNAP),
         hats="restrained hats, few rolls; a couple of snares as a counter-rhythm",
         bass="a melodic 808 that follows the keys and rings out; foldback grit optional",
         kick="sparse kicks, clap on beat 3, beat skips",
@@ -510,8 +544,8 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 54.0),
         sounds=(KICK, BASS, CLAP, OPEN_HAT),
-        leads=(EPIANO, FM_KEYS, HARP, VIBES, PLUCK, STRINGS),
-        extras=(PAD, HAT, SNARE, SAMPLE),
+        leads=(EPIANO, FM_KEYS, HARP, VIBES, PLUCK, STRINGS, FLUTE, VOX_LEAD),
+        extras=(PAD, HAT, SNARE, SAMPLE, SHAKER, SNAP),
         hats="open hats on eighths with 16th and 32nd rolls, no closed hat; a snare with rolls",
         bass="a clean 808 with octave jumps: the root on chords 1 and 3, the third on 2 and 4",
         kick="a bouncy four-bar kick groove; clap on beat 3",
@@ -530,8 +564,8 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 54.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        leads=(PIANO, PIZZ, CELLO_PIZZ, STRINGS, PLUCK, FM_BELL),
-        extras=(RIM, OPEN_HAT, PAD, CLAP, SAMPLE),
+        leads=(PIANO, PIZZ, CELLO_PIZZ, STRINGS, PLUCK, FM_BELL, VOX_LEAD, FLUTE),
+        extras=(RIM, OPEN_HAT, PAD, CLAP, SAMPLE, TOM, SHAKER, CRASH, REESE),
         hats="the 16th grid 'x..x..x.' (two spaces, two spaces, one) with a ghost hat, holes "
         "and short bursts; a 32nd roll into beat 4",
         bass="sliding 808: plain roots for three bars, slides in the fourth, to the root, fifth "
@@ -553,8 +587,8 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 54.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        leads=(PIANO, STRINGS, SAW_LEAD, PIZZ, FM_BELL),
-        extras=(SAMPLE, PAD, OPEN_HAT, CLAP),
+        leads=(PIANO, STRINGS, SAW_LEAD, PIZZ, FM_BELL, FLUTE, FM_BRASS),
+        extras=(SAMPLE, PAD, OPEN_HAT, CLAP, TOM, CRASH),
         hats="a bouncy pattern with holes, triplet rolls with velocity changes, sparse open hats",
         bass="sliding 808 that answers the melody, a slide on every 4th or 8th note, short decay",
         kick="the drill two-bar pocket with more kicks after the snare; a kick just before an 808 "
@@ -574,8 +608,8 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 55.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        leads=(BRASS, FM_BELL, TUBULAR, PIANO),
-        extras=(OPEN_HAT, CLAP, PAD, RIM),
+        leads=(BRASS, FM_BRASS, FM_BELL, TUBULAR, PIANO, VOX_LEAD),
+        extras=(OPEN_HAT, CLAP, PAD, RIM, CRASH, TOM),
         hats="skippy triplet hats with deleted hits and bursts at phrase ends; open hats rare",
         bass="a heavy 808 with less sliding than UK drill, harmonics kept audible",
         kick="sparse syncopated kicks; snare on beat 3 with busy snare fills",
@@ -595,7 +629,7 @@ GENRES: dict[str, Genre] = {
         swing=(50.0, 52.0),
         sounds=(KICK, BASS, SNARE, HAT),
         leads=(SAW_LEAD, PLUCK, FM_KEYS, MARIMBA),
-        extras=(SAMPLE, OPEN_HAT, PAD, CLAP),
+        extras=(SAMPLE, OPEN_HAT, PAD, CLAP, CRASH, SNAP, BLOCK),
         hats="closed hats on beats 2 and 4 only; busy hats turn it to mud",
         bass="the 808 doubles the kick rhythm on a held pitch",
         kick="five kicks a bar on steps 0, 4, 8, 11, 14, the 4th and 5th nudged and softer; "
@@ -616,8 +650,8 @@ GENRES: dict[str, Genre] = {
         half_time=False,
         swing=(54.0, 60.0),
         sounds=(KICK, BASS, SNARE, HAT, COWBELL),
-        leads=(FM_BELL, PIANO, STRINGS, TUBULAR),
-        extras=(OPEN_HAT, RIM, CLAP, PAD, SAMPLE),
+        leads=(FM_BELL, PIANO, STRINGS, TUBULAR, VOX_LEAD, FM_BRASS),
+        extras=(OPEN_HAT, RIM, CLAP, PAD, SAMPLE, CHOIR),
         hats="simple swung eighths, one open hat accent, a 32nd or triplet burst into the snare",
         bass="an 808 note right after most kicks, mostly the root, octave glides, distorted",
         kick="kick on step 0 with one or two syncopated hits; snare on 2 and 4, the clap a few ms "
@@ -638,8 +672,8 @@ GENRES: dict[str, Genre] = {
         half_time=True,
         swing=(50.0, 52.0),
         sounds=(KICK, BASS, CLAP, HAT, COWBELL),
-        leads=(SAW_LEAD, STRINGS, PIANO, FM_BELL),
-        extras=(OPEN_HAT, SNARE, PAD, SAMPLE),
+        leads=(SAW_LEAD, STRINGS, PIANO, FM_BELL, VOX_LEAD),
+        extras=(OPEN_HAT, SNARE, PAD, SAMPLE, REESE, CHOIR),
         hats="the cowbell carries the melody: a 2-4 note motif on eighths or sixteenths (its "
         "pitch lane), the last note an octave up; hats on straight eighths with 16th, 32nd or "
         "triplet bursts at the end of a four-bar phrase",
@@ -662,8 +696,8 @@ GENRES: dict[str, Genre] = {
         half_time=False,
         swing=(50.0, 56.0),
         sounds=(KICK, BASS, SNARE, HAT, PAD),
-        leads=(STRINGS, PIANO, HARP, FM_KEYS, VIBES, GLOCK),
-        extras=(SAMPLE, RIM, OPEN_HAT),
+        leads=(STRINGS, PIANO, HARP, FM_KEYS, VIBES, GLOCK, FLUTE, VOX_LEAD, FM_GLASS),
+        extras=(SAMPLE, RIM, OPEN_HAT, CHOIR, SHAKER),
         hats="simple soft eighths with an occasional roll or triplet",
         bass="a soft 808 or sine sub, understated",
         kick="a soft deep kick, snare or clap on 2 and 4",
@@ -682,8 +716,8 @@ GENRES: dict[str, Genre] = {
         half_time=False,
         swing=(54.0, 62.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        leads=(EPIANO, PIANO, FM_KEYS, VIBES, HARP, PLUCK),
-        extras=(SAMPLE, RIM, PAD),
+        leads=(EPIANO, PIANO, FM_KEYS, VIBES, HARP, PLUCK, FLUTE),
+        extras=(SAMPLE, RIM, PAD, SHAKER, SNAP),
         hats="swung eighths alternating soft and medium (about 0.4 and 0.7)",
         bass="a soft round bass in C1..G2, an octave jump every 4 bars",
         kick="kick on 1 and 3 with a ghost kick on the 'and' of 4; snare (or rim) on 2 and 4",
@@ -702,8 +736,8 @@ GENRES: dict[str, Genre] = {
         half_time=False,
         swing=(54.0, 64.0),
         sounds=(KICK, BASS, SNARE, HAT),
-        leads=(PIANO, EPIANO, VIBES, CELLO_PIZZ, HARP, FM_KEYS),
-        extras=(SAMPLE, RIM, OPEN_HAT),
+        leads=(PIANO, EPIANO, VIBES, CELLO_PIZZ, HARP, FM_KEYS, FLUTE, FM_BRASS),
+        extras=(SAMPLE, RIM, OPEN_HAT, SHAKER, BLOCK),
         hats="straight eighths with swing, an open hat on the 'and' of 2 or 4",
         bass="a short bass right after the kick in C1..C2, no glide",
         kick="kicks on beat 1, the 'and' of 2, sometimes beat 3, a ghost on the 'and' of 4; "
