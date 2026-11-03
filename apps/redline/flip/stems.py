@@ -90,7 +90,7 @@ def separate_named(
 ) -> dict[str, Samples]:
     """Return the named stems from the cache, or run the separator and cache them atomically."""
     folder = cache_dir / "named-stems" / cache_key(samples, rate, separator.id)
-    cached = _cached(folder, separator.names, samples.shape)
+    cached = _cached(folder, separator.names, samples.shape, rate)
     if cached is not None:
         log.info("stems from cache: %s", folder.name[:12])
         return cached
@@ -112,14 +112,14 @@ def separate_named(
 
 
 def _cached(
-    folder: Path, names: tuple[str, ...], shape: tuple[int, ...]
+    folder: Path, names: tuple[str, ...], shape: tuple[int, ...], rate: int
 ) -> dict[str, Samples] | None:
     if not folder.is_dir():
         return None
     try:
         if not _complete(folder, names):
             raise FileNotFoundError(folder)
-        stems = {name: _read(folder / f"{name}.wav") for name in names}
+        stems = {name: _read(folder / f"{name}.wav", rate) for name in names}
     except (OSError, sf.LibsndfileError) as error:
         log.warning("cached stems unreadable (%s); separating again", error)
     else:
@@ -162,8 +162,12 @@ def _complete(folder: Path, names: tuple[str, ...]) -> bool:
     return all((folder / f"{name}.wav").is_file() for name in names)
 
 
-def _read(path: Path) -> Samples:
-    data, _ = sf.read(path, always_2d=True, dtype="float32")
+def _read(path: Path, rate: int) -> Samples:
+    """A stem at the input's rate: the model writes at its own."""
+    data, written = sf.read(path, always_2d=True, dtype="float32")
+    if written != rate:
+        g = math.gcd(int(written), int(rate))
+        data = resample_poly(data, rate // g, int(written) // g, axis=0)
     return np.asarray(data, dtype=np.float32)
 
 
@@ -272,7 +276,7 @@ class _ModelSeparator:
                         f"separation failed on the GPU ({error}) and on the CPU ({cpu_error})"
                     ) from cpu_error
             try:
-                return {name: _fit(_read(paths[name]), len(samples)) for name in self.names}
+                return {name: _fit(_read(paths[name], rate), len(samples)) for name in self.names}
             except (sf.LibsndfileError, KeyError) as error:
                 raise SeparationError(f"the model wrote no readable stems: {error}") from error
 

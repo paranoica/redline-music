@@ -3,6 +3,7 @@
 import hashlib
 import importlib
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ from typing import Any, Protocol
 import numpy as np
 import numpy.typing as npt
 import soundfile as sf
+from scipy.signal import resample_poly
 
 from redline.core.audio import Audio
 from redline.measure.fingerprint import fingerprint, library_versions, module_sources
@@ -81,7 +83,10 @@ def separate(audio: Audio, separator: Separator, cache_dir: Path) -> Stems:
     if _complete(folder):
         try:
             cached = Stems(
-                _read(folder / "vocal.wav"), _read(folder / "beat.wav"), audio.rate, True
+                _read(folder / "vocal.wav", audio.rate),
+                _read(folder / "beat.wav", audio.rate),
+                audio.rate,
+                True,
             )
         except sf.LibsndfileError as error:
             log.warning("cached stems unreadable (%s); separating again", error)
@@ -119,8 +124,12 @@ def _complete(folder: Path) -> bool:
     return (folder / "vocal.wav").is_file() and (folder / "beat.wav").is_file()
 
 
-def _read(path: Path) -> Samples:
-    data, _ = sf.read(path, always_2d=True, dtype="float32")
+def _read(path: Path, rate: int) -> Samples:
+    """A stem at the input's rate: the model writes at its own."""
+    data, written = sf.read(path, always_2d=True, dtype="float32")
+    if written != rate:
+        g = math.gcd(int(written), int(rate))
+        data = resample_poly(data, rate // g, int(written) // g, axis=0)
     return np.asarray(data, dtype=np.float32)
 
 
@@ -190,7 +199,7 @@ class RoformerSeparator:
                         f"separation failed on the GPU ({error}) and on the CPU ({cpu_error})"
                     ) from cpu_error
             try:
-                vocal, beat = _read(vocal_path), _read(beat_path)
+                vocal, beat = _read(vocal_path, rate), _read(beat_path, rate)
             except sf.LibsndfileError as error:
                 raise SeparationError(f"the model wrote no readable stems: {error}") from error
             return _fit(vocal, len(samples)), _fit(beat, len(samples))

@@ -345,6 +345,26 @@ def test_model_writing_no_stems_is_a_clear_error(tmp_path):
         separate(audio(), separator, tmp_path)
 
 
+def test_stems_the_model_writes_at_its_own_rate_come_back_at_the_inputs():
+    from scipy.signal import resample_poly
+
+    def at_44k(source: Path, out: Path) -> tuple[Path, Path]:
+        data, rate = sf.read(source, always_2d=True, dtype="float32")
+        model = resample_poly(data, 44100, rate, axis=0).astype(np.float32)
+        for name in ("vocal", "beat"):
+            sf.write(out / f"{name}.wav", model, 44100, subtype="FLOAT")
+        return out / "vocal.wav", out / "beat.wav"
+
+    rate = 48000
+    t = np.arange(rate) / rate
+    tone = np.sin(2 * np.pi * 1000 * t).astype(np.float32)
+    samples = np.stack([tone, tone], axis=1)
+    vocal, _ = RoformerSeparator(run=at_44k, run_on_cpu=at_44k)(samples, rate)
+    assert vocal.shape == samples.shape
+    spectrum = np.abs(np.fft.rfft(vocal[:, 0]))
+    assert abs(np.argmax(spectrum) * rate / len(vocal) - 1000) < 5
+
+
 def test_a_cache_entry_left_half_written_is_replaced(tmp_path):
     clip = audio()
     fake = FakeSeparator()

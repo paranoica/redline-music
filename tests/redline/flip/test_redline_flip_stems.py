@@ -296,6 +296,30 @@ def test_model_output_is_fitted_to_the_input_length(tmp_path):
     assert set(out) == set(DRUM_STEMS)
 
 
+def test_stems_the_model_writes_at_its_own_rate_come_back_at_the_inputs(tmp_path):
+    from scipy.signal import resample_poly
+
+    def at_44k(source: Path, out: Path) -> dict[str, Path]:
+        data, rate = sf.read(source, always_2d=True, dtype="float32")
+        model = resample_poly(data, 44100, rate, axis=0).astype(np.float32)
+        for name in DRUM_STEMS:
+            sf.write(out / f"{name}.wav", model, 44100, subtype="FLOAT")
+        return {name: out / f"{name}.wav" for name in DRUM_STEMS}
+
+    rate = 48000
+    t = np.arange(rate) / rate
+    click = np.zeros(rate, dtype=np.float32)
+    click[rate // 2] = 1.0
+    samples = np.stack([np.sin(2 * np.pi * 1000 * t).astype(np.float32), click], axis=1)
+    separator = DrumSep(run=at_44k, run_on_cpu=write_stems((), []))
+    kick = separate_named(samples, rate, separator, tmp_path)["kick"]
+    assert kick.shape == samples.shape
+    spectrum = np.abs(np.fft.rfft(kick[:, 0]))
+    assert abs(np.argmax(spectrum) * rate / len(kick) - 1000) < 5
+    # a click half way in stays half way in, not 8.8 % early
+    assert abs(int(np.argmax(np.abs(kick[:, 1]))) - rate // 2) < 10
+
+
 def test_gpu_failure_falls_back_to_the_cpu(tmp_path):
     def fail(source, out):
         raise RuntimeError("CUDA out of memory")
