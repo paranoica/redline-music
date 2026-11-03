@@ -32,6 +32,13 @@ export function warningText(w: WarningLike): string {
       m = /^the same sounds \((.*)\) play for (\d+) bars/.exec(w.message);
       if (m) return `одни и те же звуки (${m[1]}) ${m[2]} тактов подряд — вводи или убирай звук хотя бы раз в 8 тактов`;
       break;
+    case "flat_sections":
+      m = /^the verse plays the hook's drum pattern (.+); give the verse/.exec(w.message);
+      if (m) return `куплет играет паттерн ударных хука (${m[1]}) — дай куплету свою бочку и хэты`;
+      if (/^the hook has no melodic part of its own/.test(w.message)) {
+        return "у хука нет своей мелодической партии — добавь фигуру хука, контрмелодию или слой октавой выше, которых нет в куплете";
+      }
+      break;
     case "busy_808":
       m = /^([\d.]+) 808 notes start a bar \(median\); keep 1 to (\d+)/.exec(w.message);
       if (m) return `808: ${m[1]} нот за такт — оставь 1–${m[2]} длинные`;
@@ -60,6 +67,7 @@ export function whereText(where: string): string {
   if (m) return `такты ${m[1]}`;
   m = /^sections\[\d+\] \((.*)\)$/.exec(where);
   if (m) return `секция «${m[1]}»`;
+  if (where === "hook and verse") return "хук и куплет";
   return where;
 }
 

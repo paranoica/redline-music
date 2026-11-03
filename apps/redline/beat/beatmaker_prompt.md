@@ -119,6 +119,28 @@ run past the pattern's end (`step + len` ≤ 16 × `bars`). At most 512 notes a 
   ghost notes keep hats from sounding stiff.
 - Write the melody in the key; let it leave space for a vocal in the verses.
 
+## Sections you can hear
+
+A beat with no vocal on it has to say where the hook and the verse are by itself. Two sections
+that play the same drums and the same melody sound like one long wave.
+
+- The hook is the peak. It has a melodic part the verse lacks (a hook figure, a counter-melody,
+  an octave layer or a second sound), the fullest drums (the busiest hats, an open hat or a
+  percussion line), and the 808 at its most active. Its first downbeat lands hard: a crash, an
+  impact if the recipe has one, an 808 note.
+- The verse leaves room for the voice. It plays its own drum pattern, not the hook's: another
+  kick pattern, sparser hats. The melody is stripped (the bed or the chords alone, a filtered
+  copy, an octave down), the 808 simpler.
+- A bridge or a beat switch breaks the loop: the drums out or a new pattern, the 808 out or a
+  new line, a new chord colour or the melody alone.
+- The entry into a hook is an event: a riser that ends on its downbeat (start it as many steps
+  before as the riser lasts), or a stop where everything but the melody leaves for the last beat
+  or two before it. Not a snare-roll fill.
+- Intro and outro are thinner than anything else: the melody alone or filtered, the drums
+  teased or left out.
+- A verse on the hook's drum pattern, or a hook with no melodic part of its own, comes back as
+  a warning.
+
 ## A compact example
 
 It shows the parts, not a whole song: a real score follows the recipe's structure.
@@ -145,6 +167,11 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
    "hat": "x.x.x.x.x.x.x.3.|x.x.x.x.x.x.x.3.",
    "open_hat": "......x.........|......x........."
   }},
+  "verse_drums": {"bars": 2, "rows": {
+   "kick": "x...........x...|....x...........",
+   "snare": "........X.......|........X.......",
+   "hat": "x.x.x.x.x...x.x.|x.x.x.x.x...x.3."
+  }},
   "low": {"bars": 2, "rows": {"bass": [
    {"step": 0, "len": 10, "note": "A1", "vel": 0.9},
    {"step": 10, "len": 2, "note": "A1", "vel": 0.8},
@@ -165,8 +192,8 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
  "sections": [
   {"name": "intro", "bars": 4, "play": ["melody"]},
   {"name": "hook", "bars": 8, "play": ["drums", "low", "melody"]},
-  {"name": "verse", "bars": 4, "play": ["drums"], "mute": ["open_hat"]},
-  {"name": "verse", "bars": 4, "play": ["drums", "low"], "mute": ["open_hat"]}
+  {"name": "verse", "bars": 4, "play": ["verse_drums"]},
+  {"name": "verse", "bars": 4, "play": ["verse_drums", "low"]}
  ],
  "mix": {
   "sounds": {
@@ -181,8 +208,9 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
 }
 ```
 
-The verse opens with four bars of drums alone and the 808 comes back for its second half: a
-drop of a whole block, with no fill before it. The low end runs over two
+The verse plays its own sparser drums and no bell, so the hook (full drums, the bell's figure)
+stands out; it opens with four bars of drums alone and the 808 comes back for its second half:
+a drop of a whole block, with no fill before it. The low end runs over two
 bars: the first lands on step 0 and answers on steps 10 and 12, the second comes in late on
 step 4 (step 20 of the pattern). The 808 starts with the kicks, mostly on one pitch; the note
 at step 20 overlaps the next (20 + 7 > 26), so it glides a step down from G1 to F1 between

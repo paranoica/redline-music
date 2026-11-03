@@ -355,6 +355,73 @@ def _busy_808(table: _Table, recipe: Recipe) -> list[Caution]:
     return out
 
 
+def _flat_sections(body: dict[str, Any], table: _Table) -> list[Caution]:
+    """A verse on a hook's drum pattern, or a hook with no melodic part a verse lacks."""
+    sounds = {n: table.instruments[i] for i, n in enumerate(table.names)}
+    patterns = _dict(body.get("patterns"))
+
+    def rows(name: str) -> dict[str, Any]:
+        return _dict(_dict(patterns.get(name)).get("rows"))
+
+    def sections(kind: str) -> list[tuple[set[str], set[str]]]:
+        out = []
+        for section in body["sections"]:
+            if str(section.get("name", "")).lower().startswith(kind):
+                play = {p for p in section.get("play", []) if isinstance(p, str)}
+                mute = {m for m in section.get("mute", []) if isinstance(m, str)}
+                out.append((play, mute))
+        return out
+
+    def hits(row: Any) -> bool:
+        steps = row.get("steps") if isinstance(row, dict) else row
+        return isinstance(steps, str) and any(c not in ".|" for c in steps)
+
+    hooks, verses = sections("hook"), sections("verse")
+    if not hooks or not verses:
+        return []
+    out = []
+    drums = sorted(
+        {
+            p
+            for play, _ in hooks
+            for verse, muted in verses
+            for p in play & verse
+            if any(
+                sounds.get(r) in ("kick", *HATS) and r not in muted and hits(v)
+                for r, v in rows(p).items()
+            )
+        }
+    )
+    if drums:
+        out.append(
+            Caution(
+                "flat_sections",
+                "hook and verse",
+                f"the verse plays the hook's drum pattern {', '.join(drums)}; give the verse its "
+                "own kick and hat patterns",
+                OWN,
+            )
+        )
+    in_verses = {p for play, _ in verses for p in play}
+    own = any(
+        isinstance(v, list) and v and sounds.get(r) not in BASSES and r not in muted
+        for play, muted in hooks
+        for p in play - in_verses
+        for r, v in rows(p).items()
+    )
+    if not own:
+        out.append(
+            Caution(
+                "flat_sections",
+                "hook and verse",
+                "the hook has no melodic part of its own: add a hook figure, a counter-melody or "
+                "an octave layer that the verse lacks",
+                OWN,
+            )
+        )
+    return out
+
+
 def check_score(
     score_json: str,
     recipe: Recipe,
@@ -391,5 +458,11 @@ def check_score(
     table = _Table(score_json, body, catalog)
     return Checked(
         tuple(errors),
-        (*_density(table, recipe), *_repeats(table), *_off_kick(table), *_busy_808(table, recipe)),
+        (
+            *_density(table, recipe),
+            *_repeats(table),
+            *_off_kick(table),
+            *_busy_808(table, recipe),
+            *_flat_sections(body, table),
+        ),
     )

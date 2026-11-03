@@ -563,6 +563,14 @@ test("the check's warnings read in Russian; what the page does not know stays as
     "808: 5 нот за такт — оставь 1–3 длинные",
   );
   assert.equal(sourceText("measured on the owner's tracks"), "источник: замер твоих референсов");
+  assert.equal(
+    warningText({ kind: "flat_sections", where: "hook and verse", message: "the verse plays the hook's drum pattern drums_a, drums_b; give the verse its own kick and hat patterns", source: "own choice" }),
+    "куплет играет паттерн ударных хука (drums_a, drums_b) — дай куплету свою бочку и хэты",
+  );
+  assert.equal(
+    warningText({ kind: "flat_sections", where: "hook and verse", message: "the hook has no melodic part of its own: add a hook figure, a counter-melody or an octave layer that the verse lacks", source: "own choice" }),
+    "у хука нет своей мелодической партии — добавь фигуру хука, контрмелодию или слой октавой выше, которых нет в куплете",
+  );
   // a known kind with a message of another shape, and an unknown kind, come through as sent
   assert.equal(warningText({ kind: "repeat", where: "", message: "something new", source: "" }), "something new");
   assert.equal(warningText({ kind: "novel", where: "", message: "a new check", source: "" }), "a new check");

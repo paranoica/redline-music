@@ -10,6 +10,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
+from pathlib import PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -906,7 +907,7 @@ def make_recipe(
     sounds = _with_lead(_styled(sounds, style), lead, len(spec.sounds))
     kit = ""
     if pack:
-        sounds = _from_pack(rng, sounds, pack, name)
+        sounds = _from_pack(rng, sounds, pack, name) + _transitions(rng, pack)
         kit = "pack" if any(library.is_pack(s.library or "") for s in sounds) else ""
     return Recipe(
         seed=seed,
@@ -942,6 +943,13 @@ PACK_FOR = {
     "cowbell": ("perc",),
     "crash": ("crash",),
     "bass808": ("808",),
+}
+
+
+# pack fx a recipe takes for its section changes, by the words of the file and its longest length
+TRANSITIONS = {
+    "riser": (re.compile(r"riser|uplift|build[ _-]?up|sweep[ _-]?up"), 8.0),
+    "impact": (re.compile(r"impact|downfilter|downlift|\bstomp\b"), 4.0),
 }
 
 
@@ -988,6 +996,23 @@ def _from_pack(
         chosen = (named or pool)[draw % len(named or pool)]
         instrument = PACK_INSTRUMENT.get(chosen.category, "oneshot")
         out.append(Sound(sound.name, instrument, (), f"{library.PACK_PREFIX}{chosen.id}"))
+    return tuple(out)
+
+
+def _transitions(rng: np.random.Generator, kit: dict[str, list[PackSound]]) -> tuple[Sound, ...]:
+    """A riser and an impact from the pack's fx, when it has them, to mark section changes."""
+    out = []
+    for name, (words, longest) in TRANSITIONS.items():
+        draw = int(rng.integers(1 << 30))
+        pool = [
+            s
+            for s in kit.get("fx", [])
+            if words.search(PurePosixPath(s.path).stem.lower()) and s.duration_s <= longest
+        ]
+        if pool:
+            out.append(
+                Sound(name, "oneshot", (), f"{library.PACK_PREFIX}{pool[draw % len(pool)].id}")
+            )
     return tuple(out)
 
 

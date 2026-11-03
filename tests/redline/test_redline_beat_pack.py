@@ -400,6 +400,60 @@ def test_a_sound_whose_path_names_the_genre_is_drawn_first():
     assert len(others) > 1
 
 
+FX = [
+    dataclasses.replace(entry("FX/Riser 01.wav", "fx"), duration_s=3.0),
+    dataclasses.replace(entry("FX/Impact Low.wav", "fx"), duration_s=1.5),
+    dataclasses.replace(entry("FX/Riser Endless.wav", "fx"), duration_s=20.0),
+    dataclasses.replace(entry("FX/Tape Noise.wav", "fx"), duration_s=2.0),
+]
+
+
+def test_a_pack_with_risers_and_impacts_gives_the_recipe_its_transitions():
+    from redline.beat.recipe import make_recipe, pack_kit
+
+    with_fx = {s.name: s for s in make_recipe(5, genre="trap", pack=pack_kit(KIT + FX)).sounds}
+    assert with_fx["riser"].library == f"pack-{FX[0].id}"
+    assert with_fx["impact"].library == f"pack-{FX[1].id}"
+    assert with_fx["riser"].instrument == with_fx["impact"].instrument == "oneshot"
+    plain = {s.name for s in make_recipe(5, genre="trap", pack=pack_kit(KIT)).sounds}
+    assert not plain & {"riser", "impact"}
+    # the rest of the recipe is the same draw with or without the pack's fx
+    assert {k: v for k, v in with_fx.items() if k not in ("riser", "impact")} == {
+        s.name: s for s in make_recipe(5, genre="trap", pack=pack_kit(KIT)).sounds
+    }
+
+
+def test_a_transition_is_chosen_by_its_file_name_not_its_folders():
+    from redline.beat.recipe import make_recipe, pack_kit
+
+    traps = [
+        dataclasses.replace(
+            entry("FX/Risers & Downlifters/Downlifter 02.wav", "fx"), duration_s=3.0
+        ),
+        dataclasses.replace(entry("Boom Bap Kit/FX/Vinyl Crackle.wav", "fx"), duration_s=2.0),
+        dataclasses.replace(entry("Impact Sounds/FX/Tape Stop.wav", "fx"), duration_s=1.0),
+    ]
+    sounds = {s.name: s for s in make_recipe(5, genre="trap", pack=pack_kit(KIT + traps)).sounds}
+    assert "riser" not in sounds
+    assert sounds["impact"].library == f"pack-{traps[0].id}"
+    build = [dataclasses.replace(entry("FX/Build_Up_01.wav", "fx"), duration_s=4.0)]
+    sounds = {s.name: s for s in make_recipe(5, genre="trap", pack=pack_kit(KIT + build)).sounds}
+    assert sounds["riser"].library == f"pack-{build[0].id}"
+
+
+def test_the_request_gives_a_transition_its_length_in_steps(tmp_path):
+    pytest.importorskip("redline_dsp")
+    from redline.beat import handoff
+    from redline.beat.recipe import make_recipe, pack_kit
+
+    catalog = tmp_path / "catalog.json"
+    write_catalog(catalog, KIT + FX)
+    recipe = make_recipe(5, genre="trap", bpm=140, pack=pack_kit(KIT + FX))
+    (line,) = [x for x in handoff._pack_lines(recipe, catalog) if x.startswith("  - riser:")]
+    # 3.0 s at 140 BPM is 28 sixteenths: start it 28 steps before the downbeat it leads into
+    assert "3.0 s = 28 steps" in line
+
+
 def write_catalog(path, sounds):
     import json
     from dataclasses import asdict

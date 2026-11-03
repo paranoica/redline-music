@@ -95,7 +95,10 @@ Warnings never refuse; they go into the next request and onto the page: hit dens
 the same bar repeated more than eight times, the same set of sounds for more than eight bars,
 an 808 off the kick (fewer than half the kicks that land on a playing 808 start a note within
 20 ms of it), a busy 808 (in the genres with the measured groove, more than three notes starting a bar in a
-section, unless the 808 style asks for many or short notes). Each says where its limit comes from: production blogs,
+section, unless the 808 style asks for many or short notes), flat sections (a verse on a hook's
+drum pattern, or a hook with no melodic part a verse lacks). With a pack kit the recipe also
+takes a riser and an impact from the pack's fx when it has them; the request gives each its
+length in steps, so a riser can end on the downbeat it leads into. Each says where its limit comes from: production blogs,
 unverified, or our own choice.
 
 Genres: trap, dark_trap, rage, plugg, pluggnb, uk_drill, ny_drill, chicago_drill, jersey_club,

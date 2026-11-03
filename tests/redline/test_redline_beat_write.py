@@ -634,6 +634,68 @@ def test_the_trap_family_gets_the_measured_groove_and_no_phrase_end_rolls(genre)
         assert not drawn & {"hat_rolls", "stop_before_hook", "ghost_snares"}
 
 
+def sectioned():
+    """A hook and a verse that differ the way the advice asks: no flat warning."""
+    body = score(bars=(8, 8))
+    rows = body["patterns"]["groove"]["rows"]
+    body["patterns"]["verse_drums"] = {
+        "bars": 8,
+        "rows": {**rows, "kick": "x...........x..." * 8, "hat": "x...x...x...x..." * 8},
+    }
+    body["sections"] = [
+        {"name": "hook", "bars": 8, "play": ["groove", "low", "melody"]},
+        {"name": "verse", "bars": 8, "play": ["verse_drums", "low"]},
+    ]
+    return body
+
+
+def flat(body):
+    return [w for w in warnings_of(body) if w.kind == "flat_sections"]
+
+
+def test_a_hook_and_a_verse_with_their_own_drums_and_a_hook_melody_are_not_flat():
+    assert flat(sectioned()) == []
+
+
+def test_a_verse_on_the_hooks_drum_pattern_is_flat():
+    body = sectioned()
+    body["sections"][1]["play"] = ["groove", "low"]
+    (warned,) = flat(body)
+    assert "groove" in warned.message and warned.source == "own choice"
+
+
+def test_a_verse_that_mutes_the_shared_kick_and_hats_or_has_none_is_not_flat():
+    body = sectioned()
+    body["sections"][1]["play"] = ["groove", "low"]
+    body["sections"][1]["mute"] = ["kick", "hat", "open_hat"]
+    assert flat(body) == []
+    body = sectioned()
+    body["patterns"]["groove"]["rows"]["kick"] = "." * 128
+    body["patterns"]["groove"]["rows"]["hat"] = "." * 128
+    body["patterns"]["groove"]["rows"]["open_hat"] = "." * 128
+    body["sections"][1]["play"] = ["groove", "low"]
+    assert flat(body) == []
+
+
+def test_a_muted_hook_melody_is_not_its_own_and_names_are_read_in_any_case():
+    body = sectioned()
+    body["sections"][0]["mute"] = ["bell"]
+    (warned,) = flat(body)
+    assert "melodic" in warned.message
+    body = sectioned()
+    body["sections"][0]["name"] = "Hook"
+    body["sections"][1]["name"] = "Verse"
+    body["sections"][1]["play"] = ["groove", "low"]
+    assert len(flat(body)) == 1
+
+
+def test_a_hook_with_no_melodic_part_of_its_own_is_flat():
+    body = sectioned()
+    body["sections"][1]["play"] = ["verse_drums", "low", "melody"]
+    (warned,) = flat(body)
+    assert "melodic" in warned.message
+
+
 def test_more_than_8_bars_with_the_same_sounds_is_a_warning():
     body = score(bars=(16,))
     body["patterns"]["groove"]["rows"]["open_hat"] = "." * 128
