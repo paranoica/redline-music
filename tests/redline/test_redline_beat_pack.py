@@ -572,6 +572,20 @@ def test_digits_glued_to_a_word_and_a_drum_machine_named_808(path, category):
     assert pack.category_by_name(path) == category
 
 
+def test_a_long_drum_stem_of_a_loop_kit_is_a_loop_and_a_short_hit_stays(tmp_path):
+    root = tmp_path / "sounds"
+    stem = put(root, "Drum Loops Kit 08/Kit_140_08_Kick.wav", tone(55, 8.0))
+    whole = put(root, "Drum Loops Kit 08/Kit_140_08_808_Full.wav", tone(49, 8.0))
+    hit = put(root, "Drum Loops Kit 08/Kick 1.wav", tone(55, 0.4))
+    long_kick = put(root, "Kicks/Long Kick.wav", tone(55, 6.0))
+    boom = put(root, "808s/Long Boom.wav", tone(49, 4.0))
+    assert pack.describe(root, stem).category == "loop"
+    assert pack.describe(root, whole).category == "loop"
+    assert pack.describe(root, hit).category == "kick"
+    assert pack.describe(root, long_kick).category == "loop"
+    assert pack.describe(root, boom).category == "808"
+
+
 def test_a_sound_sorted_by_its_folder_is_sorted_by_name(tmp_path):
     root = tmp_path / "sounds"
     path = put(root, "808s/Boom.wav", tone(49.0, 1.5))

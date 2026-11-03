@@ -176,7 +176,7 @@ place them in `work/sounds/<name>/` by hand. A render report lists any sound of 
 writes `work/sounds/pack/catalog.json`. A file's category comes from the words of its own name
 first, then of its folders (so `808 Kit/Kick 7.wav` is a kick), and from its sound when no word
 says it: low-heavy and short is a kick, low-heavy and long an 808, bright and short a closed hat,
-anything over 2.5 s with no word a loop. Digits glued to a word are split off (`kick01`). A folder
+anything over 2.5 s with no word a loop; a drum over 5 s, or a drum or 808 over 2.5 s in a loops folder, is a loop stem too. Digits glued to a word are split off (`kick01`). A folder
 makes its files 808s only when it is about 808s (`808s`, `808 Bass`, `Sub Bass`), not when `808`
 names the drum machine (`Cassette 808`). Drum machine codes (`BD`, `SD`, `CH`, `OH`) count only
 when no word of the path says anything. An 808 or melodic one-shot gets its MIDI root: a note in
