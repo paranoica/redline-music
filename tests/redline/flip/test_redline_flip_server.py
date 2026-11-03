@@ -142,7 +142,7 @@ def root(tmp_path, monkeypatch):
 
 def analysis_json(sha8):
     return {
-        "format": 1,
+        "format": pipeline.FORMAT,
         "source": "input/beats/x.wav",
         "sha8": sha8,
         "rate": STEM_RATE,

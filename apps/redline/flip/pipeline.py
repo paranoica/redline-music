@@ -52,7 +52,8 @@ from redline.song.model import SongError, relative_to_root, resolve_inside
 
 Samples = npt.NDArray[np.float32]
 
-FORMAT = 1
+# raised when the analysis of an existing source must be made again
+FORMAT = 2
 ANALYSIS = "analysis.json"
 STEMS_DIR = "stems48"
 SOURCE_STEMS = ("drums", "bass", "other", "vocals")
@@ -146,7 +147,10 @@ def read_analysis(folder: Path) -> dict[str, Any] | None:
         return None
     except (OSError, ValueError) as error:
         raise PipelineError(f"{ANALYSIS}: {error}") from None
-    if not isinstance(data, dict) or data.get("format") != FORMAT:
+    made = data.get("format") if isinstance(data, dict) else None
+    if isinstance(made, int) and not isinstance(made, bool) and 0 < made < FORMAT:
+        return None
+    if made != FORMAT:
         raise PipelineError(f"{ANALYSIS}: not an analysis this version reads")
     return data
 

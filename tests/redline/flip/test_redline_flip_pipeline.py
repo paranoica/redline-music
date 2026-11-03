@@ -651,6 +651,19 @@ def test_a_page_save_during_a_second_analysis_keeps_its_edit(tmp_path, monkeypat
     assert [b.label for b in model.load(folder / "draft.json").arrangement] == ["mine"]
 
 
+def test_an_analysis_made_from_stems_read_at_the_wrong_rate_counts_as_not_made(tmp_path):
+    root, path, fake, folder = fresh(tmp_path)
+    data = json.loads((folder / "analysis.json").read_text(encoding="utf-8"))
+    # format 1 analysed drum stems that came back 8.8 % fast
+    data["format"] = 1
+    (folder / "analysis.json").write_text(json.dumps(data))
+    assert pipeline.read_analysis(folder) is None
+    data["format"] = pipeline.FORMAT + 1
+    (folder / "analysis.json").write_text(json.dumps(data))
+    with pytest.raises(pipeline.PipelineError):
+        pipeline.read_analysis(folder)
+
+
 def test_a_broken_old_analysis_does_not_stop_a_new_one(tmp_path):
     root, path, fake, folder = fresh(tmp_path)
     old = json.loads((folder / "analysis.json").read_text(encoding="utf-8"))
