@@ -22,7 +22,7 @@ PACK = Path("input/sounds")
 CATALOG = Path("work/sounds/pack/catalog.json")
 FORMAT = 1
 # raised whenever the sorting changes, so a rescan sorts every file again
-SORTING = 3
+SORTING = 4
 # hits a kit plays once per step, whose files are short; a cymbal's tail may run long
 DRUMS = ("kick", "snare", "clap", "hat_closed", "perc")
 LOOPS_FOLDER = re.compile(r"\bloops?\b")
