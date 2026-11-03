@@ -586,6 +586,19 @@ def test_a_long_drum_stem_of_a_loop_kit_is_a_loop_and_a_short_hit_stays(tmp_path
     assert pack.describe(root, boom).category == "808"
 
 
+def test_a_long_one_shot_under_a_loops_or_tempo_folder_and_a_long_cymbal_stay_hits(tmp_path):
+    root = tmp_path / "sounds"
+    for relative, seconds, category in (
+        ("Trap Kit 140 BPM/808s/808 Boom.wav", 2.6, "808"),
+        ("Pack - Loops & One Shots/One Shots/808s/808 Long.wav", 3.0, "808"),
+        ("Pack - Loops & One Shots/One Shots/Kicks/Kick Long.wav", 2.8, "kick"),
+        ("Kit/Crashes/Crash 3.wav", 5.5, "crash"),
+        ("Kit/Open Hats/Open Hat Long.wav", 5.5, "hat_open"),
+    ):
+        path = put(root, relative, tone(55 if category != "crash" else 3000, seconds))
+        assert pack.describe(root, path).category == category, relative
+
+
 def test_a_sound_sorted_by_its_folder_is_sorted_by_name(tmp_path):
     root = tmp_path / "sounds"
     path = put(root, "808s/Boom.wav", tone(49.0, 1.5))

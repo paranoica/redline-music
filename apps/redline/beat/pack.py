@@ -23,8 +23,10 @@ CATALOG = Path("work/sounds/pack/catalog.json")
 FORMAT = 1
 # raised whenever the sorting changes, so a rescan sorts every file again
 SORTING = 3
-# the categories of hits a kit plays once per step
-DRUMS = ("kick", "snare", "clap", "hat_closed", "hat_open", "crash", "perc")
+# hits a kit plays once per step, whose files are short; a cymbal's tail may run long
+DRUMS = ("kick", "snare", "clap", "hat_closed", "perc")
+LOOPS_FOLDER = re.compile(r"\bloops?\b")
+ONE_SHOTS = re.compile(r"\bone ?shots?\b")
 AUDIO = (".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3")
 PREFIX = "pack-"
 # a sound longer than this with no word for it is taken for a loop
@@ -304,9 +306,9 @@ def category_by_sound(x: np.ndarray, rate: int, duration_s: float) -> str:
 
 
 def _in_loops(relative: str) -> bool:
-    """A folder of the path says loops: its long files are stems of a loop, not hits."""
-    loop = dict(WORDS)["loop"]
-    return any(loop.search(_words(part)) for part in Path(relative).parent.parts)
+    """The file's own folder holds loops, so its long files are stems of a loop, not hits."""
+    words = _words(Path(relative).parent.name)
+    return bool(LOOPS_FOLDER.search(words)) and not ONE_SHOTS.search(words)
 
 
 def describe(root: Path, path: Path) -> PackSound:
@@ -320,7 +322,11 @@ def describe(root: Path, path: Path) -> PackSound:
     if (
         (category not in ("loop", "fx") and long and named is None)
         or (category in DRUMS and long)
-        or (category in (*DRUMS, "808") and duration > ONESHOT_MAX_S and _in_loops(relative))
+        or (
+            category in (*DRUMS, "hat_open", "crash", "808")
+            and duration > ONESHOT_MAX_S
+            and _in_loops(relative)
+        )
     ):
         category = "loop"
     note = None
