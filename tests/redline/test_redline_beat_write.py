@@ -338,8 +338,10 @@ def test_the_ethereal_plugg_beat_plays_a_legato_808_under_a_sustained_lead():
 
 def test_the_ethereal_plugg_beat_draws_no_move_its_measured_shape_forbids():
     # fills, gaps in the hook, call and answer phrases and a second hook melody all go
-    # against one full hook over one sustained layer
+    # against one full hook over one sustained layer; a pickup kick lands in the kickless
+    # verse or takes the intro under its one kick a bar
     forbidden = {
+        "kick_pickup",
         "loop_endings",
         "silent_beat",
         "counter_melody",
