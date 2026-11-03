@@ -8,15 +8,17 @@ limit comes from.
 import json
 import re
 from bisect import bisect_left
+from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import redline_dsp
 
 from redline.beat import library, pack
-from redline.beat.recipe import BLOG, LETTERS, OWN, Recipe, parse_key, scale
+from redline.beat.recipe import BLOG, GENRES, LETTERS, MEASURED, OWN, Recipe, parse_key, scale
 
 RATE = 48000.0
 BPM_SLACK = 0.5
@@ -27,6 +29,10 @@ ON_KICK_S = 0.020
 ON_KICK_SHARE = 0.5
 # the 808s: synthesised and recorded
 BASSES = ("bass808", "sample808")
+# more 808 notes starting a bar than this is busier than the owner's references
+MAX_808_A_BAR = 3
+# 808 styles that ask for many or short notes, which may be busy
+BUSY_STYLES = ("lead_808", "constant_glide", "kick_double", "staccato_slides", "octave_bounce")
 MAX_SAME = 8
 HATS = ("hat_closed", "hat_open", "oneshot_hat", "oneshot_open_hat")
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d{1,2})")
@@ -322,6 +328,33 @@ def _off_kick(table: _Table) -> list[Caution]:
     ]
 
 
+def _busy_808(table: _Table, recipe: Recipe) -> list[Caution]:
+    if not GENRES[recipe.genre].groove or recipe.bass_style in BUSY_STYLES:
+        return []
+    out = []
+    starts = [e for e in table.of(BASSES) if e["legato_from"] is None and e["roll"] == 0]
+    for i, (name, _) in enumerate(table.sections):
+        # a sub under a distorted layer is one 808: the busiest layer counts
+        layers = [
+            Counter(e["bar"] for e in starts if e["section"] == i and e["sound"] == sound)
+            for sound in {e["sound"] for e in starts if e["section"] == i}
+        ]
+        if not layers:
+            continue
+        median = max(float(np.median(list(per_bar.values()))) for per_bar in layers)
+        if median > MAX_808_A_BAR:
+            out.append(
+                Caution(
+                    "busy_808",
+                    f"sections[{i}] ({name})",
+                    f"{median:g} 808 notes start a bar (median); keep 1 to {MAX_808_A_BAR}, "
+                    "long ones",
+                    MEASURED,
+                )
+            )
+    return out
+
+
 def check_score(
     score_json: str,
     recipe: Recipe,
@@ -356,4 +389,7 @@ def check_score(
     if not rust_ok:
         return Checked(tuple(errors), ())
     table = _Table(score_json, body, catalog)
-    return Checked(tuple(errors), (*_density(table, recipe), *_repeats(table), *_off_kick(table)))
+    return Checked(
+        tuple(errors),
+        (*_density(table, recipe), *_repeats(table), *_off_kick(table), *_busy_808(table, recipe)),
+    )

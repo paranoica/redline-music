@@ -19,6 +19,15 @@ from redline.beat.pack import ZONE_MAX_S, PackSound
 
 BLOG = "blog, unverified"
 OWN = "own choice"
+# how the low end, the 808 and the hats move in the owner's reference tracks (half time)
+GROOVE = (
+    "the low end runs in two-bar cycles: the first bar hits step 0 and answers around steps 10 "
+    "to 14, the second skips step 0 and comes in late on step 4 (sometimes 2); the 808 plays one "
+    "or two long notes a bar (4 to 8 steps), mostly on even steps and mostly on the same pitch, "
+    "and often plays alone with no kick under it; the clap on step 8 and little else; "
+    "hats on eighths, about 9 to 13 hits a bar, with a triplet roll ('3') once or twice a bar on "
+    "the same steps in every bar; a straight grid, the triplets carry the feel"
+)
 MEASURED = "measured on the owner's tracks"
 # the score's limits, the same as Rust's
 BPM = (40.0, 220.0)
@@ -90,6 +99,7 @@ class Genre:
         source: Where the facts come from.
         invented: The fields set by own choice.
         feel: Where the backbeat sits, when neither half time nor 2 and 4 says it.
+        groove: How the parts move as measured on the owner's references, when they fit.
     """
 
     bpm: tuple[int, int]
@@ -111,6 +121,7 @@ class Genre:
     source: str
     invented: tuple[str, ...]
     feel: str = ""
+    groove: str = ""
 
 
 @dataclass(frozen=True)
@@ -122,7 +133,11 @@ class Device:
 
 
 DEVICES = {
-    "drop_808": Device("the 808 drops out for the last bar before each hook (use a fill)", BLOG),
+    "drop_808": Device(
+        "the 808 drops out for a whole 4- or 8-bar block (the intro, or the first half of a "
+        "section) while the drums or the melody play on; no fill",
+        MEASURED,
+    ),
     "hat_rolls": Device(
         "hat rolls (3, 4 or 6 hits in a step) at the end of each 4-bar phrase, not elsewhere",
         BLOG,
@@ -133,8 +148,9 @@ DEVICES = {
         BLOG,
     ),
     "glide_sparingly": Device(
-        "808 glides (overlapping notes) only at phrase ends; constant glide removes contrast",
-        BLOG,
+        "808 glides (overlapping notes) are rare: about one every 4 to 8 bars, mostly a step "
+        "down of 1 or 2 semitones; constant glide removes contrast",
+        MEASURED,
     ),
     "open_hat_offbeat": Device("one open hat on an off-beat a bar, choked by the next hat", BLOG),
     "ghost_snares": Device("ghost snares (g) in the verses, never in the hooks", OWN),
@@ -147,7 +163,9 @@ DEVICES = {
     ),
     "call_response": Device("the melody plays a phrase in one bar and answers it in the next", OWN),
     "mute_return": Device(
-        "the 808 and the hats are muted for one whole bar inside a section, then come back", BLOG
+        "the drums drop out for 4 to 8 bars inside a section while the 808 and the melody play "
+        "on, then come back",
+        MEASURED,
     ),
     "build_by_subtraction": Device(
         "the hook is the full loop; every other section is that loop with parts taken out", BLOG
@@ -238,8 +256,8 @@ BASS_STYLES = {
     "clean_long": (
         Device(
             "a clean long 808 (decay 2-4 s) ringing under the melody; glides only into accents, "
-            "one or two a bar at most",
-            BLOG,
+            "one every 4 to 8 bars",
+            MEASURED,
         ),
         (("decay", 3.0), ("drive", 0.15)),
     ),
@@ -402,7 +420,6 @@ LOFI = _parts(("intro", 4), ("a", 8), ("break", 4), ("b", 8), ("outro", 4))
 LOOP = _parts(("intro", 4), ("a", 8), ("b", 8), ("a", 8), ("b", 8), ("outro", 4))
 # the sections a move speaks of; a structure without one does not draw it
 NEEDS = {
-    "drop_808": ("hook",),
     "stop_before_hook": ("hook",),
     "thin_verse": ("verse", "hook"),
     "ghost_snares": ("verse", "hook"),
@@ -424,6 +441,10 @@ CLASHES = {
 ALL_DEVICES = tuple(DEVICES)
 NO_ROLLS = tuple(d for d in ALL_DEVICES if d not in ("hat_rolls", "glide_sparingly"))
 NO_SPARING_GLIDE = tuple(d for d in ALL_DEVICES if d != "glide_sparingly")
+# the measured groove has rolls on a fixed step, drops in whole blocks and little beside the clap
+GROOVE_DEVICES = tuple(
+    d for d in ALL_DEVICES if d not in ("hat_rolls", "stop_before_hook", "ghost_snares")
+)
 ALL_CHARACTER = tuple(CHARACTER)
 CALM_CHARACTER = tuple(
     c for c in ALL_CHARACTER if c not in ("triplet_hats", "pitched_rolls", "chopped_lead")
@@ -449,17 +470,18 @@ GENRES: dict[str, Genre] = {
             FM_GLASS,
         ),
         extras=(OPEN_HAT, CLAP, PAD, RIM, SAMPLE, CRASH, BLOCK),
-        hats="eighths or sixteenths; the last two hats of a phrase become a 32nd or triplet "
-        "roll with its middle hits softer; one open hat off the beat, choked",
-        bass="the 808 follows the melody's roots, mostly within an octave: a note on every "
-        "kick plus a few in the gaps",
-        kick="kick on step 0 and one or two syncopated hits (around steps 6, 10 or 14); snare "
-        "or clap on beat 3",
+        hats="eighths with a triplet roll on the same one or two steps of every bar, its middle "
+        "hits softer; one open hat off the beat, choked",
+        bass="the 808 follows the melody's roots, mostly within an octave: one or two long "
+        "notes a bar, starting with the kicks",
+        kick="kick on step 0 of a two-bar cycle and one or two syncopated hits (around steps 10 "
+        "to 14, and step 4 of the second bar); snare or clap on beat 3",
         modes=("minor", "harmonic_minor", "phrygian"),
         structures=(SONG, SHORT_INTRO, TRAP_BRIDGE),
         hats_per_bar=(8, 40),
         kicks_per_bar=(1, 6),
-        devices=ALL_DEVICES,
+        devices=GROOVE_DEVICES,
+        groove=GROOVE,
         bass_styles=("clean_long", "distorted", "constant_glide", "staccato_slides"),
         character=ALL_CHARACTER,
         source=BLOG,
@@ -483,8 +505,8 @@ GENRES: dict[str, Genre] = {
             FLUTE,
         ),
         extras=(PAD, OPEN_HAT, SNARE, RIM, SAMPLE, CHOIR, CRASH),
-        hats="eighths with the middle hats turned down, the last two of a phrase as a "
-        "32nd-triplet roll; hats drop out for the bar before a hook",
+        hats="eighths with the middle hats turned down and a triplet roll on the same step of "
+        "every bar",
         bass="a long 808 on the chord roots, grit above a clean sub; it slides down into the "
         "root at a phrase start",
         kick="sparse kicks; clap (or snare) on beat 3; keep the drums sparse so the space stays",
@@ -492,7 +514,8 @@ GENRES: dict[str, Genre] = {
         structures=(DARK, SONG),
         hats_per_bar=(6, 32),
         kicks_per_bar=(1, 4),
-        devices=ALL_DEVICES,
+        devices=GROOVE_DEVICES,
+        groove=GROOVE,
         bass_styles=("distorted", "clean_long", "lead_808"),
         character=ALL_CHARACTER,
         source=BLOG,
@@ -505,17 +528,18 @@ GENRES: dict[str, Genre] = {
         sounds=(KICK, BASS, CLAP, HAT),
         leads=(SUPERSAW, SUPERSAW, SAW_LEAD, GLOCK),
         extras=(OPEN_HAT, SNARE, PAD, SAMPLE, REESE, CRASH),
-        hats="sparse in some sections and rapid in others; triplet or 32nd rolls only at the end "
-        "of a 2- or 4-bar phrase, velocity ramping up",
+        hats="sparse in some sections and rapid in others; triplet rolls on the same step of "
+        "every bar, velocity ramping up",
         bass="a distorted, clipped 808 that follows the chords and glides; a clean sub under a "
         "distorted layer",
-        kick="kick on step 0 (a punchy layered kick), clap on beat 3; at least one beat a bar "
-        "where almost nothing sounds",
+        kick="a punchy layered kick on step 0 of a two-bar cycle, clap on beat 3; at least one "
+        "beat a bar where almost nothing sounds",
         modes=("minor", "phrygian"),
         structures=(RAGE,),
         hats_per_bar=(4, 40),
         kicks_per_bar=(1, 5),
-        devices=ALL_DEVICES,
+        devices=GROOVE_DEVICES,
+        groove=GROOVE,
         bass_styles=("lead_808", "distorted", "constant_glide"),
         character=ALL_CHARACTER,
         source=BLOG,

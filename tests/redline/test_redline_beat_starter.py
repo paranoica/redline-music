@@ -45,7 +45,16 @@ def test_the_808_starts_on_each_kick(genre):
     assert [n["step"] + n["len"] for n in notes] == [*kicks[1:], len(kick)]
     known = {s.library for s in recipe.sounds if s.library}
     kinds = {w.kind for w in check_score(json.dumps(score), recipe, known).warnings}
-    assert "off_kick" not in kinds
+    assert "off_kick" not in kinds and "busy_808" not in kinds
+
+
+def test_a_half_time_starter_swings_its_low_end_over_two_bars():
+    score = starter_score(make_recipe(4, genre="trap"))
+    first, second = score["patterns"]["drums"]["rows"]["kick"].split("|")
+    # the first bar lands on step 0, the second comes in late on step 4
+    assert first[0] == "x" and second[0] == "." and second[4] == "x"
+    hats = score["patterns"]["drums"]["rows"]["hat"].split("|")
+    assert all("3" in bar for bar in hats)
 
 
 def test_a_pack_starter_plays_the_packs_drums_and_808(tmp_path):

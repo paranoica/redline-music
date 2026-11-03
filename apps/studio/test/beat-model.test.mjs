@@ -558,6 +558,11 @@ test("the check's warnings read in Russian; what the page does not know stays as
     warningText({ kind: "off_kick", where: "bars 3, 5", message: "2 of 12 kicks under the 808 start an 808 note; start the 808 on most kicks, extra notes in the gaps", source: "blog, unverified" }),
     "808 начинается с бочкой только 2 раза из 12 — ставь ноту 808 на большинство бочек, дополнительные ноты — в паузы",
   );
+  assert.equal(
+    warningText({ kind: "busy_808", where: "sections[1] (hook)", message: "5 808 notes start a bar (median); keep 1 to 3, long ones", source: "measured on the owner's tracks" }),
+    "808: 5 нот за такт — оставь 1–3 длинные",
+  );
+  assert.equal(sourceText("measured on the owner's tracks"), "источник: замер твоих референсов");
   // a known kind with a message of another shape, and an unknown kind, come through as sent
   assert.equal(warningText({ kind: "repeat", where: "", message: "something new", source: "" }), "something new");
   assert.equal(warningText({ kind: "novel", where: "", message: "a new check", source: "" }), "a new check");

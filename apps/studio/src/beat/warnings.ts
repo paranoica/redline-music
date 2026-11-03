@@ -32,6 +32,10 @@ export function warningText(w: WarningLike): string {
       m = /^the same sounds \((.*)\) play for (\d+) bars/.exec(w.message);
       if (m) return `одни и те же звуки (${m[1]}) ${m[2]} тактов подряд — вводи или убирай звук хотя бы раз в 8 тактов`;
       break;
+    case "busy_808":
+      m = /^([\d.]+) 808 notes start a bar \(median\); keep 1 to (\d+)/.exec(w.message);
+      if (m) return `808: ${m[1]} нот за такт — оставь 1–${m[2]} длинные`;
+      break;
     case "off_kick":
       m = /^(\d+) of (\d+) kicks under the 808 start an 808 note/.exec(w.message);
       if (m) return `808 начинается с бочкой только ${m[1]} ${times(Number(m[1]))} из ${m[2]} — ставь ноту 808 на большинство бочек, дополнительные ноты — в паузы`;
@@ -43,6 +47,7 @@ export function warningText(w: WarningLike): string {
 export function sourceText(source: string): string {
   if (source === "blog, unverified") return "источник: блог, не проверено";
   if (source === "own choice") return "источник: своё решение";
+  if (source === "measured on the owner's tracks") return "источник: замер твоих референсов";
   return `источник: ${source}`;
 }
 

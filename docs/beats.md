@@ -94,13 +94,19 @@ recipe's, a library that is not in the manifest.
 Warnings never refuse; they go into the next request and onto the page: hit density per genre,
 the same bar repeated more than eight times, the same set of sounds for more than eight bars,
 an 808 off the kick (fewer than half the kicks that land on a playing 808 start a note within
-20 ms of it). Each says where its limit comes from: production blogs,
+20 ms of it), a busy 808 (in the genres with the measured groove, more than three notes starting a bar in a
+section, unless the 808 style asks for many or short notes). Each says where its limit comes from: production blogs,
 unverified, or our own choice.
 
 Genres: trap, dark_trap, rage, plugg, pluggnb, uk_drill, ny_drill, chicago_drill, jersey_club,
 memphis, phonk (the drift kind), cloud, lofi, boom_bap. Their tempos, structures, hat styles and
 808 habits come from producer blogs and tutorials and are starting points, not rules; where the
-blogs disagree (phonk's tempo, swing scales) the table keeps one and says so.
+blogs disagree (phonk's tempo, swing scales) the table keeps one and says so. Trap, dark_trap and
+rage also carry a groove measured on the
+owner's reference tracks, which wins over the blog notes: the low end in two-bar cycles (the
+second bar comes in late, on step 4), one or two long 808 notes a bar on mostly one pitch, rare
+short glides down, triplet hat rolls on a fixed step of every bar, and drops of whole 4- to 8-bar
+blocks instead of a gap before each hook.
 
 What keeps two beats of a genre apart:
 

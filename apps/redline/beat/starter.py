@@ -14,10 +14,10 @@ from redline.beat.recipe import Recipe, parse_key, recipe_json
 # two bars of drums a family of genres starts from, by role
 FAMILIES: dict[str, dict[str, tuple[str, str]]] = {
     "half_time": {
-        "kick": ("x.........x.....", "x.....x...x....."),
+        "kick": ("x.........x.x...", "....x.......x..."),
         "snare": ("........x.......", "........x......."),
-        "hat": ("x.x.x.x.x.x.x.x.", "x.x.x.x.x.x.x3x6"),
-        "open_hat": ("..............x.", "................"),
+        "hat": ("x.x.x.x.x.x.x.3.", "x.x.x.x.x.x.x.3."),
+        "open_hat": ("......x.........", "................"),
     },
     "drill": {
         "kick": ("x.............x.", "x..x..x.......x."),

@@ -100,16 +100,23 @@ run past the pattern's end (`step + len` ≤ 16 × `bars`). At most 512 notes a 
 
 ## Making it musical
 
-- Change one thing every 4 to 8 bars: a sound in or out, a fill, a different hat pattern, a
-  kick variation. The same bar more than 8 times in a row comes back as a warning.
+- Change one thing every 4 to 8 bars: a sound in or out, a different hat pattern, a kick
+  variation. The same bar more than 8 times in a row comes back as a warning.
 - Verses are thinner than hooks: fewer sounds or simpler patterns, so the hook lifts.
-- Drop the 808 (or most of the beat) for the bar before a hook, so the hook lands.
-- Glide the 808 at phrase ends, not on every note, unless the 808 style says otherwise.
+- Sections differ by whole layers: the 808 or the drums out for 4 to 8 bars while the rest
+  plays on. A one-bar gap or a fill before every hook is a cliche; use one only where a device
+  asks for it.
+- Keep the 808 sparse: one or two long notes a bar, most of them on the same pitch as the one
+  before; more than three notes starting a bar comes back as a warning, unless the 808 style
+  makes the 808 the melody.
+- Glides are rare: about one every 4 to 8 bars, mostly a short step down, landing between
+  kicks rather than on one, unless the 808 style says otherwise.
 - Start an 808 note on most kicks: the kick's click on the 808's body is the sound. Add a few
   808 notes in the gaps between kicks, and duck the 808 a few dB from the kick. A kick that
   lands inside a held 808 note, with no new note, sounds off the beat; fewer than half the
   kicks under the 808 starting a note comes back as a warning.
-- Hat rolls belong at phrase ends; velocity and ghost notes keep hats from sounding stiff.
+- Hat rolls go where the genre's groove puts them (with none, at phrase ends); velocity and
+  ghost notes keep hats from sounding stiff.
 - Write the melody in the key; let it leave space for a vocal in the verses.
 
 ## A compact example
@@ -133,18 +140,18 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
  },
  "patterns": {
   "drums": {"bars": 2, "rows": {
-   "kick": "x.....x.........|x.........x..x..",
+   "kick": "x.........x.x...|....x.......x...",
    "snare": "........X.......|........X.......",
-   "hat": "x.x.x.x.x.x.x.3.|x.x.x.x.x.x.6...",
+   "hat": "x.x.x.x.x.x.x.3.|x.x.x.x.x.x.x.3.",
    "open_hat": "......x.........|......x........."
   }},
   "low": {"bars": 2, "rows": {"bass": [
-   {"step": 0, "len": 6, "note": "A1", "vel": 0.9},
-   {"step": 6, "len": 6, "note": "A1", "vel": 0.9},
-   {"step": 12, "len": 6, "note": "E2", "vel": 0.7},
-   {"step": 16, "len": 10, "note": "C2", "vel": 0.9},
-   {"step": 26, "len": 3, "note": "G1", "vel": 0.8},
-   {"step": 29, "len": 3, "note": "G1", "vel": 0.8}
+   {"step": 0, "len": 10, "note": "A1", "vel": 0.9},
+   {"step": 10, "len": 2, "note": "A1", "vel": 0.8},
+   {"step": 12, "len": 8, "note": "A1", "vel": 0.9},
+   {"step": 20, "len": 7, "note": "G1", "vel": 0.9},
+   {"step": 26, "len": 2, "note": "F1", "vel": 0.8},
+   {"step": 28, "len": 4, "note": "G1", "vel": 0.8}
   ]}},
   "melody": {"bars": 2, "rows": {"bell": [
    {"step": 0, "len": 4, "note": "E5", "vel": 0.7},
@@ -153,18 +160,13 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
    {"step": 16, "len": 4, "note": "G4", "vel": 0.6},
    {"step": 20, "len": 2, "note": "G#4", "vel": 0.5, "passing": true},
    {"step": 24, "len": 8, "note": "A4", "vel": 0.7}
-  ]}},
-  "turn": {"bars": 1, "rows": {
-   "hat": {"steps": "x.x.x.x.4.4.6.6.",
-    "velocity": [0.8, 0, 0.5, 0, 0.8, 0, 0.5, 0, 0.6, 0, 0.7, 0, 0.8, 0, 0.9, 0]},
-   "snare": "........X...g.x.",
-   "bass": []
-  }}
+  ]}}
  },
  "sections": [
   {"name": "intro", "bars": 4, "play": ["melody"]},
-  {"name": "hook", "bars": 8, "play": ["drums", "low", "melody"], "fill": "turn"},
-  {"name": "verse", "bars": 8, "play": ["drums", "low"], "mute": ["open_hat"]}
+  {"name": "hook", "bars": 8, "play": ["drums", "low", "melody"]},
+  {"name": "verse", "bars": 4, "play": ["drums"], "mute": ["open_hat"]},
+  {"name": "verse", "bars": 4, "play": ["drums", "low"], "mute": ["open_hat"]}
  ],
  "mix": {
   "sounds": {
@@ -179,10 +181,12 @@ It shows the parts, not a whole song: a real score follows the recipe's structur
 }
 ```
 
-In the hook the fill `turn` replaces the 8th bar for the hat, the snare and the bass (its empty
-note list silences the 808 there); kick, open hat and bell play on. Every 808 note but one
-starts with a kick; the one at step 12 fills the gap and overlaps the next (12 + 6 > 16), so
-the 808 glides from E2 to C2.
+The verse opens with four bars of drums alone and the 808 comes back for its second half: a
+drop of a whole block, with no fill before it. The low end runs over two
+bars: the first lands on step 0 and answers on steps 10 and 12, the second comes in late on
+step 4 (step 20 of the pattern). The 808 starts with the kicks, mostly on one pitch; the note
+at step 20 overlaps the next (20 + 7 > 26), so it glides a step down from G1 to F1 between
+kicks, never onto one, and the 808 lands with the kick again on step 28.
 
 ## Your answer
 

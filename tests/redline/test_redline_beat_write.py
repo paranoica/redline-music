@@ -207,7 +207,7 @@ def test_a_recipe_saved_before_the_moves_reads_back_and_asks_for_nothing_it_lack
     lines = handoff._recipe(old)
     assert not any("lead" in line and "melodic voice" in line for line in lines)
     assert not any(line.startswith(("- 808 style", "- Character")) for line in lines)
-    assert "  - " + DEVICES["drop_808"].text + " (blog, unverified)" in lines
+    assert f"  - {DEVICES['drop_808'].text} ({DEVICES['drop_808'].source})" in lines
 
 
 def test_a_new_recipe_asks_for_its_lead():
@@ -567,6 +567,71 @@ def test_an_808_style_that_doubles_the_kick_is_held_to_the_kick_too():
     body = score()
     body["patterns"]["low"]["rows"]["bass"] = [{"step": 2, "len": 8, "note": "A1", "vel": 0.9}]
     assert off_kick(body, replace(trap(), bass_style="kick_double"))
+
+
+def busy(body, recipe=None):
+    return [w for w in warnings_of(body, recipe) if w.kind == "busy_808"]
+
+
+def test_an_808_of_many_short_notes_a_bar_is_a_warning_and_two_long_ones_are_not():
+    body = score()
+    assert busy(body) == []
+    body["patterns"]["low"]["rows"]["bass"] = [
+        {"step": s, "len": 2, "note": "A1", "vel": 0.9} for s in range(0, 16, 2)
+    ]
+    warned = busy(body)
+    assert len(warned) == len(body["sections"])
+    assert all(w.source == "measured on the owner's tracks" for w in warned)
+    assert warned[0].message.startswith("8 808 notes start a bar")
+
+
+def test_four_808_notes_a_bar_is_a_warning_and_three_is_not():
+    body = score()
+    body["patterns"]["low"]["rows"]["bass"] = [
+        {"step": s, "len": 3, "note": "A1", "vel": 0.9} for s in (0, 6, 10)
+    ]
+    assert busy(body) == []
+    body["patterns"]["low"]["rows"]["bass"].append({"step": 13, "len": 3, "note": "A1", "vel": 0.9})
+    assert busy(body)
+
+
+def test_two_808_layers_and_a_roll_are_not_counted_as_a_busy_808():
+    body = score()
+    body["sounds"]["sub"] = {"instrument": "bass808"}
+    body["patterns"]["low"]["rows"]["sub"] = list(BASS)
+    assert busy(body) == []
+
+
+def test_a_genre_without_the_measured_groove_is_not_held_to_its_808_count():
+    notes = [{"step": s, "len": 2, "note": "A1", "vel": 0.9} for s in range(0, 16, 2)]
+    body = score(bpm=90)
+    body["patterns"]["low"]["rows"]["bass"] = notes
+    boom = replace(make_recipe(11, genre="boom_bap", bpm=90, key="A minor"), bars=(16, 48))
+    assert not any(w.kind == "busy_808" for w in check_score(text(body), boom).warnings)
+    body = score()
+    body["patterns"]["low"]["rows"]["bass"] = notes
+    assert busy(body)
+
+
+def test_an_808_that_is_the_melody_may_be_busy():
+    body = score()
+    body["patterns"]["low"]["rows"]["bass"] = [
+        {"step": s, "len": 2, "note": "A1", "vel": 0.9} for s in range(0, 16, 2)
+    ]
+    for style in ("lead_808", "constant_glide", "kick_double", "staccato_slides"):
+        assert busy(body, replace(trap(), bass_style=style)) == []
+
+
+TRAP_FAMILY = ("trap", "dark_trap", "rage")
+
+
+@pytest.mark.parametrize("genre", sorted(GENRES))
+def test_the_trap_family_gets_the_measured_groove_and_no_phrase_end_rolls(genre):
+    request = "\n".join(handoff._recipe(make_recipe(3, genre=genre)))
+    assert ("- Groove (measured" in request) == (genre in TRAP_FAMILY)
+    if genre in TRAP_FAMILY:
+        drawn = {d for seed in range(40) for d in make_recipe(seed, genre=genre).devices}
+        assert not drawn & {"hat_rolls", "stop_before_hook", "ghost_snares"}
 
 
 def test_more_than_8_bars_with_the_same_sounds_is_a_warning():

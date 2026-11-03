@@ -187,6 +187,16 @@ def _recipe(recipe: Recipe) -> list[str]:
         f"- 808: {genre.bass}.",
         f"- Kick: {genre.kick}. Keep {recipe.kicks_per_bar[0]:g} to "
         f"{recipe.kicks_per_bar[1]:g} kick hits a bar.",
+        *(
+            [
+                f"- Groove (measured on the owner's reference tracks; where the notes above "
+                f"or the devices below differ it wins, the 808 style and the character moves "
+                f"still outrank it): "
+                f"{genre.groove}."
+            ]
+            if genre.groove
+            else []
+        ),
         "- Sounds: "
         + "; ".join(
             f"{s.name} = {s.instrument}"
