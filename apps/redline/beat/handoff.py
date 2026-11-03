@@ -22,9 +22,12 @@ from redline.beat.checks import Caution, check_score, note_name
 from redline.beat.pack import PackSound
 from redline.beat.recipe import (
     BASS_STYLES,
+    BLOG,
     CHARACTER,
     DEVICES,
     GENRES,
+    MEASURED,
+    OWN,
     Recipe,
     make_recipe,
     pack_kit,
@@ -167,6 +170,13 @@ def _effects() -> list[str]:
     ]
 
 
+FACTS = {
+    BLOG: "from producer blogs and tutorials, unverified",
+    OWN: "own choices",
+    MEASURED: "measured on a reference track the owner picked",
+}
+
+
 def _recipe(recipe: Recipe) -> list[str]:
     genre = GENRES[recipe.genre]
     feel = genre.feel or (
@@ -177,8 +187,7 @@ def _recipe(recipe: Recipe) -> list[str]:
         recipe_json(recipe),
         "```",
         "",
-        f"- Genre: {recipe.genre} ({feel}). Its facts are from producer blogs and tutorials, "
-        "unverified; "
+        f"- Genre: {recipe.genre} ({feel}). Its facts are {FACTS[genre.source]}; "
         f"own choices: {', '.join(genre.invented)}.",
         f"- Tempo {recipe.bpm:g} BPM, key {recipe.key}, swing {recipe.swing:g}, seed "
         f"{recipe.seed}.",
@@ -189,7 +198,7 @@ def _recipe(recipe: Recipe) -> list[str]:
         f"{recipe.kicks_per_bar[1]:g} kick hits a bar.",
         *(
             [
-                f"- Groove (measured on the owner's reference tracks; where the notes above "
+                f"- Groove (measured on reference tracks the owner picked; where the notes above "
                 f"or the devices below differ it wins, the 808 style and the character moves "
                 f"still outrank it): "
                 f"{genre.groove}."

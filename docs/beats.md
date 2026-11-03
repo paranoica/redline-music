@@ -101,15 +101,23 @@ takes a riser and an impact from the pack's fx when it has them; the request giv
 length in steps, so a riser can end on the downbeat it leads into. Each says where its limit comes from: production blogs,
 unverified, or our own choice.
 
-Genres: trap, dark_trap, rage, plugg, pluggnb, uk_drill, ny_drill, chicago_drill, jersey_club,
+Genres: trap, dark_trap, rage, plugg, pluggnb, ethereal_plugg, uk_drill, ny_drill, chicago_drill, jersey_club,
 memphis, phonk (the drift kind), cloud, lofi, boom_bap. Their tempos, structures, hat styles and
-808 habits come from producer blogs and tutorials and are starting points, not rules; where the
+808 habits (ethereal_plugg aside, see below) come from producer blogs and tutorials and are
+starting points, not rules; where the
 blogs disagree (phonk's tempo, swing scales) the table keeps one and says so. Trap, dark_trap and
 rage also carry a groove measured on the
 owner's reference tracks, which wins over the blog notes: the low end in two-bar cycles (the
 second bar comes in late, on step 4), one or two long 808 notes a bar on mostly one pitch, rare
 short glides down, triplet hat rolls on a fixed step of every bar, and drops of whole 4- to 8-bar
 blocks instead of a gap before each hook.
+
+ethereal_plugg is built from one example track the owner picked, measured from its audio rather
+than from blogs: about 125 BPM half time, a legato 808 that changes pitch with every chord (kicks
+fall on its held notes, so the 808-on-the-kick warning is off for it), a drumless verse over a
+clean sub, an intro and a break with a drone instead of the 808, one sustained wide lead with
+vibrato (no plucks or bells), and an outro pitched a fifth up (copies of the 808 and the lead
+with a pitch rack, so the notes stay in the key) that stops dead on the bar line.
 
 What keeps two beats of a genre apart:
 

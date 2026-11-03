@@ -120,6 +120,7 @@ test("a new beat sends its genre and kit; no genre is a drawn one", () => {
 
 test("a genre shows by its Russian name, an unknown one by its words", () => {
   assert.equal(genreName("uk_drill"), "UK дрилл");
+  assert.equal(genreName("ethereal_plugg"), "волшебный плагг");
   assert.equal(genreName("new_wave"), "new wave");
 });
 

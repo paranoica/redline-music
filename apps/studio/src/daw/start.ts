@@ -110,6 +110,7 @@ const GENRE_NAMES: Record<string, string> = {
   rage: "рейдж",
   plugg: "плагг",
   pluggnb: "плаггнб",
+  ethereal_plugg: "волшебный плагг",
   uk_drill: "UK дрилл",
   ny_drill: "NY дрилл",
   chicago_drill: "чикаго дрилл",

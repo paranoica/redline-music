@@ -17,6 +17,7 @@ from redline.beat.recipe import (  # noqa: E402
     CLASHES,
     DEVICES,
     GENRES,
+    GROOVE,
     NEEDS,
     RecipeError,
     make_recipe,
@@ -306,7 +307,171 @@ def test_every_genre_draws_its_bpm_swing_and_modes_inside_its_ranges(genre):
         assert len(set(recipe.devices)) == len(recipe.devices)
         total = sum(part.bars for part in recipe.structure)
         assert recipe.bars[0] <= total <= recipe.bars[1]
-    assert spec.source in ("blog, unverified", "own choice")
+    assert spec.source in ("blog, unverified", "own choice", "measured on the owner's tracks")
+
+
+def genre_line(recipe):
+    (line,) = [x for x in handoff._recipe(recipe) if x.startswith("- Genre")]
+    return line
+
+
+def test_a_genre_measured_on_the_owners_example_says_so_and_a_blog_genre_still_says_blogs():
+    measured = genre_line(make_recipe(3, genre="ethereal_plugg"))
+    assert "measured on a reference track the owner picked" in measured
+    assert "producer blogs" not in measured
+    assert "producer blogs and tutorials, unverified" in genre_line(make_recipe(3, genre="trap"))
+
+
+def test_the_ethereal_plugg_beat_plays_a_legato_808_under_a_sustained_lead():
+    for seed in range(40):
+        recipe = make_recipe(seed, genre="ethereal_plugg")
+        assert recipe.bass_style == "legato_chords"
+        assert not {"hat_rolls", "ghost_snares", "glide_sparingly", "kick_switch"} & set(
+            recipe.devices
+        ), seed
+        # the example's melody has no rhythmic attacks: every lead fades in
+        assert dict(lead_of(recipe).params).get("attack", 0) >= 0.2, seed
+        assert "crash" in {s.instrument for s in recipe.sounds}
+    lines = handoff._recipe(make_recipe(1, genre="ethereal_plugg"))
+    assert any(x.startswith("- Groove") and "stops dead" in x for x in lines)
+
+
+def test_the_ethereal_plugg_beat_draws_no_move_its_measured_shape_forbids():
+    # fills, gaps in the hook, call and answer phrases and a second hook melody all go
+    # against one full hook over one sustained layer
+    forbidden = {
+        "loop_endings",
+        "silent_beat",
+        "counter_melody",
+        "call_response",
+        "build_by_subtraction",
+        "mute_return",
+    }
+    for seed in range(60):
+        recipe = make_recipe(seed, genre="ethereal_plugg")
+        assert not forbidden & {*recipe.devices, *recipe.character}, seed
+
+
+def note(step, length, name, vel=0.9):
+    return {"step": step, "len": length, "note": name, "vel": vel}
+
+
+def ethereal_score(key, with_break):
+    """A score written to the letter of the ethereal_plugg texts."""
+    hook_808 = [
+        note(0, 15, "D1"),
+        note(15, 10, "A#1"),
+        note(24, 8, "A1"),
+        note(32, 15, "D1"),
+        note(52, 7, "G1"),
+        note(58, 6, "A1"),
+    ]
+    # the verse sub jumps an octave up from the hook line, never under C1
+    sub = [
+        note(0, 16, "D2"),
+        note(16, 10, "A#1"),
+        note(26, 6, "A2"),
+        note(32, 16, "D2"),
+        note(48, 2, "A#1"),
+        note(50, 6, "A#2"),
+        note(56, 8, "A2"),
+    ]
+    chords = [("D4", "F4", "A4"), ("A#3", "D4", "F4"), ("A3", "D4", "F4"), ("G3", "A#3", "D4")]
+    lead = [note(i * 16, 16, n, 0.7) for i, chord in enumerate(chords) for n in chord]
+    hook_clap = "........x.......|..x.....x.......|........x.......|..x.....x...x..."
+    patterns = {
+        "intro_drums": {
+            "bars": 2,
+            "rows": {
+                "kick": "x...............|....x...........",
+                "clap": "........x.......|........x.......",
+                "hat": "x...x.x.....x.x.|....x...x.x.x.x.",
+            },
+        },
+        "hook_drums": {
+            "bars": 4,
+            "rows": {
+                "kick": "x...........x...|..........x...x.|x...........x...|..........x...x.",
+                "clap": hook_clap,
+                "hat": "x.x.x.x...x.x.x.|x...x.x...x.x.x.|xxxxxxxx.xxxxx..|x...x.x...x.x...",
+            },
+        },
+        "crash8": {"bars": 8, "rows": {"crash": "x" + "." * 127}},
+        "crash4": {"bars": 4, "rows": {"crash": "x" + "." * 63}},
+        "verse_hats": {
+            "bars": 4,
+            "rows": {"hat": "x.x.x.x.x.x.x.x.|x.x.x.x.x.x.xxxx|x.x.x.x.x.x.x.x.|x.x.x.x.x.x.x.x."},
+        },
+        "low": {"bars": 4, "rows": {"bass": hook_808}},
+        "low_sub": {"bars": 4, "rows": {"sub": sub}},
+        "low_up": {"bars": 4, "rows": {"bass_up": hook_808}},
+        "melody": {"bars": 4, "rows": {"lead": lead}},
+        "melody_verse": {"bars": 4, "rows": {"lead_verse": lead}},
+        "melody_up": {"bars": 4, "rows": {"lead_up": lead}},
+        "drone": {"bars": 4, "rows": {"pad": [note(0, 64, "D2", 0.6)]}},
+        "outro_drums": {
+            "bars": 4,
+            "rows": {"clap": hook_clap, "hat": "x...x.......x..." * 4},
+        },
+    }
+    intro = ["intro_drums", "melody", "drone"]
+    sections = [
+        {"name": "intro", "bars": 8, "play": intro},
+        {"name": "hook", "bars": 16, "play": ["hook_drums", "crash8", "low", "melody"]},
+        {"name": "verse", "bars": 8, "play": ["verse_hats", "crash8", "low_sub", "melody_verse"]},
+        {"name": "verse", "bars": 4, "play": ["verse_hats", "crash4", "low_sub", "melody_verse"]},
+        {"name": "verse", "bars": 4, "play": ["low_sub", "melody_verse"]},
+        *([{"name": "break", "bars": 8, "play": intro}] if with_break else []),
+        {"name": "hook", "bars": 16, "play": ["hook_drums", "crash8", "low", "melody"]},
+        {"name": "outro", "bars": 8, "play": ["outro_drums", "crash8", "low_up", "melody_up"]},
+    ]
+    vox = {"instrument": "vox", "params": {"vowel": 3.0, "attack": 0.6, "release": 2.0}}
+    up = [{"effect": "pitch", "params": {"semitones": 7}}]
+    return {
+        "version": 1,
+        "bpm": 125,
+        "swing": 51,
+        "seed": 3,
+        "key": key,
+        "sounds": {
+            "kick": {"instrument": "kick"},
+            "bass": {"instrument": "bass808", "params": {"decay": 4.0, "drive": 0.6}},
+            "bass_up": {"instrument": "bass808", "params": {"decay": 4.0, "drive": 0.6}},
+            "sub": {"instrument": "bass808", "params": {"drive": 0.0, "decay": 4.0}},
+            "clap": {"instrument": "clap"},
+            "hat": {"instrument": "hat_closed"},
+            "pad": {"instrument": "saw", "params": {"attack": 0.3, "release": 1.0}},
+            "crash": {"instrument": "crash"},
+            "lead": vox,
+            "lead_verse": vox,
+            "lead_up": vox,
+        },
+        "patterns": patterns,
+        "sections": sections,
+        "mix": {
+            "sounds": {
+                "bass": {"sidechain": "kick"},
+                "sub": {"gain_db": 5},
+                "lead_verse": {
+                    "gain_db": -9,
+                    "rack": [{"effect": "filter", "params": {"mode": "hp", "cutoff": 400}}],
+                },
+                "bass_up": {"rack": up},
+                "lead_up": {"rack": up},
+            }
+        },
+    }
+
+
+@pytest.mark.parametrize("key", ["D minor", "D harmonic_minor", "D phrygian"])
+@pytest.mark.parametrize("with_break", [True, False])
+def test_a_score_that_follows_the_ethereal_plugg_texts_gets_no_error_and_no_warning(
+    key, with_break
+):
+    recipe = replace(make_recipe(3, genre="ethereal_plugg", key=key, bpm=125), bars=(56, 88))
+    result = check_score(json.dumps(ethereal_score(key, with_break)), recipe)
+    assert result.errors == ()
+    assert result.warnings == ()
 
 
 def test_every_genre_has_its_sounds_and_structures():
@@ -569,6 +734,16 @@ def test_an_808_style_that_doubles_the_kick_is_held_to_the_kick_too():
     assert off_kick(body, replace(trap(), bass_style="kick_double"))
 
 
+def test_a_legato_808_lets_the_kicks_fall_on_its_held_notes():
+    body = score()
+    body["patterns"]["low"] = {
+        "bars": 2,
+        "rows": {"bass": [{"step": 0, "len": 32, "note": "A1", "vel": 0.9}]},
+    }
+    assert off_kick(body)
+    assert off_kick(body, replace(trap(), bass_style="legato_chords")) == []
+
+
 def busy(body, recipe=None):
     return [w for w in warnings_of(body, recipe) if w.kind == "busy_808"]
 
@@ -628,7 +803,8 @@ TRAP_FAMILY = ("trap", "dark_trap", "rage")
 @pytest.mark.parametrize("genre", sorted(GENRES))
 def test_the_trap_family_gets_the_measured_groove_and_no_phrase_end_rolls(genre):
     request = "\n".join(handoff._recipe(make_recipe(3, genre=genre)))
-    assert ("- Groove (measured" in request) == (genre in TRAP_FAMILY)
+    assert (GROOVE in request) == (genre in TRAP_FAMILY)
+    assert ("- Groove (measured" in request) == (genre in (*TRAP_FAMILY, "ethereal_plugg"))
     if genre in TRAP_FAMILY:
         drawn = {d for seed in range(40) for d in make_recipe(seed, genre=genre).devices}
         assert not drawn & {"hat_rolls", "stop_before_hook", "ghost_snares"}

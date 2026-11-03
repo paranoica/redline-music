@@ -33,6 +33,8 @@ BASSES = ("bass808", "sample808")
 MAX_808_A_BAR = 3
 # 808 styles that ask for many or short notes, which may be busy
 BUSY_STYLES = ("lead_808", "constant_glide", "kick_double", "staccato_slides", "octave_bounce")
+# 808 styles that hold notes through the kicks on purpose
+HELD_STYLES = ("legato_chords",)
 MAX_SAME = 8
 HATS = ("hat_closed", "hat_open", "oneshot_hat", "oneshot_open_hat")
 NOTE = re.compile(r"([A-G])([#b]?)(-?\d{1,2})")
@@ -286,7 +288,9 @@ def _repeats(table: _Table) -> list[Caution]:
     return out
 
 
-def _off_kick(table: _Table) -> list[Caution]:
+def _off_kick(table: _Table, recipe: Recipe) -> list[Caution]:
+    if recipe.bass_style in HELD_STYLES:
+        return []
     notes = table.of(BASSES)
     starts = sorted(e["start"] for e in notes)
     # a note sounds to its written end; a one-shot 808 played as a drum to where it is cut
@@ -461,7 +465,7 @@ def check_score(
         (
             *_density(table, recipe),
             *_repeats(table),
-            *_off_kick(table),
+            *_off_kick(table, recipe),
             *_busy_808(table, recipe),
             *_flat_sections(body, table),
         ),

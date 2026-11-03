@@ -2,8 +2,8 @@
 
 The moves are the devices, the 808's style and the beat's character.
 
-The genre facts come from producer blogs and tutorials and are unverified; the numbers no
-source gave are marked as own choices in `invented`.
+Most genre facts come from producer blogs and tutorials and are unverified; a genre's
+`source` says which, and the numbers no source gave are marked as own choices in `invented`.
 """
 
 import json
@@ -30,6 +30,20 @@ GROOVE = (
     "the same steps in every bar; a straight grid, the triplets carry the feel"
 )
 MEASURED = "measured on the owner's tracks"
+# how ethereal_plugg moves, measured on one example track the owner picked
+ETHEREAL_GROOVE = (
+    "one 4-bar chord loop under everything, shared by the 808 and the lead; the intro (and the "
+    "break before the second hook) has no 808: the kick on step 0 of the first bar and step 4 "
+    "of the second ('x...............|....x...........'), the clap on step 8, sparse hats, "
+    "the lead over a held root drone on the pad, clearly quieter than the hook; the hook is "
+    "full; a crash on beat 1 of every 8-bar block, the verse included; the verse is a beat "
+    "switch: no kick and no clap, the sub 808 alone under the lead, the lead about 9 dB down "
+    "and high-passed, the hats out for its last 4 bars; in the break the drums come back and "
+    "the 808 leaves; the lead is one sustained, wide layer with a slow vibrato (a width and a "
+    "vibrato rack), no rhythmic attacks, never muted; the outro plays copies of the hook's 808 "
+    "and lead with a pitch rack of +7 semitones (their notes written as in the hook, so they "
+    "stay in the key), no kick, the clap on, and the beat stops dead on the last bar line"
+)
 # the score's limits, the same as Rust's
 BPM = (40.0, 220.0)
 MAX_SEED = 2**32 - 1
@@ -311,6 +325,16 @@ BASS_STYLES = {
         ),
         (("decay", 2.5), ("drive", 1.0), ("tone", 5000.0), ("glide_ms", 100.0)),
     ),
+    "legato_chords": (
+        Device(
+            "the 808 sings the chord changes: about 4 notes per 4 bars, each 6 to 16 steps, a "
+            "new pitch at every change and never the same pitch twice in a row, one short rest "
+            "early in bar 4; two glides per 4 bars (one glide time for both), a step down of 1 "
+            "semitone in the middle of bar 2 and a step up of 2 into the last chord",
+            MEASURED,
+        ),
+        (("decay", 4.0), ("drive", 0.6), ("glide_ms", 120.0)),
+    ),
     "lead_808": (
         Device(
             "the 808 is the lead: it carries the melody in its upper octave (C2..G3) with "
@@ -368,6 +392,19 @@ TUBULAR = _lead("sampler", library="vcsl-tubular-bells")
 FLUTE = _lead("flute")
 VOX_LEAD = _lead("vox", ("vowel", 0.0), ("voices", 3.0))
 FM_BRASS = _lead("fm", ("preset", "brass"), ("ratio", 1.0), ("index", 4.0))
+CHOIR_LEAD = _lead(
+    "vox",
+    ("vowel", 3.0),
+    ("voices", 5.0),
+    ("detune", 12.0),
+    ("vibrato", 0.4),
+    ("attack", 0.6),
+    ("release", 2.0),
+)
+OOH_LEAD = _lead(
+    "vox", ("vowel", 4.0), ("voices", 3.0), ("vibrato", 0.3), ("attack", 0.4), ("release", 1.5)
+)
+AIR_FLUTE = _lead("flute", ("vibrato", 0.5), ("vibrato_hz", 5.7), ("attack", 0.3), ("release", 1.5))
 FM_GLASS = _lead("fm", ("preset", "glass"), ("ratio", 3.5), ("index", 2.5), ("decay", 1.5))
 
 
@@ -400,6 +437,10 @@ DRILL = _parts(
     ("outro", 8),
 )
 RAGE = _parts(("intro", 4), ("hook", 16), ("verse", 16), ("hook", 16), ("verse", 16), ("hook", 16))
+ETHEREAL = _parts(
+    ("intro", 8), ("hook", 16), ("verse", 16), ("break", 8), ("hook", 16), ("outro", 8)
+)
+ETHEREAL_SHORT = _parts(("intro", 8), ("hook", 16), ("verse", 16), ("hook", 16), ("outro", 8))
 PLUGGNB = _parts(("intro", 8), ("build", 16), ("hook", 16), ("verse", 16), ("hook", 16))
 MEMPHIS = _parts(
     ("intro", 8), ("verse", 16), ("hook", 8), ("verse", 16), ("break", 8), ("hook", 16)
@@ -585,6 +626,35 @@ GENRES: dict[str, Genre] = {
         character=CALM_CHARACTER,
         source=BLOG,
         invented=("swing", "hats_per_bar", "kicks_per_bar"),
+    ),
+    "ethereal_plugg": Genre(
+        bpm=(120, 132),
+        half_time=True,
+        swing=(50.0, 52.0),
+        sounds=(KICK, BASS, CLAP, HAT, PAD, CRASH),
+        leads=(CHOIR_LEAD, OOH_LEAD, STRINGS, AIR_FLUTE),
+        extras=(RIM, SNAP, SHAKER, OPEN_HAT),
+        hats="eighths that leave the clap's steps empty, about 10 a bar; a 16th run of 12 to 14 "
+        "hits on bar 3 of every 4-bar block and the thinnest bar (about 6) on bar 4; no rolls; "
+        "in the verse straight eighths on all eight even steps, with a 16th fill on steps 12 to "
+        "15 of bar 2 of each 4-bar block",
+        bass="a legato line on the chord changes; saturated in the hooks, a clean sine in the "
+        "verse (a sound named `sub`, a bass808 with drive 0, about 5 dB louder) jumping an "
+        "octave and back, no note under C1; no 808 in the intro and the break",
+        kick="most kicks fall on held 808 notes and the 808 ducks under them (sidechain); the "
+        "kick on step 0 of a cycle's first bar starts an 808 note; the second bar skips step 0 "
+        "and comes in on 4, 10 or 14; the clap on step 8 every bar, step 2 every second bar and "
+        "step 12 every fourth; no fills",
+        modes=("harmonic_minor", "minor", "phrygian"),
+        structures=(ETHEREAL, ETHEREAL_SHORT),
+        hats_per_bar=(3, 20),
+        kicks_per_bar=(1, 3),
+        devices=("drop_808", "filtered_intro", "thin_verse"),
+        bass_styles=("legato_chords",),
+        character=("kick_pickup", "detuned_lead", "velocity_tiers"),
+        source=MEASURED,
+        invented=("modes", "hats_per_bar", "kicks_per_bar", "extras"),
+        groove=ETHEREAL_GROOVE,
     ),
     "uk_drill": Genre(
         bpm=(138, 146),
