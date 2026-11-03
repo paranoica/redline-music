@@ -652,7 +652,7 @@ def test_a_page_save_during_a_second_analysis_keeps_its_edit(tmp_path, monkeypat
 
 
 def test_an_analysis_made_from_stems_read_at_the_wrong_rate_counts_as_not_made(tmp_path):
-    root, path, fake, folder = fresh(tmp_path)
+    *_, folder = fresh(tmp_path)
     data = json.loads((folder / "analysis.json").read_text(encoding="utf-8"))
     # format 1 analysed drum stems that came back 8.8 % fast
     data["format"] = 1
